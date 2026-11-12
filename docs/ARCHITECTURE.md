@@ -196,7 +196,10 @@ it: a harness that cannot take a further turn gets a new driver for each turn, a
 retired instead.
 
 **proposed** First harnesses: Claude Code and Codex, each run headless as a child process with structured
-output. A custom harness around an LLM is one more implementation of the trait. Consider the Agent Client
+output: Claude Code through its stream-json input and output, Codex through `codex app-server` on stdio.
+`docs/HARNESSES.md` records how each behaves. Both take further turns, compact on request and report context
+fill. Each driver gets a clean environment and its own config directory, so nothing of the builder's own
+setup is loaded, and the harness's own updating, sandboxing and automatic compaction are turned off. A custom harness around an LLM is one more implementation of the trait. Consider the Agent Client
 Protocol as a third harness after v1, since it would bring in every agent that speaks it.
 
 **proposed** Two parts of the daemon need a model's answer without an agent: the gate's classifier and the
@@ -207,8 +210,10 @@ through the fake harness.
 
 **proposed** A harness logs in to its provider with a credential from the vault, like any other credential: the
 driver's environment holds a reference, and the proxy swaps it for the value on the provider's hosts only. The
-builder adds each provider's key or long-lived token to the vault once. M3 confirms what each harness accepts,
-and until M11 the real harnesses run with the builder's own login, outside any sandbox, in tests only.
+builder adds each provider's API key to the vault once. A subscription login is not supported in v1: Claude
+Code's cannot be given as a placeholder in its isolated mode and Anthropic's terms restrict third-party use
+of it, and Codex's is OAuth with refresh. Until M11 the real harnesses run with a key from the builder's
+environment, outside any sandbox, in tests only.
 
 ## What lives outside a driver
 
@@ -279,7 +284,8 @@ deadline, the daemon reports the task failed to its delegator.
 
 **proposed** A harness and model that fail for a reason that looks like the provider's (an outage, a rate
 limit, a refused key) cool off for a set time, for every project, and are skipped meanwhile. The end of a
-cool-off is a job.
+cool-off is a job. Both harnesses retry a failing provider themselves, so their retry counts are set low and
+the router is what moves the work elsewhere.
 
 **decided (owner, 2026-11-11)** Budgets are per lead inside a project total. The ledger holds the project's
 budget and one budget per lead, set by the CEO or by the builder. A driver's cost is charged to the lead at the
@@ -288,7 +294,9 @@ router checks both the lead's budget and the project's. The leads' budgets toget
 project's total: a `form_team`, `set_budget` or builder's change that would pass it is refused.
 
 **proposed** A worker the CEO runs directly, with no lead above it, is charged to the project like the CEO.
-The cost of a turn is what its harness reports, or the tokens it reports at the model's listed price. Under a
+The cost of a turn is what its harness reports (Claude Code), or the tokens it reports at the model's listed
+price (Codex), and the charge records which. A price covers input, cached input, output, cache writes at two
+lifetimes, and a higher tier for long prompts. Under a
 subscription login that figure is what the same work would cost at list price, not what the builder pays.
 When a lead reaches its budget the daemon puts a notice in the CEO's inbox, and when the project reaches its
 total the daemon posts the notice in the chat itself, since a CEO turn to say so could not be paid for.
@@ -304,8 +312,9 @@ total the daemon posts the notice in the chat itself, since a CEO turn to say so
 
 **proposed** How that works:
 
-- A driver whose turn ends goes to Warm instead of ending. A warm driver is kept for a short time, set to match
-  the provider's cache lifetime. The end of that time is a job.
+- A driver whose turn ends goes to Warm instead of ending. A warm driver is kept for its model's prompt cache
+  lifetime, which each harness publishes with the model, since it differs by provider. The end of that time is
+  a job.
 - The router prefers the agent's warm driver when it is compatible, as above.
 - After the task's delegator accepts it (the CEO, for a lead's task), the driver is compacted if its harness
   can do that. If it cannot, it is retired, and the agent's next driver starts from the start pack, which
@@ -413,7 +422,7 @@ number of such turns in a row, the task is reported failed.
 
 **proposed** Agents act on the organisation through tools the daemon serves to each driver over MCP:
 `delegate`, `review`, `report`, `message`, `wait`, `schedule`, `cancel_job`, `raise_task`, `update_task`,
-`write_spec`, `add_file`, `set_preview`, `load_skill`, `remember`. `update_task` carries the progress note and,
+`write_spec`, `add_file`, `set_preview`, `start_process`, `stop_process`, `load_skill`, `remember`. `update_task` carries the progress note and,
 where the agent can say, the share of the task that is done. The CEO gets `form_team`, `set_effort` and
 `set_budget` as well, and for reflection `read_log`, `read_memories` and `propose_change`. Only the CEO can
 `message` the builder. Waiting for the builder's answer is a wait on the reply. Every such call is an event.
@@ -465,14 +474,15 @@ from its parent's branch, or from the project's main branch for the CEO. Work re
 branches up the tree as tasks are accepted, as "Delegation, the inbox and waiting" describes.
 
 **proposed** A sandbox has no network of its own. The backend maps two endpoints into it: the vault's proxy,
-and the driver's own address for the daemon's tools. How each is mapped is the backend's business (a Unix
-socket under bubblewrap, a host port with a per-driver token for containers), and M10 confirms it first. Until
+and the driver's own address for the daemon's tools. How each is mapped is the backend's business (neither harness takes a Unix socket for either, so under bubblewrap a forwarder inside the sandbox listens on
+loopback, and containers use a host port with a per-driver token), and M10 confirms it first. Until
 M10 an agent's sandbox is a plain worktree with no isolation, which is enough for the fake harness.
 
 **proposed** The sandbox belongs to the agent, not to a driver. Every driver the agent has runs in it, so a
 driver that takes over finds the files as the last one left them. Processes the last driver started in the
 background, such as a dev server, belong to the sandbox and keep running through a handoff. Destroying the
-sandbox stops them.
+sandbox stops them. A harness stops its own background commands when it stops, so such a process is started
+with the daemon's `start_process` tool, which runs it in the sandbox outside any driver.
 
 **decided (owner, 2026-11-11)** Containers or bubblewrap, and it has to perform well.
 
@@ -527,7 +537,8 @@ actions are events; the app shows them; approval or denial is an event the orche
 
 **proposed** A held action does not hold up a driver. The agent is told the action is held and can wait on the
 decision. On Approve, the daemon carries out a held tool call itself, or, for a command stopped by a harness's
-permission hook, allows that exact command once for that agent. The decision goes to the agent's inbox, so it
+permission hook, allows that exact command once for that agent. A permission hook pauses the harness's turn
+while it is unanswered, so the daemon answers a held command at once with a denial that says it is held. The decision goes to the agent's inbox, so it
 reaches the agent even if its driver has changed meanwhile.
 
 ## Memory, skills and reflection
@@ -650,7 +661,7 @@ written as paths here. The first four belong to the daemon, the rest to one proj
 
 Agents reach the same resources through their tools: `delegate`, `review`, `raise_task`, `update_task` and
 `report` act on `/tasks/`; `message` on `/messages/`; `wait` on an agent's waits; `schedule` and `cancel_job`
-on `/jobs/`; `write_spec` on `/specs/`; `add_file` on `/files/`; `set_preview` on `/projects/`; `remember` and
+on `/jobs/`; `write_spec` on `/specs/`; `add_file` on `/files/`; `set_preview` on `/projects/`; `start_process` and `stop_process` on an agent's sandbox; `remember` and
 the CEO's `read_memories` on `/memories/`; `load_skill` on `/skills/`; the CEO's `form_team`, `set_effort` and
 `set_budget` on `/agents/`; its `read_log` on `/events`; and its `propose_change` on `/trials/`. Every tool
 call is also an entry in `/actions/`.

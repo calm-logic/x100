@@ -26,14 +26,16 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 - M1b: the folds into tab state, plus the small changes to M1a listed under decisions. Opus subagent, owns
   `crates/x100-core`.
-- M3 first task: the report on how Claude Code and Codex run headless, from documentation and help output
-  only. No model is called.
 
 ## Waiting on the owner
 
 1. **Pushing.** Asked once M0 is accepted. Until then everything is local.
-2. **Real-provider runs.** Needed by M3 (one-file edit and second turn, each harness), M9 (kill test, both
-   directions) and M17 (the fifteen conditions). Rough count given before the first run. None made yet.
+2. **Real-provider runs.** None made yet. M3 needs about six short runs per harness on the cheapest models
+   (Haiku 5.5, gpt-6-luna at low effort), each under about a cent: roughly 25 cents in all with retries. They
+   need an Anthropic API key and an OpenAI API key in the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
+   The orchestrator does not read key files. M9 and M17 need more, counted when they come.
+5. **Subscription logins.** v1 supports provider API keys only, see decisions. Say if a Claude or ChatGPT
+   subscription must work in v1.
 3. **Credentials in Settings.** Added to `PRODUCT.md` as v1, because condition 6 cannot be met unless the
    builder can add a credential. Say if it should be done another way.
 4. **Open questions 1 and 2 in `PRODUCT.md`.** The build uses the recommended answers: the CEO may invent any
@@ -89,6 +91,20 @@ All in **proposed** parts, made in the review before M0. Reasons in brief.
   `x100-orch` so its check needs no throwaway code.
 - **"Still missing" list.** Its four items are settled into the design and the list is removed.
 - **M16 to M17** for where thresholds are tuned.
+
+From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted the architecture:
+
+- **Logins.** API keys only in v1. Claude Code's isolated mode reads no subscription token, Anthropic's terms
+  restrict third-party use of claude.ai login, and Codex's ChatGPT login is OAuth with refresh.
+- **Background processes.** A harness kills its own on stop, so `start_process` and `stop_process` are daemon
+  tools and the sandbox owns what they start.
+- **Sandbox endpoints.** Neither harness takes a Unix socket for MCP or its proxy, so bubblewrap needs a
+  loopback forwarder inside the sandbox.
+- **Permission hooks pause the turn.** The daemon answers a held command at once with a denial.
+- **Cost.** Codex reports tokens only. Prices gained cache-write lifetimes and a long-prompt tier.
+- **Warm period** follows each model's cache lifetime, not one setting.
+- **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
+- **Codex** is driven through `codex app-server`, not `codex exec`.
 
 From M1a, where the documents were silent:
 
