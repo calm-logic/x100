@@ -58,9 +58,10 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-- Contract fixes M5 asked for, before M6: an append of several events at once in the store, the store's
-  error boxed, a hook in the driver spec that gives the child's pid at spawn, and one ordering rule written
-  into PROTOCOL.md. Sonnet subagent.
+- M6, orchestration, split in two. M6a: the organisation's behaviour in `crates/x100-orch` on the fake
+  harness and the fake clock (tools, delegation, inbox, waits, jobs, team, start pack), with the plan's M6
+  check. M6b, after it: the tools served to real harnesses over MCP, and the daemon's remaining M6 methods.
+  Opus subagents.
 
 ## Waiting on the owner
 
@@ -143,6 +144,12 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Codex** is driven through `codex app-server`, not `codex exec`.
 
 From M5:
+
+- **Contract fixes after M5**, verified by the orchestrator (224 tests pass twice): the store appends several
+  events as one unit, so a message and its delivery, or a turn's checkpoint, reply and end, are written
+  together or not at all. The store's error is small. A driver's pid is recorded at spawn, so one killed with
+  the daemon during its handshake is reaped on restart. A refused turn-end batch now fails the turn and its
+  items go to the next driver.
 
 - **Protocol limits.** A line is at most 16 MiB. A subscriber whose queue has no room for 10 seconds is cut
   off with `subscription.closed` and resumes from its cursor. A project created later reaches every
