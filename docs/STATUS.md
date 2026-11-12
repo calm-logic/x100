@@ -224,6 +224,16 @@ invent any role with a charter, and team changes need the builder's agreement.
   end-to-end run gains a second part: a follow-up edit, then a deploy through Homebox.
 - **2026-11-12. Homebox connects locally by default.** When a Homebox server is on this machine, "use local"
   is the default and needs no key. Otherwise the builder gives a host address and an API key.
+- **2026-11-12. Homebox and GitHub, for M12I.**
+  - "Use local" is built as one fixed command in the `homebox-admin` container that mints an edit key for
+    x100, kept in the vault. A proper Homebox command line replaces it later.
+  - GitHub must be connected to x100 before x100 creates and pushes a repository for a project. Until then a
+    project's repository stays local, with commits as now, and cannot be deployed through Homebox.
+  - A public address on Homebox's primary domain is acceptable for the test. x100 finds the primary domain
+    and the GitHub account through Homebox's API. The same GitHub account is the one to connect to x100.
+  - The orchestrator may change Homebox's repository. Its uncommitted static-site support is committed
+    locally in `~/code/homebox` (18 tests pass) and not pushed, since a push there starts Homebox's own
+    deploys.
 - **2026-11-12. Build M11 and M12 now**, with what they depend on (M10). Homebox follows in its place in the
   plan, not ahead of it.
 

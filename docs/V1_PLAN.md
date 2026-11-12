@@ -292,7 +292,10 @@ the CEO do what the builder can: list integrations, link the project ("connect t
 called foobar"), and deploy. Homebox, the owner's own self-hosted platform, is the first. It connects in one of two ways: "use local",
 the default when a Homebox server is found on this machine, which uses Homebox's own direct local access and
 needs no key; or a host address and an API key, since Homebox is self-hostable and may be elsewhere. It has
-no OAuth of its own yet. The project is linked to a Homebox project and deployed to it. A deploy
+no OAuth of its own yet. The project is linked to a Homebox project and deployed to it. Homebox deploys only
+from a hosted repository, so GitHub is the second integration: connected with GitHub's own OAuth, it lets
+x100 create a private repository for a project and push to it. Until GitHub is connected a project's
+repository stays local and cannot be deployed through Homebox, and x100 says so. A deploy
 is an action the gate rates as high risk.
 
 Check: with a stand-in for Homebox's API, "use local" is offered first when a local server is found and
