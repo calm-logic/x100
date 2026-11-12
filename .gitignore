@@ -1,0 +1,6 @@
+# The marketing site is its own private repository, nested here.
+/site/
+/REEL.md
+
+# Rust
+/target/
