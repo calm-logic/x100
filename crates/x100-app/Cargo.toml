@@ -8,6 +8,28 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[lib]
+name = "x100_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "x100-app"
 path = "src/main.rs"
+
+[dependencies]
+x100-client = { path = "../x100-client" }
+x100-core = { path = "../x100-core" }
+x100-proto = { path = "../x100-proto" }
+# Zed's main branch, pinned (spike S1). The crates.io release renders through Vulkan only, which
+# under WSL is a software renderer. Zed's terminal, markdown, ui and theme crates are GPL and are
+# not used: `deny.toml` refuses them.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["wayland", "x11"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["test-support"] }
+tempfile = "3"

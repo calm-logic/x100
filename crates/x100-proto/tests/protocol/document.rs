@@ -194,9 +194,11 @@ fn the_worked_example_is_a_valid_conversation() {
     let mut subscribed = false;
     for (who, line) in &doc.exchange {
         let message = Message::parse(line).unwrap_or_else(|e| panic!("{line}: {e}"));
+        // Compared as values: the order of keys in a written line depends on a serde_json
+        // feature another crate in the same build may turn on, and means nothing on the wire.
         assert_eq!(
-            &message.to_line(),
-            line,
+            serde_json::from_str::<Value>(&message.to_line()).unwrap(),
+            serde_json::from_str::<Value>(line).unwrap(),
             "write the line the way the types write it"
         );
         match (who.as_str(), message) {

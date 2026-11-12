@@ -43,7 +43,9 @@ impl DaemonTools for Recorder {
     ) -> Result<String, String> {
         let reply = match &call {
             ToolCall::SetPreview { .. } => Ok("previewing".to_owned()),
-            ToolCall::Remember { .. } => Ok(json!({ "note": "kept", "n": 7 }).to_string()),
+            // Written out, not built with `json!`: its key order depends on a serde_json feature another
+            // crate in the same build may turn on.
+            ToolCall::Remember { .. } => Ok(r#"{"n":7,"note":"kept"}"#.to_string()),
             _ => Err("not in this test".to_owned()),
         };
         self.calls.lock().unwrap().push((driver, endpoint, call));

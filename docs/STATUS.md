@@ -79,16 +79,25 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 - **The terminal stream in the contract.** Core has the chunk type and `Driver.view` (terminal or headless),
   the store records and follows a terminal per driver, and the protocol has `terminal.read`,
   `terminal.subscribe` and the `terminal.chunk` notice. Served from M3T on.
+- **M15a, the desktop app's shell, chat and Team tab.** The orchestrator's run: 285 tests pass across the
+  whole workspace with the app in it, clippy and fmt clean on the app, client and protocol, the app's tests
+  twice, no process left. The window tests run with no display against a real daemon on the fake clock with
+  the Fernleaf script: a brief with two attachments is typed and sent and the main panel opens; the three
+  leads' rows match the client's state; tab dots appear and clear; the drivers list matches; clicking down
+  three levels shows each agent's own agents and the trail; an answer to the CEO redraws one row and not the
+  others; a new client shows the same project. The subagent also drove the real window under X11 through the
+  X server's test extension and captured it (`crates/x100-app/screenshots/`). The orchestrator compared
+  `first-run.png` and `team.png` with a render of the page's mock: same three areas, proportions, colours, tab
+  bar with dots, CEO orb, lead rows with meter, driver pill and effort pips. **Differs from the mock:** no
+  animations, Lato not Manrope, no provider logo in the driver pill, no drawn window bar, a real composer with
+  Attach and "By path". **Not verified:** macOS, a real file chooser (WSL has no portal, so "By path" exists),
+  the licence check (`cargo-deny` is not installed here, CI runs it).
 
 ## In progress
 
-- M15a, the desktop app's shell, chat and Team tab. Opus subagent, owns `crates/x100-app` and
-  `crates/x100-client`. M15b follows with the agent's live terminal view.
+- M15b, the agent's live terminal view in the desktop app. Opus subagent, owns `crates/x100-app`.
 - M3T, terminal drivers on local logins. Opus subagent, owns `crates/x100-drivers`.
 - M8, router and budgets. Opus subagent, owns `crates/x100-router`.
-- Owed when `x100-app` joins the workspace: GPUI turns on `serde_json`'s `preserve_order` for the whole build,
-  and two tests that compare exact JSON text then fail (`x100-drivers` `the_fake_replays_a_script_deterministically`,
-  `x100-proto` `the_worked_example_is_a_valid_conversation`). They must compare values, not text.
 
 ## Waiting on the owner
 
@@ -181,6 +190,17 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From M15a:
+
+- **GPUI changes JSON key order for the whole build.** It turns on `serde_json`'s `preserve_order`, and cargo
+  merges features across a workspace build. Two tests compared exact JSON text and failed. The orchestrator
+  made them compare values. A daemon built with the workspace writes keys in a different order from one built
+  alone, with the same meaning.
+- **Fetching GPUI on this machine** needs `CARGO_NET_GIT_FETCH_WITH_CLI=true` the first time, because of the
+  machine's git rule that rewrites https to ssh.
+- **The app starts a daemon itself** only for the default socket or with `--daemon`.
+- **Seams:** `team/output.rs` `AgentOutput` for M15b, and one match arm per tab in `tabs.rs` for M16.
 
 From M6a:
 
