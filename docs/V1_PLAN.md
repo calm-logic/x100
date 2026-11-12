@@ -74,6 +74,7 @@ engine, theming.
 | M10 | Sandbox | `x100-sandbox` | M6 | Opus |
 | M11 | Vault and proxy | `x100-vault` | M10 | Opus |
 | M12 | Gate | `x100-gate` | M6 | Sonnet |
+| M12I | Integrations, with Homebox first | `x100-integrations` | M11, M12 | Opus |
 | M13 | Memory and skills | `x100-memory` | M6 | Sonnet |
 | M14 | Lab: evals and trials | `x100-lab` | M8, M10, M13 | Opus |
 | M15 | Desktop app: shell, chat and Team | `x100-app` | M7, S1 | Opus |
@@ -280,6 +281,24 @@ Check: table tests for the rules. End to end with the fake harness: at "High ris
 is held and a file edit is not; Approve resumes it; Deny drops it and the agent is told; at "Nothing" neither
 is held; at "Every decision" both are. An Approve that arrives after the agent's driver was replaced reaches
 the new driver.
+
+### M12I. Integrations, with Homebox first
+
+Integrations as a part of x100 the builder connects once and projects then use: a list of supported
+integrations, one consistent way to connect each (OAuth where the service offers it, a pasted key only where
+it does not), the credential kept in the vault, and each call to the service made by the daemon so no agent
+holds the credential. A project setting that links the project to something in an integration. Tools that let
+the CEO do what the builder can: list integrations, link the project ("connect this to the Homebox project
+called foobar"), and deploy. Homebox, the owner's own self-hosted platform, is the first: connected with an
+API key for now, since it has no OAuth of its own yet, linked to a Homebox project, and deployed to. A deploy
+is an action the gate rates as high risk.
+
+Check: with a stand-in for Homebox's API, connecting stores the key in the vault and the key is in no event,
+transcript or reply. The builder links a project from Settings, and the CEO links one by name from the chat.
+A deploy asked for in the chat is held at "High risk only", runs on Approve, and reports the deployed
+address. A deploy that fails says why. When asked to, the second part of the end-to-end run on the builder's
+logins and the builder's own Homebox: after the todo app is built, a follow-up message asks for a small
+edit, then for a deploy through Homebox, and the edited page is served at the deployed address.
 
 ### M13. Memory and skills
 

@@ -145,10 +145,32 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-Nothing is running. The owner's goal of 2026-11-12 is met, see below. What v1 still needs, in the plan's
-order: M7 (terminal interface), M9 (handoff), M10 (sandbox), M11 (vault), M12 (gate), M13 (memory and skills),
-M14 (lab), M17 (hardening). M10 and M12 come first in practice: until they exist a Claude Code driver cannot
-run commands and no real driver is isolated.
+Running, each on its own crates:
+
+- **How a project begins** (the owner's change): starting a conversation creates the project, uninitialized.
+  The CEO sets its name and intent with a tool when it knows enough, which creates the code directory under
+  `~/x100/` and opens the builder's task. A project's own state moves to the daemon's data directory. The
+  name-and-directory form is removed. Also in that step: the facts table above an agent's output is deleted,
+  and memories, skills and trials are hidden until built. Opus subagent, edits most crates.
+- **M10, the sandbox**, as a crate on its own (`crates/x100-sandbox`). Opus subagent.
+- **M11, the vault and proxy**, as a crate on its own (`crates/x100-vault`). Opus subagent.
+- **M12, the gate**, as a crate on its own (`crates/x100-gate`). Sonnet subagent.
+- **Homebox research**, read-only: how its API, keys, projects and deploys work. Opus subagent.
+
+Queued, in this order:
+
+1. **App follow-ups from the owner's review of the recording.** The terminal at the pane's size: the app
+   tells the daemon the pane's size and the program redraws itself, so text shows at the normal font size
+   (today the whole screen is shrunk to fit). One "+" icon button for adding files, replacing Attach and By
+   path (under WSL it opens a path field, since there is no file chooser). An agent's drilldown is the
+   terminal filling the view, with the agent's head and label small in the top-left of the row that holds the
+   Agents and Drivers switch. An `executive-summary` skill the CEO respects in its messages to the builder
+   only, never in its own work or the driver's output. The chat shows only what the CEO sends with `message`
+   and its report, not every text of its turn.
+2. **Wiring M10, M11 and M12** into the orchestrator and daemon, one after another, each with its
+   end-to-end check. With the sandbox in, Claude Code drivers can run commands.
+3. **M12I, integrations with Homebox first**, then the two-part end-to-end run.
+4. M7, M9, M13, M14, M17.
 
 ## Waiting on the owner
 
@@ -189,6 +211,19 @@ invent any role with a charter, and team changes need the builder's agreement.
 - **2026-11-12. Cap per login.** At most 4 terminal drivers at once on one login, by default.
 - **2026-11-12. The login inside the sandbox** may be writable. No objection.
 - **2026-11-12. An agent's terminal** is for watching only, for now.
+- **2026-11-12. How a project begins.** No form. Starting a conversation creates an uninitialized project,
+  and the CEO initializes it with a name and intent once it has context, which may be deferred ("hi").
+- **2026-11-12. The agent view.** The terminal must be readable, not shrunk. A drilldown is the terminal
+  filling the view, with the head and label in the top-left corner. No drivers, waiting, jobs and inbox table.
+  Memories and skills hidden until M13. One "+" button for files.
+- **2026-11-12. The CEO's messages to the builder** are an executive summary: the minimum, unless more is
+  asked for or likely to be useful. This applies to its messages only, not to the driver's own output.
+- **2026-11-12. Integrations.** Homebox is the first supported integration, with a project setting that links
+  a project to a Homebox project, and CEO tools for x100's own actions such as that link. OAuth as much as
+  possible, a pasted token as a last resort. Homebox uses an API key for now, since it has no OAuth yet. The
+  end-to-end run gains a second part: a follow-up edit, then a deploy through Homebox.
+- **2026-11-12. Build M11 and M12 now**, with what they depend on (M10). Homebox follows in its place in the
+  plan, not ahead of it.
 
 ## Toolchain, checked 2026-11-11
 
