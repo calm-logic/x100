@@ -4,11 +4,17 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## Accepted milestones
 
-None yet.
+- **M0, workspace and CI.** Check run by the orchestrator in a fresh copy of the tree on rustc 1.99.1:
+  `cargo build --workspace` exit 0, `cargo test --workspace` 29 result lines all ok with 0 tests,
+  `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo fmt --check` exit 0. Binaries built:
+  `x100`, `x100-app`, `x100d`. The CI file is written and has not run, since nothing is pushed.
 
 ## In progress
 
-M0, workspace and CI. Sonnet subagent.
+- S1, GPUI spike. Opus subagent, owns `spikes/gpui`.
+- M1, split in two because it is the contract and large. M1a: ids, domain types, events, the six state
+  machines, the clock, and the Stateright proofs. M1b, after it: the folds into tab state. Opus subagent, owns
+  `crates/x100-core`.
 
 ## Waiting on the owner
 
