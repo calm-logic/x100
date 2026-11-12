@@ -1,4 +1,4 @@
-//! Files attached to the brief and to messages: choosing them, uploading them through the
+//! Files attached to messages: choosing them, uploading them through the
 //! protocol, and how each is previewed. An image shows as itself; anything else as its name,
 //! kind and size.
 
@@ -36,6 +36,30 @@ pub async fn upload(
         .await
         .map_err(|e| format!("could not upload {name}: {e}"))?;
     Ok(Uploaded { file, bytes })
+}
+
+/// A file chosen for a project that does not exist yet: its name, until it is uploaded.
+pub fn pending(path: &std::path::Path) -> AnyElement {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    div()
+        .flex_none()
+        .max_w(px(220.))
+        .px(px(10.))
+        .py(px(7.))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(theme::line())
+        .bg(gpui::rgb(0x0a0a0b))
+        .text_size(px(theme::SMALL))
+        .text_color(theme::text())
+        .whitespace_nowrap()
+        .overflow_hidden()
+        .text_ellipsis()
+        .child(name)
+        .into_any_element()
 }
 
 /// A file's preview. `image` is its picture once there is one.

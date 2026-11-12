@@ -211,19 +211,8 @@ impl Orchestrator {
             .map(|p| p.ctl.clone())
     }
 
-    /// The brief: the project's first message, and the task it delegates to the CEO.
-    pub async fn send_brief(
-        &self,
-        project: ProjectId,
-        body: String,
-        attachments: Vec<FileId>,
-    ) -> Result<(MessageId, TaskId), Refused> {
-        let ctx = self.ctx(project)?;
-        blocking(move || builder::send_brief(&ctx, body, attachments)).await
-    }
-
-    /// The builder's message to the CEO, which opens a task for it when it has none from the
-    /// builder.
+    /// The builder's message to the CEO. Once the project is set up, it opens a task for the CEO
+    /// when it has none from the builder; before, it is only a message.
     pub async fn send_chat(
         &self,
         project: ProjectId,
@@ -233,6 +222,12 @@ impl Orchestrator {
     ) -> Result<MessageId, Refused> {
         let ctx = self.ctx(project)?;
         blocking(move || builder::send_chat(&ctx, body, attachments, in_reply_to)).await
+    }
+
+    /// The builder renames a project that is set up.
+    pub async fn rename(&self, project: ProjectId, name: String) -> Result<(), Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || builder::rename(&ctx, name)).await
     }
 
     pub async fn raise_task(

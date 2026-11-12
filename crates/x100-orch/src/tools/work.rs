@@ -143,7 +143,7 @@ pub(super) fn delegate(
     Ok(Plan {
         commit: vec![me],
         events,
-        merge: None,
+        ..Plan::default()
     })
 }
 
@@ -182,6 +182,7 @@ pub(super) fn review(at: &At, task: TaskId, verdict: &Verdict) -> Result<Plan, R
                 from: assignment.assignee,
                 into: Target::Agent(me),
             }),
+            code_dir: None,
         }),
         Verdict::SendBack { effort, .. } => {
             if let Some(wanted) = effort {
@@ -207,7 +208,7 @@ pub(super) fn review(at: &At, task: TaskId, verdict: &Verdict) -> Result<Plan, R
             Ok(Plan {
                 commit: Vec::new(),
                 events,
-                merge: None,
+                ..Plan::default()
             })
         }
     }
@@ -261,6 +262,7 @@ pub(super) fn report(
         commit: vec![me],
         events,
         merge,
+        ..Plan::default()
     })
 }
 

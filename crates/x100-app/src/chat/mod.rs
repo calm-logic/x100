@@ -1,9 +1,11 @@
 //! The chat with the CEO. Before the first message it is the whole window beside the sidebar: the
-//! CEO and a box for the brief. After it, the conversation: the builder's messages, the CEO's
-//! replies in Markdown, its questions waiting for an answer, and its reports.
+//! CEO and a box to write in ([`start`] for a project not created yet). After it, the
+//! conversation: the builder's messages, the CEO's replies in Markdown, its questions waiting for
+//! an answer, and its reports.
 
 mod attach;
 mod composer;
+mod start;
 
 use std::collections::HashMap;
 
@@ -20,7 +22,8 @@ use x100_core::id::{MessageId, ProjectId};
 use x100_core::message::Route;
 use x100_core::task::Outcome;
 
-pub use composer::Composer;
+pub use composer::{Composer, Target};
+pub use start::StartView;
 
 use crate::held::HeldStrip;
 use crate::markdown::Markdown;
@@ -28,8 +31,8 @@ use crate::session::{Session, SessionEvent};
 use crate::theme;
 use crate::widgets::{self, Orb};
 
-/// Whether the builder has sent the project's first message, the brief.
-pub fn briefed(p: &ProjectState) -> bool {
+/// Whether the builder has sent the project's first message.
+pub fn started(p: &ProjectState) -> bool {
     p.chat().iter().any(|c| match c.item {
         ChatItem::Message(id) => p
             .message(id)
@@ -89,7 +92,7 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let composer = cx.new(|cx| Composer::new(session.clone(), project, cx));
+        let composer = cx.new(|cx| Composer::new(session.clone(), Target::Project(project), cx));
         composer.update(cx, |c, cx| c.focus(window, cx));
         let held = cx.new(|cx| HeldStrip::new(session.clone(), project, cx));
         let subscription = cx.subscribe(&session, |this, _, event, cx| match event {
@@ -180,12 +183,12 @@ impl ChatView {
                     }),
                 })
                 .collect();
-            let name = p.project().map(|pr| pr.name.clone()).unwrap_or_default();
+            let name = crate::words::project_name(Some(p));
             let working = p
                 .project()
                 .and_then(|pr| p.agent(pr.ceo))
                 .is_some_and(|a| a.state == AgentState::Working);
-            (name, briefed(p), working, lines)
+            (name, started(p), working, lines)
         })
     }
 
@@ -347,6 +350,22 @@ impl ChatView {
     }
 }
 
+/// Before a project's first message: the CEO, outlined, over the box to write in, and anything
+/// that goes under it.
+fn first_run(composer: AnyElement, below: Option<AnyElement>) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .p(px(20.))
+        .child(widgets::orb(104., Orb::Outline).mb(px(26.)))
+        .child(div().w(px(600.)).max_w_full().child(composer))
+        .children(below)
+        .into_any_element()
+}
+
 fn typing() -> AnyElement {
     div()
         .self_start()
@@ -363,21 +382,11 @@ fn typing() -> AnyElement {
 
 impl Render for ChatView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some((name, briefed, working, lines)) = self.read_lines(cx) else {
+        let Some((name, started, working, lines)) = self.read_lines(cx) else {
             return div().into_any_element();
         };
-        if !briefed {
-            // First run: the CEO, outlined, over the box for the brief.
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .p(px(20.))
-                .child(widgets::orb(104., Orb::Outline).mb(px(26.)))
-                .child(div().w(px(600.)).max_w_full().child(self.composer.clone()))
-                .into_any_element();
+        if !started {
+            return first_run(self.composer.clone().into_any_element(), None);
         }
         if lines.len() != self.lines {
             self.lines = lines.len();
@@ -411,7 +420,11 @@ impl Render for ChatView {
                                     .text_color(theme::text())
                                     .child("CEO"),
                             )
-                            .child(format!("· {name}")),
+                            .child(
+                                div()
+                                    .debug_selector(|| "chat-project".into())
+                                    .child(format!("· {name}")),
+                            ),
                     ),
             )
             .child(

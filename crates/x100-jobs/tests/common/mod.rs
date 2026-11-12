@@ -84,7 +84,6 @@ pub fn open_project_on(
         log.append(
             Actor::Builder,
             ProjectEvent::Created {
-                name: "Test".into(),
                 ceo: ceo(),
                 charter: "Test.".into(),
                 effort: EffortRange::FULL,

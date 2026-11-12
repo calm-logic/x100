@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionEvent};
@@ -15,7 +17,7 @@ use crate::memory::{NoteName, SkillRef, SkillVersion};
 use crate::message::Message;
 use crate::party::Party;
 use crate::process::{Process, ProcessEnd, ProcessName};
-use crate::project::{SettingChange, Settings};
+use crate::project::{Identity, SettingChange, Settings};
 use crate::spec::SpecRevision;
 use crate::task::{Opening, Task, TaskEvent};
 use crate::trial::{Trial, TrialEvent};
@@ -28,14 +30,24 @@ use crate::trial::{Trial, TrialEvent};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectEvent {
-    /// Creating a project creates its CEO.
+    /// Creating a project creates its CEO. A new project has no name, no intent and, unless it
+    /// starts on an existing folder, no code directory: it is not set up.
     Created {
-        name: String,
         ceo: AgentId,
         charter: String,
         effort: EffortRange,
         settings: Settings,
     },
+    /// Where the project's code lives: its git repository, and what x100 writes there for people.
+    /// Recorded at creation for an existing folder, or when the project is set up. It never moves.
+    CodeDirSet {
+        dir: PathBuf,
+    },
+    /// The CEO set the project up with `set_up_project`. The builder's task opens in the same
+    /// append.
+    SetUp(Identity),
+    /// A later change to the name or the intent, by the CEO or the builder.
+    Renamed(Identity),
     SettingChanged(SettingChange),
     /// The address of the project's development build, from `set_preview`.
     PreviewSet {

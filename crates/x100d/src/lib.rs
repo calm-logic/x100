@@ -28,8 +28,8 @@ use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
     CLAUDE_BASE_URL_ENV, CLAUDE_LOGIN_ENV, CODEX_BASE_URL_ENV, CODEX_LOGIN_ENV, Config,
-    DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, QUEUE_CAPACITY, SCRIPTS_ENV,
-    default_data_dir,
+    DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, PROJECTS_ROOT_ENV, QUEUE_CAPACITY,
+    SCRIPTS_ENV, default_data_dir,
 };
 pub use error::Error;
 pub use unavailable::arrives_with;
@@ -94,8 +94,14 @@ impl Daemon {
         }
 
         let settings_log = log.clone();
-        let settings: x100_orch::Settings =
-            Arc::new(move || settings_log.with_state(|s| *s.settings()));
+        let root = config.projects_root.clone();
+        // The orchestrator reads the projects root from the settings, so the daemon's default
+        // fills a setting the builder has not made.
+        let settings: x100_orch::Settings = Arc::new(move || {
+            let mut s = settings_log.with_state(|s| s.settings().clone());
+            s.projects_root.get_or_insert_with(|| root.clone());
+            s
+        });
         // The harnesses reach the tools through the desk, so it exists before them, and so does
         // the address every driver is given.
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
@@ -128,14 +134,12 @@ impl Daemon {
 
         let projects: Vec<_> = hub
             .log
-            .with_state(|d| d.projects().map(|(id, e)| (id, e.path.clone())).collect());
-        for (id, path) in projects {
-            let path = PathBuf::from(path);
-            if !path.is_dir() {
-                eprintln!("x100d: project {id} is gone from {}", path.display());
-                continue;
-            }
-            let store = ProjectStore::open(&path, Arc::clone(&clock))?;
+            .with_state(|d| d.projects().map(|(id, _)| id).collect());
+        for id in projects {
+            let store = ProjectStore::open(
+                &x100_store::project_dir(&config.data_dir, id),
+                Arc::clone(&clock),
+            )?;
             // A project whose creation was cut short has nothing to settle or serve yet.
             if store.log.last().is_none() {
                 continue;

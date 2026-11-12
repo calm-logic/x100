@@ -1,6 +1,7 @@
 //! The window's root: the projects sidebar, the chat with the selected project's CEO, and the
 //! main panel. Before a project's first message the main panel is hidden and the chat fills the
-//! rest of the window.
+//! rest of the window. With no project selected, a new one is being started: the CEO and the box
+//! for its first message.
 
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ use x100_client::Change;
 use x100_core::fold::ProjectPart;
 use x100_core::id::ProjectId;
 
-use crate::chat::{self, ChatView};
+use crate::chat::{self, ChatView, StartView};
 use crate::session::{Session, SessionEvent};
 use crate::sidebar::Sidebar;
 use crate::tabs::MainPanel;
@@ -25,8 +26,10 @@ pub struct Shell {
     session: Entity<Session>,
     sidebar: Entity<Sidebar>,
     projects: HashMap<ProjectId, ProjectViews>,
-    /// Whether the selected project had its brief when last drawn.
-    briefed: bool,
+    /// The start of a new project, made the first time it is shown.
+    start: Option<Entity<StartView>>,
+    /// Whether the selected project had its first message when last drawn.
+    started: bool,
     title: String,
     _subscription: Subscription,
 }
@@ -40,8 +43,8 @@ impl Shell {
                 if changes.parts.contains(&ProjectPart::Chat)
                     && Some(*project) == this.session.read(cx).selected() =>
             {
-                // The first message opens the main panel.
-                if this.briefed != this.selected_briefed(cx) {
+                // The first message opens the main panel, and a name changes the title.
+                if this.started != this.selected_started(cx) || this.title != this.title_of(cx) {
                     cx.notify();
                 }
             }
@@ -52,7 +55,8 @@ impl Shell {
             session,
             sidebar,
             projects: HashMap::new(),
-            briefed: false,
+            start: None,
+            started: false,
             title: String::new(),
             _subscription: subscription,
         }
@@ -71,12 +75,34 @@ impl Shell {
         self.projects.get(&project)
     }
 
-    fn selected_briefed(&self, cx: &Context<Self>) -> bool {
+    /// The start of a new project, once it has been shown.
+    pub fn start(&self) -> Option<&Entity<StartView>> {
+        self.start.as_ref()
+    }
+
+    /// The window's title as last set.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn selected_started(&self, cx: &Context<Self>) -> bool {
         let session = self.session.read(cx);
         session
             .selected()
-            .and_then(|p| session.project(p, |p, _| chat::briefed(p)))
+            .and_then(|p| session.project(p, |p, _| chat::started(p)))
             .unwrap_or(false)
+    }
+
+    /// "x100" with the selected project's name, or "New project" until its CEO names it.
+    fn title_of(&self, cx: &Context<Self>) -> String {
+        let session = self.session.read(cx);
+        match session.selected() {
+            Some(p) => {
+                let name = session.project(p, |p, _| crate::words::project_name(Some(p)));
+                format!("x100 · {}", name.unwrap_or_default())
+            }
+            None => "x100".into(),
+        }
     }
 }
 
@@ -85,14 +111,8 @@ impl Render for Shell {
         let session = self.session.read(cx);
         let selected = session.selected();
         let connected = session.connected();
-        let name = selected
-            .and_then(|p| session.project(p, |p, _| p.project().map(|pr| pr.name.clone())))
-            .flatten();
-        self.briefed = self.selected_briefed(cx);
-        let title = match &name {
-            Some(name) => format!("x100 · {name}"),
-            None => "x100".into(),
-        };
+        self.started = self.selected_started(cx);
+        let title = self.title_of(cx);
         // Told to the platform only when it changes: this runs on every frame.
         if title != self.title {
             window.set_window_title(&title);
@@ -113,17 +133,14 @@ impl Render for Shell {
 
         let body = div().flex_1().min_w_0().h_full().flex();
         let body = match views {
-            None => body.child(
-                div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(theme::TEXT))
-                    .text_color(theme::dim())
-                    .child("Create a project to start."),
-            ),
-            Some((chat, _)) if !self.briefed => {
+            None => {
+                let session = self.session.clone();
+                let start = self
+                    .start
+                    .get_or_insert_with(|| cx.new(|cx| StartView::new(session, window, cx)));
+                body.child(start.clone())
+            }
+            Some((chat, _)) if !self.started => {
                 body.child(chat.cached(StyleRefinement::default().size_full()))
             }
             // The main panel is not cached: its rows change often, and a dirty cached view

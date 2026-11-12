@@ -57,6 +57,9 @@ impl Daemon {
         let child = Command::new(binary("x100d"))
             .arg("--data-dir")
             .arg(dir.path().join("data"))
+            // Code directories go under the test's own directory, never the builder's `~/x100`.
+            .arg("--projects-root")
+            .arg(dir.path().join("projects"))
             .arg("--scripts-dir")
             .arg(SCRIPTS)
             .arg("--fake-harness")
@@ -76,8 +79,9 @@ impl Daemon {
         self.dir.path().join("data/x100d.sock")
     }
 
-    pub fn project_dir(&self, name: &str) -> String {
-        self.dir.path().join(name).to_string_lossy().into_owned()
+    /// Where the daemon makes a project's code directory when its CEO sets it up.
+    pub fn projects_root(&self) -> PathBuf {
+        self.dir.path().join("projects")
     }
 }
 
@@ -125,16 +129,20 @@ impl Run {
             .expect("the daemon answers")
     }
 
-    /// Creates the Fernleaf project as the daemon's own Fernleaf test does: every agent on the
-    /// script's short-lived model, and waits long enough not to expire when the clock moves.
+    /// Waits long enough not to expire when the clock moves, as the daemon's Fernleaf test does.
+    pub fn long_waits(&self, client: &Client) {
+        self.rt
+            .block_on(client.request(SetDaemonSetting {
+                setting: DaemonSetting::DefaultWaitDeadline(Duration::from_secs(7 * 86_400)),
+            }))
+            .expect("the setting is taken");
+    }
+
+    /// A new project for the Fernleaf script, made as the daemon's own Fernleaf test makes it:
+    /// every agent on the script's short-lived model. Its first message is the test's to send.
     pub fn fernleaf_project(&self, client: &Client) -> ProjectId {
+        self.long_waits(client);
         self.rt.block_on(async {
-            client
-                .request(SetDaemonSetting {
-                    setting: DaemonSetting::DefaultWaitDeadline(Duration::from_secs(7 * 86_400)),
-                })
-                .await
-                .expect("the setting is taken");
             let harness = client.with_state(|s| {
                 s.daemon
                     .harnesses()
@@ -160,8 +168,7 @@ impl Run {
             };
             let project = client
                 .request(CreateProject {
-                    path: self.daemon.project_dir("fernleaf"),
-                    name: Some("Fernleaf".into()),
+                    dir: None,
                     settings: Some(settings),
                 })
                 .await
@@ -236,6 +243,24 @@ pub fn pump_until(
         pump(vcx);
         if done(vcx) {
             return;
+        }
+        assert!(Instant::now() < until, "timed out waiting until {what}");
+    }
+}
+
+/// Pumps until the client's state gives a value: for what the app sends in several steps, each of
+/// which runs only while the window's tasks are pumped.
+pub fn pump_for<T>(
+    vcx: &mut VisualTestContext,
+    client: &Client,
+    (what, within): (&str, Duration),
+    f: impl Fn(&x100_proto::Snapshot) -> Option<T>,
+) -> T {
+    let until = Instant::now() + within;
+    loop {
+        pump(vcx);
+        if let Some(found) = client.with_state(&f) {
+            return found;
         }
         assert!(Instant::now() < until, "timed out waiting until {what}");
     }

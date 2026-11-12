@@ -246,6 +246,18 @@ fn samples(tool: Tool) -> Vec<ToolCall> {
         Tool::SetPreview => vec![ToolCall::SetPreview {
             url: "http://127.0.0.1:5173".into(),
         }],
+        Tool::SetUpProject => vec![
+            ToolCall::SetUpProject {
+                name: "Todo app".into(),
+                intent: "A todo list in one page.".into(),
+                brief: Some("One index.html with a list that survives a reload.".into()),
+            },
+            ToolCall::SetUpProject {
+                name: "Todo".into(),
+                intent: "A todo list in one page.".into(),
+                brief: None,
+            },
+        ],
         Tool::LoadSkill => vec![
             ToolCall::LoadSkill {
                 skill: skill(SkillScope::Shared),

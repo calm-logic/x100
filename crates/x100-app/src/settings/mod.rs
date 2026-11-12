@@ -1,4 +1,5 @@
-//! The Settings tab: Ask me about, the project's budget, each lead's budget and effort range, the
+//! The Settings tab: the project's name, intent and code directory, which only the name of may be
+//! changed here, Ask me about, the project's budget, each lead's budget and effort range, the
 //! harnesses and models x100 may use, and the Credentials part. Each control sends its protocol
 //! request and says beside itself what came back: where the daemon has not made a method yet
 //! (leads' budgets and effort ranges until M8, credentials until M11) it says so, and the control
@@ -53,6 +54,10 @@ pub struct ModelChoice {
 /// What the tab shows, read from the folded state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsModel {
+    /// `None` until the CEO sets the project up.
+    pub name: Option<String>,
+    pub intent: Option<String>,
+    pub code_dir: Option<String>,
     pub ask: AskMeAbout,
     pub budget: Money,
     pub leads: Vec<LeadModel>,
@@ -99,6 +104,9 @@ impl SettingsModel {
             })
             .collect();
         Some(SettingsModel {
+            name: project.name().map(str::to_owned),
+            intent: project.identity.as_ref().map(|i| i.intent.clone()),
+            code_dir: project.code_dir.as_ref().map(|d| d.display().to_string()),
             ask: project.settings.ask_me_about,
             budget: project.settings.budget,
             leads: leads.into_iter().map(|(_, l)| l).collect(),
@@ -110,6 +118,7 @@ impl SettingsModel {
 /// A control, to say what came back beside it and to find its text field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Control {
+    Name,
     Ask,
     Budget,
     LeadBudget(AgentId),
@@ -273,8 +282,26 @@ impl SettingsView {
         );
     }
 
-    /// Sets the budget `control` names to what its field holds.
+    /// Renames the project to what the name's field holds.
+    pub fn rename(&mut self, cx: &mut Context<Self>) {
+        let Some((field, _)) = self.fields.get(&Control::Name) else {
+            return;
+        };
+        // An empty name is the daemon's to refuse, and its answer shows beside the field.
+        let name = field.read(cx).text().trim().to_owned();
+        let (client, project) = (self.client(cx), self.project);
+        self.send(
+            Control::Name,
+            async move { client.rename_project(project, name).await },
+            cx,
+        );
+    }
+
+    /// Sets the budget `control` names to what its field holds, or the name.
     pub fn apply_budget(&mut self, control: Control, cx: &mut Context<Self>) {
+        if control == Control::Name {
+            return self.rename(cx);
+        }
         let Some((field, _)) = self.fields.get(&control) else {
             return;
         };
@@ -325,7 +352,11 @@ impl SettingsView {
 
     /// A budget's field and its Set button, with what came back.
     fn amount(&mut self, control: Control, id: String, cx: &mut Context<Self>) -> AnyElement {
-        let field = self.field(control, "New amount, in dollars", cx);
+        let placeholder = match control {
+            Control::Name => "A new name",
+            _ => "New amount, in dollars",
+        };
+        let field = self.field(control, placeholder, cx);
         let (field_id, set_id) = (format!("{id}-field"), format!("{id}-set"));
         div()
             .flex()
@@ -401,6 +432,38 @@ impl Render for SettingsView {
             return page;
         };
         let outcome = |s: &Self, c: Control| s.outcomes.get(&c).map(notice::line);
+        let text = |t: Option<String>, none: &str| {
+            div()
+                .text_size(px(theme::SMALL))
+                .text_color(theme::muted())
+                .child(t.unwrap_or_else(|| none.to_owned()))
+        };
+        // The name and intent are the CEO's, set when it sets the project up; the builder may
+        // rename it after that. The code directory never moves.
+        let name = match &m.name {
+            Some(name) => row(
+                "Name",
+                Some(format!("Now {name}")),
+                self.amount(Control::Name, "name".into(), cx),
+            ),
+            None => row(
+                "Name",
+                None,
+                text(
+                    None,
+                    "None yet: the CEO names the project once it knows what it is",
+                ),
+            ),
+        };
+        let intent = row("Intent", None, text(m.intent.clone(), "None yet"));
+        let code = row(
+            "Code directory",
+            None,
+            text(
+                m.code_dir.clone(),
+                "None yet: made when the project is set up",
+            ),
+        );
 
         let ask = row(
             "Ask me about",
@@ -509,7 +572,10 @@ impl Render for SettingsView {
                     .into_any_element()])),
             )
         });
-        page.child(ask)
+        page.child(name)
+            .child(intent)
+            .child(code)
+            .child(ask)
             .child(budget)
             .children(leads)
             .child(

@@ -53,7 +53,9 @@ Agents are "it". No agent is "he" or "she", in the product, the documents or the
 
 These are the product's behaviour, not suggestions.
 
-1. Every project has exactly one CEO. Creating a project creates its CEO.
+1. Every project has exactly one CEO. Creating a project creates its CEO. Starting a conversation creates the
+   project, with no name yet. The CEO sets it up, with a name and what it is for, once it knows enough from
+   the conversation, and may change either later.
 2. The builder talks to the CEO. The CEO answers first, then delegates.
 3. The CEO works out the team early, while it talks to the builder about the goal. The builder can direct who is
    on it. There is no fixed roster.
@@ -80,9 +82,11 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 ### The app window
 
 - **v1** A native desktop window with three areas: a projects sidebar, a chat with the CEO, and a main panel.
-- **v1** Before the first message in a project, the main panel is hidden. The window shows the CEO and a box
-  to write the brief in. After the first message the main panel opens.
-- **v1** The brief accepts attached files. Attachments show as previews in the chat.
+- **v1** With no project open, the window shows the CEO and a box to write in. There is no form: sending the
+  first message creates the project, and the main panel opens. The project shows as "New project" until the
+  CEO names it. A small control starts a project on a folder that already exists.
+- **v1** A message accepts attached files, added with one "+" button. Attachments show as previews in the
+  chat.
 - **v1** The main panel has tabs, in this order: Team, Specs, Tasks, Files, Budget, Log, Preview, Infra, Settings.
   A tab shows a dot when something in it changed while it was not open.
 - **v1** Multiple projects, listed in the sidebar with a live indicator and an agent count. The page's demo shows
@@ -92,7 +96,10 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 ### Chat
 
 - **v1** Free-form messages to the CEO. The page's canned prompts are a demo device.
-- **v1** The CEO's replies are short and say what it did and what it needs from the builder.
+- **v1** The CEO's messages to the builder are an executive summary: the minimum, saying what it did and what
+  it needs, with more only when asked or when the builder would clearly need it. This governs its messages to
+  the builder only, never its own work or its driver's output. The chat shows what the CEO sends the builder
+  and its reports, not everything its driver writes.
 - **v1** The CEO can ask the builder a question and wait for the answer without stopping other work.
 
 ### Team
@@ -103,8 +110,10 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
   agents it runs or, if it has none, what it is working in right now.
 - **v1** "What it is working in" is the live output of the agent's driver: its terminal and tool output. When
   the agent changes driver, the output carries on in the same view, with the change marked.
-- **v1** An agent's view also shows the drivers it has had and why each ended, what it is waiting for, and the
-  jobs it has scheduled.
+- **v1** Opening an agent fills the view with its driver's terminal, at a readable size, with the agent's head
+  and name small in the top-left corner. The drivers it has had are marked in that output where each took
+  over. Its waits and jobs show in the Log. (The owner removed the table of drivers, waits, jobs and inbox
+  from this view on 2026-11-12.)
 - **v1** The Team tab can list drivers instead of agents: every live and warm driver in the project, with its
   agent, harness, model, effort, machine, state, how full its context is, and what it has cost.
 - **v1** There is one chat per project, with the CEO. The builder does not message leads or workers. A request
@@ -119,7 +128,8 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
   or a set time. A waiting agent spends nothing, and anything new for it wakes it.
 - **v1** Agents schedule jobs: wake themselves or an agent below them at a time or on a repeat, or delegate a
   task on a repeat ("run the smoke tests every morning"). The builder asks the CEO for one.
-- **v1** The builder can cancel any job from the agent's view. Jobs scheduled and fired show in the Log.
+- **v1** Jobs scheduled and fired show in the Log. The builder asks the CEO to cancel one. A cancel button
+  went with the table removed from the agent's view, and has no home yet.
 
 ### Specs
 

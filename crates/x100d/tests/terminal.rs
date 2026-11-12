@@ -1,8 +1,9 @@
-//! Terminal drivers through the real daemon, with the client library as the only way in: a brief
-//! runs on the real `claude` or `codex` program in a pseudo-terminal on a (dummy) local login,
-//! writes the BRD and reports through the daemon's tools, and the driver's terminal is followed
-//! live by one client and, from part way through, by a second. See `common/real.rs` for how no
-//! request leaves the machine.
+//! Terminal drivers through the real daemon, with the client library as the only way in: a new
+//! project's CEO, on the real `claude` or `codex` program in a pseudo-terminal on a (dummy) local
+//! login, answers "hi", sets the project up from the brief that follows, and on a new driver in
+//! the project's worktree writes the BRD and reports through the daemon's tools. That driver's
+//! terminal is followed live by one client and, from part way through, by a second. See
+//! `common/real.rs` for how no request leaves the machine.
 
 mod common;
 
@@ -11,11 +12,13 @@ use std::collections::BTreeMap;
 use common::real::{PATIENCE, Program, Real, Watch, read_all};
 use common::{gone, group_members, running};
 use serde_json::json;
-use x100_core::driver::{DriverEvent, DriverState, View};
+use x100_core::agent::AgentState;
+use x100_core::driver::{DriverEvent, DriverState, EndReason, RetireReason, View};
 use x100_core::effort::Effort;
 use x100_core::event::ProjectEvent;
 use x100_core::harness::{HarnessKind, HarnessModel, ModelName};
 use x100_core::id::{AgentId, DriverId, ProjectId, TaskId};
+use x100_core::message::Route;
 use x100_core::spec::SpecKind;
 use x100_core::task::{Outcome, TaskState};
 use x100_core::terminal::ChunkKind;
@@ -30,34 +33,89 @@ struct Ran {
     driver: DriverId,
 }
 
-/// The brief, the model's replies queued before any driver may start, and the CEO's terminal
-/// driver followed by one client from its start. Once the brief's task is done a second client
-/// subscribes, late, and a message from the builder gives the driver a second turn, which the late
-/// client follows live. Checks what every terminal driver must show.
-async fn run_brief(r: &Real, replies: impl FnOnce(TaskId) -> Vec<Reply>) -> Ran {
+const NAME: (&str, &str) = ("Todo app", "todo-app");
+const INTENT: &str = "A todo list in the browser.";
+
+/// What the CEO is given to set the project up: the arguments of `set_up_project`.
+fn set_up_arguments() -> serde_json::Value {
+    json!({
+        "name": NAME.0,
+        "intent": INTENT,
+        "brief": "Write the BRD for a todo app, then report.",
+    })
+}
+
+/// "hi" to a new project, answered by the CEO on a driver in the scratch directory. Then the
+/// brief: on the same driver the model calls `set_up_project` with `set_up`, the turn ends and
+/// that driver retires, and the task's replies are queued once its id is known, which is seconds
+/// before a new driver starts in the worktree. That driver is followed by one client from its
+/// start. Once the task is done a second client subscribes, late, and a message from the builder
+/// gives the driver a second turn, which the late client follows live. Checks what every terminal
+/// driver must show.
+async fn run_brief(r: &Real, set_up: Reply, replies: impl FnOnce(TaskId) -> Vec<Reply>) -> Ran {
     let project = r.project().await;
-    let task = r
-        .client
-        .send_brief(project, "Write the BRD, then report.", vec![])
+    r.client
+        .send_chat(project, "hi", vec![], None)
         .await
-        .unwrap()
-        .task;
+        .unwrap();
     let ceo = r.ceo_waits_for_a_driver().await;
+    r.provider
+        .reply(Reply::Text("Hello! What would you like to build?".into()));
+    r.allow(project).await;
+    r.until("the CEO says hello and goes idle", |p| {
+        let replied = p
+            .messages()
+            .any(|m| m.message.route == Route::CeoToBuilder && m.message.body.contains("Hello!"));
+        (replied && p.agent(ceo)?.state == AgentState::Idle).then_some(())
+    })
+    .await;
+    let s = r.client.project(project).unwrap();
+    assert_eq!(s.tasks().count(), 0, "a greeting opens no task");
+    assert_eq!(s.project().unwrap().name(), None);
+
+    r.provider.reply(set_up);
+    r.provider.reply(Reply::Text("Setting it up.".into()));
+    r.client
+        .send_chat(
+            project,
+            "Write the BRD for a todo app, then report.",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    let task = r
+        .until("the CEO sets the project up", |p| {
+            p.tasks().next().map(|t| t.task.id)
+        })
+        .await;
     for reply in replies(task) {
         r.provider.reply(reply);
     }
     r.provider.reply(Reply::Text("Nothing else.".into()));
-    r.allow(project).await;
-    let driver = r
-        .until("the CEO's driver starts", |p| {
-            p.agent(ceo)?.drivers.last().copied()
+    let (scratch, driver) = r
+        .until("the CEO's driver in the worktree starts", |p| {
+            match p.agent(ceo)?.drivers.as_slice() {
+                [scratch, driver] => Some((*scratch, *driver)),
+                _ => None,
+            }
         })
         .await;
+    // Followed from its start, before anything else, so its first turn arrives live.
     let first = Watch::new(
         r.client
             .follow_terminal(project, driver, None)
             .await
             .unwrap(),
+    );
+    let s = r.client.project(project).unwrap();
+    let project_state = s.project().unwrap();
+    assert_eq!(project_state.name(), Some(NAME.0));
+    let code = r.projects_root().join(NAME.1);
+    assert_eq!(project_state.code_dir.as_deref(), Some(code.as_path()));
+    assert_eq!(
+        s.driver(scratch).unwrap().state,
+        DriverState::Ended(EndReason::Retired(RetireReason::ProjectSetUp))
     );
 
     r.until("the brief's task is done", |p| {
@@ -107,8 +165,8 @@ async fn run_brief(r: &Real, replies: impl FnOnce(TaskId) -> Vec<Reply>) -> Ran 
             .agent(ceo)
             .unwrap()
             .drivers,
-        vec![driver],
-        "one driver did it all"
+        vec![scratch, driver],
+        "one driver in the worktree did all the work"
     );
 
     // A program may finish drawing a turn just after the turn ends.
@@ -208,7 +266,11 @@ async fn a_brief_runs_on_claude_codes_terminal_and_is_followed_live() {
     let outside = r.dir.path().join("outside.txt");
     let ran = {
         let outside = outside.clone();
-        run_brief(&r, move |task| {
+        let set_up = Reply::Tool {
+            name: "mcp__x100__set_up_project".into(),
+            input: set_up_arguments(),
+        };
+        run_brief(&r, set_up, move |task| {
             vec![
                 // A command is put to the daemon, which refuses it: nothing runs.
                 Reply::Tool {
@@ -240,11 +302,12 @@ async fn a_brief_runs_on_claude_codes_terminal_and_is_followed_live() {
         "a command ran without the daemon's say-so"
     );
     // What the model was told of its command, in the request after it.
-    let told = r.provider.requests()[1].body["messages"].to_string();
-    assert!(
-        told.contains("Commands are not available here yet"),
-        "the command was put to the daemon and refused: {told}"
-    );
+    let told = r.provider.requests().iter().any(|q| {
+        q.body["messages"]
+            .to_string()
+            .contains("Commands are not available here yet")
+    });
+    assert!(told, "the command was put to the daemon and refused");
 
     let pids = pids_of(&r, ran.driver);
     assert_eq!(pids.len(), 1, "{pids:?}");
@@ -259,13 +322,23 @@ fn patch(name: &str) -> Reply {
     }
 }
 
-fn codex_replies(task: TaskId) -> Vec<Reply> {
-    // On gpt-6-luna Codex gives the model one JavaScript `exec` tool, through which it calls MCP
-    // tools as functions of `tools`.
-    let exec = |code: String| Reply::Freeform {
+/// On gpt-6-luna Codex gives the model one JavaScript `exec` tool, through which it calls MCP
+/// tools as functions of `tools`.
+fn exec(code: String) -> Reply {
+    Reply::Freeform {
         name: "exec".into(),
         input: code,
-    };
+    }
+}
+
+fn codex_set_up() -> Reply {
+    let arguments = set_up_arguments();
+    exec(format!(
+        "const r = await tools.mcp__x100__set_up_project({arguments}); text(JSON.stringify(r));"
+    ))
+}
+
+fn codex_replies(task: TaskId) -> Vec<Reply> {
     let spec = json!({ "spec": "brd", "status": "draft", "body": BRD });
     let report = json!({ "task": task, "outcome": "completed", "summary": "The BRD is written." });
     vec![
@@ -288,8 +361,8 @@ async fn a_brief_runs_on_codexs_terminal_and_is_followed_live() {
     let Some(r) = Real::start(Program::Codex).await else {
         return;
     };
-    let ran = run_brief(&r, codex_replies).await;
-    let worktree = x100_store::Git::new(r.dir.path().join("todo")).worktree_path(ran.ceo);
+    let ran = run_brief(&r, codex_set_up(), codex_replies).await;
+    let worktree = x100_store::Git::new(r.projects_root().join(NAME.1)).worktree_path(ran.ceo);
     assert_eq!(
         std::fs::read_to_string(worktree.join("todo.md")).unwrap(),
         "- buy milk\n"
@@ -298,11 +371,12 @@ async fn a_brief_runs_on_codexs_terminal_and_is_followed_live() {
         !worktree.join("../escaped.md").exists(),
         "a write left the worktree"
     );
-    let told = r.provider.requests()[1].body["input"].to_string();
-    assert!(
-        told.contains("patch rejected: writing outside of the project"),
-        "{told}"
-    );
+    let told = r.provider.requests().iter().any(|q| {
+        q.body["input"]
+            .to_string()
+            .contains("patch rejected: writing outside of the project")
+    });
+    assert!(told, "the patch outside the worktree was refused");
     let pids = pids_of(&r, ran.driver);
     assert_eq!(
         pids.len(),
@@ -317,7 +391,7 @@ async fn a_codex_terminal_driver_left_by_a_killed_daemon_is_gone_after_a_restart
     let Some(mut r) = Real::start(Program::Codex).await else {
         return;
     };
-    let ran = run_brief(&r, codex_replies).await;
+    let ran = run_brief(&r, codex_set_up(), codex_replies).await;
     let pids = pids_of(&r, ran.driver);
     assert_eq!(pids.len(), 2, "{pids:?}");
     r.daemon.kill9();
@@ -389,11 +463,7 @@ async fn a_terminal_harness_whose_login_is_missing_is_passed_over_and_a_new_proj
 
     // A project with the daemon's defaults allows the cheapest model of each terminal harness
     // and nothing headless, and its CEO works at low to medium effort.
-    let project = r
-        .client
-        .create_project(r.dir.path().join("defaults").display().to_string(), None)
-        .await
-        .unwrap();
+    let project = r.client.create_project(None).await.unwrap();
     let state = r
         .client
         .wait_for(PATIENCE, |s| s.projects.get(&project)?.project().cloned())

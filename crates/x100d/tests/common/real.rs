@@ -187,9 +187,9 @@ impl Real {
             .expect("the terminal harness is registered")
     }
 
-    /// A project that allows nothing yet, so the CEO's driver starts only once the replies are
-    /// queued and [`Real::allow`] is called. A turn that neither reports nor waits gives its task
-    /// up at once, so a reply that only talks is the turn's last.
+    /// A new project that allows nothing yet, so the CEO's driver starts only once the replies
+    /// are queued and [`Real::allow`] is called. A turn that neither reports nor waits gives its
+    /// task up at once, so a reply that only talks is the turn's last.
     pub async fn project(&self) -> ProjectId {
         self.client
             .request(x100_proto::SetDaemonSetting {
@@ -197,7 +197,6 @@ impl Real {
             })
             .await
             .unwrap();
-        let path = self.dir.path().join("todo");
         let settings = Settings {
             ask_me_about: AskMeAbout::HighRiskOnly,
             budget: Money::from_dollars(5),
@@ -207,8 +206,7 @@ impl Real {
         let project = self
             .client
             .request(CreateProject {
-                path: path.display().to_string(),
-                name: None,
+                dir: None,
                 settings: Some(settings),
             })
             .await
@@ -249,6 +247,11 @@ impl Real {
             })
     }
 
+    /// Where the daemon makes code directories.
+    pub fn projects_root(&self) -> PathBuf {
+        self.dir.path().join("projects")
+    }
+
     pub async fn ceo_waits_for_a_driver(&self) -> AgentId {
         self.until("the CEO waits for a driver", |p| {
             let ceo = p.project()?.ceo;
@@ -269,8 +272,18 @@ impl Real {
     }
 }
 
+/// The data directory and, beside it, the projects root, both inside the test's directory.
 fn args(data: &std::path::Path) -> Vec<std::ffi::OsString> {
-    vec!["--data-dir".into(), data.into()]
+    let root = data
+        .parent()
+        .expect("the test's directory")
+        .join("projects");
+    vec![
+        "--data-dir".into(),
+        data.into(),
+        "--projects-root".into(),
+        root.into(),
+    ]
 }
 
 async fn connect(data: &std::path::Path) -> Client {

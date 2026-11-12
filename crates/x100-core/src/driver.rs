@@ -164,6 +164,9 @@ pub enum RetireReason {
     /// It is healthy, but between turns it no longer fits its agent's work. Retired, not handed
     /// off: between turns there is nothing left for a last turn to write.
     Unfit(Unfit),
+    /// It worked in a scratch directory because the project had no code yet. The project is set
+    /// up now, and a driver cannot move into the code directory, so a new one starts there.
+    ProjectSetUp,
 }
 
 /// Why a warm driver no longer fits its agent's work.

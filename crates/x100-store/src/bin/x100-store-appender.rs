@@ -39,7 +39,6 @@ fn main() {
     let ceo = AgentId::from_u128(1);
     if store.log.last().is_none() {
         let created = ProjectEvent::Created {
-            name: "crash test".into(),
             ceo,
             charter: "survive".into(),
             effort: EffortRange::FULL,

@@ -10,13 +10,27 @@ use x100_core::money::Money;
 use x100_core::project::SettingChange;
 use x100_proto::{
     AddCredential, ChangeProjectSetting, DecideAction, ListMemories, ListSkills, ListTrials, LogId,
-    LogPage, Memories, Page, RaiseTask, ReadLog, RemoveCredential, RemoveFile, ReplaceCredential,
-    ScopeCredential, Secret, SetEffortRange, SetLeadBudget, Skills, Trials,
+    LogPage, Memories, Page, RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject,
+    ReplaceCredential, ScopeCredential, Secret, SetEffortRange, SetLeadBudget, Skills, Trials,
 };
 
 use crate::{Client, ClientError};
 
 impl Client {
+    /// Renames a project its CEO has set up.
+    pub async fn rename_project(
+        &self,
+        project: ProjectId,
+        name: impl Into<String>,
+    ) -> Result<(), ClientError> {
+        self.request(RenameProject {
+            project,
+            name: name.into(),
+        })
+        .await
+        .map(drop)
+    }
+
     /// A page of a project's log, in the order `page` asks for.
     pub async fn read_events(
         &self,

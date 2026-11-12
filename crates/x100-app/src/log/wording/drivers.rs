@@ -108,6 +108,9 @@ pub(super) fn driver_event(n: &Names, driver: DriverId, event: &DriverEvent) -> 
                 RetireReason::CannotCompact => "it could not compact",
                 RetireReason::AgentRetired => "the agent was retired",
                 RetireReason::Unfit(why) => unfit(*why),
+                RetireReason::ProjectSetUp => {
+                    "the project was set up, and work goes on in its code directory"
+                }
             }
         ),
         DriverEvent::Stopped(reason) => {

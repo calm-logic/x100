@@ -4,6 +4,7 @@ mod team;
 mod work;
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +20,7 @@ use crate::id::{ActionId, AgentId, DriverId, FileId, JobId, MessageId, TaskId, T
 use crate::job::ProjectJob;
 use crate::ledger::{Budgets, Spend};
 use crate::money::Usage;
-use crate::project::{SettingChange, Settings};
+use crate::project::{Identity, SettingChange, Settings};
 use crate::spec::SpecKind;
 use crate::team::{Team, TeamOp};
 use crate::time::Timestamp;
@@ -45,7 +46,11 @@ pub enum ProjectPart {
 /// The project itself, once its log has created it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
-    pub name: String,
+    /// Its name and intent, from the moment the CEO sets it up. `None` while it is not set up.
+    pub identity: Option<Identity>,
+    /// Where its repository is. `None` until it is set up, unless it started on an existing
+    /// folder.
+    pub code_dir: Option<PathBuf>,
     pub ceo: AgentId,
     pub created: Timestamp,
     pub settings: Settings,
@@ -53,6 +58,17 @@ pub struct Project {
     pub preview: Option<String>,
     /// The tree, each agent's effort range and each lead's budget.
     pub team: Team,
+}
+
+impl Project {
+    /// The name the CEO gave it, once it is set up.
+    pub fn name(&self) -> Option<&str> {
+        self.identity.as_ref().map(|i| i.name.as_str())
+    }
+
+    pub fn is_set_up(&self) -> bool {
+        self.identity.is_some()
+    }
 }
 
 /// Everything every tab and view of one project draws, folded from its log.
@@ -151,12 +167,14 @@ impl ProjectState {
         }
         match event {
             P::Created {
-                name,
                 ceo,
                 charter,
                 effort,
                 settings,
-            } => self.create(s.at, name, *ceo, charter, *effort, settings, ch),
+            } => self.create(s.at, *ceo, charter, *effort, settings, ch),
+            P::CodeDirSet { dir } => self.code_dir_set(dir, ch),
+            P::SetUp(identity) => self.identify(identity, false, ch),
+            P::Renamed(identity) => self.identify(identity, true, ch),
             P::SettingChanged(change) => self.setting(change, ch),
             P::PreviewSet { url } => {
                 self.project_mut()?.preview = Some(url.clone());
@@ -210,11 +228,9 @@ impl ProjectState {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn create(
         &mut self,
         at: Timestamp,
-        name: &str,
         ceo: AgentId,
         charter: &str,
         effort: EffortRange,
@@ -225,7 +241,8 @@ impl ProjectState {
             return Err((None, Corrupt::AlreadyCreated));
         }
         self.project = Some(Project {
-            name: name.to_owned(),
+            identity: None,
+            code_dir: None,
             ceo,
             created: at,
             settings: settings.clone(),
@@ -244,6 +261,35 @@ impl ProjectState {
             ch.part(part);
         }
         ch.record(Record::Agent(ceo));
+        Ok(())
+    }
+
+    fn code_dir_set(&mut self, dir: &Path, ch: &mut Ch) -> Result<(), Fail> {
+        let project = self.project_mut()?;
+        if project.code_dir.is_some() {
+            return Err((None, Corrupt::CodeDirAlreadySet));
+        }
+        project.code_dir = Some(dir.to_owned());
+        ch.part(ProjectPart::Settings).part(ProjectPart::Files);
+        Ok(())
+    }
+
+    /// The first naming sets the project up; a later one renames it. Neither moves anything.
+    fn identify(&mut self, identity: &Identity, rename: bool, ch: &mut Ch) -> Result<(), Fail> {
+        let project = self.project_mut()?;
+        match (rename, project.is_set_up()) {
+            (false, true) => return Err((None, Corrupt::AlreadySetUp)),
+            (true, false) => return Err((None, Corrupt::NotSetUp)),
+            _ => {}
+        }
+        project.identity = Some(identity.clone());
+        for part in [
+            ProjectPart::Settings,
+            ProjectPart::Chat,
+            ProjectPart::Sidebar,
+        ] {
+            ch.part(part);
+        }
         Ok(())
     }
 

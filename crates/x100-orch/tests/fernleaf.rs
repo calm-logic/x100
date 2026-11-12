@@ -23,11 +23,16 @@ use x100_core::wait::{WaitEnd, WaitOn};
 const SCRIPT: &str = include_str!("scripts/fernleaf.toml");
 const DAY: Duration = Duration::from_secs(24 * 3600);
 
-/// The whole run, from the brief to the second morning's smoke tests.
+/// The whole run, from the builder's first message to a new project to the second morning's
+/// smoke tests.
 async fn run() -> World {
     // The router puts every agent on the cheaper model, whose warm period an hour outlasts.
-    let w = World::new(Setup::new(SCRIPT)).await;
-    w.brief("Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.")
+    let w = World::new(Setup {
+        start: Start::New,
+        ..Setup::new(SCRIPT)
+    })
+    .await;
+    w.say("Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.")
         .await;
     w.settle().await;
 

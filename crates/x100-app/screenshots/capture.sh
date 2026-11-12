@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The real-window check: x100d on the fake clock with the Fernleaf script, x100-app on the X11
-# display, driven through XTEST (xtest.py) and captured with xwd. Builds nothing: run
+# display, driven through the X server (xtest.py) and captured with xwd. Builds nothing: run
 # `cargo build -p x100d -p x100-app --bins` first. Coordinates assume the app's 1400x900 window.
 #
 # Usage: capture.sh [OUT_DIR]   (default: this directory)
@@ -21,7 +21,7 @@ stop() {
 }
 trap stop EXIT
 
-"$bin/x100d" --data-dir "$work/data" --scripts-dir "$root/crates/x100-orch/tests/scripts" \
+"$bin/x100d" --data-dir "$work/data" --projects-root "$work/projects" --scripts-dir "$root/crates/x100-orch/tests/scripts" \
   --fake-harness "$bin/x100d-fake-harness" --fake-clock 1794387600000 >"$work/daemon.log" 2>&1 &
 daemon=$!
 until [[ -S $work/data/x100d.sock ]]; do sleep 0.2; done
@@ -45,16 +45,21 @@ ffmpeg -loglevel error -f lavfi -i "color=c=0x2fd27a:s=160x120" -vf "drawbox=x=4
   -frames:v 1 "$work/sketch.png"
 printf '# Notes\nForest greens, maybe.\n' >"$work/notes.md"
 
-# A project from the sidebar.
-drive click 60 67 sleep 0.5 type "Fernleaf" click 80 110 type "$work/fernleaf" key Return sleep 2
+# No project: the window opens on the CEO and the box for the first message, with no form.
+shot new-project
+# "hi" creates the project, listed as "New project" until its CEO names it; the CEO only answers.
+drive click 785 470 sleep 0.5 type "hi" key Return sleep 5
+shot new-project-hi
 
-# First run: the brief, with both files attached by path (WSL has no file chooser portal).
-drive click 601 558 sleep 0.5 type "$work/sketch.png" key Return sleep 1.5
-drive click 601 586 sleep 0.5 type "$work/notes.md" key Return sleep 1.5
-drive click 785 440 type "Launch Fernleaf" key shift+Return \
+# The brief, in the chat's box, with both files attached by path (WSL has no file chooser portal).
+drive click 300 858 sleep 0.5 type "$work/sketch.png" key Return sleep 1.5
+drive click 300 858 sleep 0.5 type "$work/notes.md" key Return sleep 1.5
+drive click 380 759 type "Launch Fernleaf" key shift+Return \
   type "A landing page for Fernleaf, a plant shop, with a waitlist." sleep 0.5
-shot first-run
+shot brief
+# The CEO sets the project up as Fernleaf, and its team forms.
 drive key Return sleep 6
+shot named
 shot team
 
 # Opening agents, down to one that runs none. Leads are listed Marketing, Product, Tech, under the
@@ -90,10 +95,11 @@ drive click 957 21 sleep 1
 shot preview
 drive click 1015 21 sleep 1
 shot infra
-# Settings: change Ask me about, which reaches the daemon and the Log; then the Credentials part.
-drive click 1073 21 sleep 1 click 1331 78 sleep 1
+# Settings: the project's name, intent and code directory first, then Ask me about, changed here,
+# which reaches the daemon and the Log; then the Credentials part at the foot of the tab.
+drive click 1073 21 sleep 1 click 1331 236 sleep 1
 shot settings
-drive click 1000 851 sleep 0.7 scroll 1000 500 40 sleep 0.7
+drive scroll 1000 500 40 sleep 0.7 click 1000 876 sleep 0.7 scroll 1000 500 40 sleep 0.7
 shot credentials
 drive click 901 21 sleep 1.5
 shot log

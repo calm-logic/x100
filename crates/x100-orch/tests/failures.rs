@@ -69,7 +69,7 @@ steps = [{ text = "Still thinking." }]
 /// The brief names the trouble in one word; the CEO passes it on as the worker's task title.
 async fn delegate(trouble: &str) -> (World, TaskId) {
     let w = World::new(Setup::new(SCRIPT)).await;
-    let brief = w.brief(&format!("Trouble: {trouble}")).await;
+    let brief = w.send(&format!("Trouble: {trouble}")).await;
     (w, brief)
 }
 

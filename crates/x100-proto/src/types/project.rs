@@ -23,8 +23,10 @@ pub struct ListProjects {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSummary {
     pub project: ProjectId,
-    pub name: String,
-    pub path: String,
+    /// `None` until the CEO sets the project up.
+    pub name: Option<String>,
+    /// The code directory, once it has one.
+    pub dir: Option<String>,
     /// An agent is at work.
     pub live: bool,
     pub agents: u32,
@@ -42,13 +44,19 @@ pub struct GetProject {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateProject {
-    /// The directory the project lives in. Created if missing; a git repository is started in it
-    /// if it has none.
-    pub path: String,
-    /// Defaults to the directory's name.
-    pub name: Option<String>,
+    /// An existing folder to start the project on, as an absolute path: its code directory from
+    /// the start, where a git repository is started if it has none. Without it the project has
+    /// no code until its CEO sets it up.
+    pub dir: Option<String>,
     /// Defaults to the daemon's.
     pub settings: Option<Settings>,
+}
+
+/// The builder renames a project its CEO has set up. The intent and the code directory stay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameProject {
+    pub project: ProjectId,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,21 +79,6 @@ pub struct Reflect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reflecting {
     /// The reflection task the builder delegated to the CEO.
-    pub task: TaskId,
-}
-
-/// The first message of a project: the brief, with any files attached.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SendBrief {
-    pub project: ProjectId,
-    pub body: String,
-    pub attachments: Vec<FileId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefSent {
-    pub message: MessageId,
-    /// The task the builder delegated to the CEO with it.
     pub task: TaskId,
 }
 

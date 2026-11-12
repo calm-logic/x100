@@ -30,7 +30,7 @@ use x100_core::spec::{SpecKind, SpecStatus};
 use x100_core::task::{Outcome, TaskState};
 use x100_core::time::Timestamp;
 use x100_proto::{
-    CancelJob, CreateProject, ErrorCode, GetProject, ReadStartPack, SendBrief, SendChat, SetClock,
+    CancelJob, CreateProject, ErrorCode, GetProject, ReadStartPack, SendChat, SetClock,
     SetDaemonSetting,
 };
 
@@ -54,6 +54,8 @@ impl Run {
         let daemon = DaemonProc::spawn(vec![
             "--data-dir".into(),
             env.data.clone().into(),
+            "--projects-root".into(),
+            env.projects_root().into(),
             "--scripts-dir".into(),
             SCRIPTS.into(),
             "--fake-harness".into(),
@@ -96,8 +98,7 @@ impl Run {
         };
         let project = client
             .request(CreateProject {
-                path: env.project_dir("fernleaf"),
-                name: Some("Fernleaf".into()),
+                dir: None,
                 settings: Some(settings),
             })
             .await
@@ -199,14 +200,14 @@ async fn fernleaf_runs_through_the_daemon() {
     let mut run = Run::start().await;
     let project = run.project;
     run.client
-        .request(SendBrief {
+        .send_chat(
             project,
-            body: "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist."
-                .into(),
-            attachments: vec![],
-        })
+            "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
+            vec![],
+            None,
+        )
         .await
-        .expect("the brief is sent");
+        .expect("the first message is sent");
     run.settle().await;
 
     // The CEO kept working while its question was open: it accepted the site meanwhile.
@@ -328,8 +329,14 @@ async fn fernleaf_runs_through_the_daemon() {
     let smoke = s.job(smoke).unwrap();
     assert_eq!((smoke.fired, smoke.state), (2, JobState::Cancelled));
 
-    // What the workers wrote is on the project's main branch.
-    let dir = run.env.project_dir("fernleaf");
+    // The CEO set the project up from the first message, in a code directory under the projects
+    // root, and what the workers wrote is on its main branch.
+    assert_eq!(s.project().unwrap().name(), Some("Fernleaf"));
+    let dir = run.env.projects_root().join("fernleaf");
+    assert_eq!(
+        s.project().unwrap().code_dir.as_deref(),
+        Some(dir.as_path())
+    );
     for file in [
         "site/index.html",
         "site/mobile.css",

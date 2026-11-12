@@ -51,7 +51,7 @@ steps = [
 "#,
     );
     let w = World::new(Setup::new(&script)).await;
-    let brief = w.brief("Check the site").await;
+    let brief = w.send("Check the site").await;
     w.settle().await;
     let s = w.state();
     assert!(matches!(
@@ -121,7 +121,7 @@ steps = [
 "#,
     );
     let w = World::new(Setup::new(&script)).await;
-    let brief = w.brief("Morning check").await;
+    let brief = w.send("Morning check").await;
     w.settle().await;
     let first = w.state().agent(w.ceo).unwrap().drivers[0];
     assert_eq!(w.state().driver(first).unwrap().state, DriverState::Warm);
@@ -177,7 +177,7 @@ steps = [{ text = "Starting the long job." }, { stall = true }]
 "#,
     );
     let w = World::new(Setup::new(&script)).await;
-    let brief = w.brief("Long job").await;
+    let brief = w.send("Long job").await;
     w.until("the first turn is running", |s| {
         s.drivers().any(|d| d.state == DriverState::Running)
     })
@@ -253,7 +253,7 @@ steps = [
 "#,
     );
     let w = World::new(Setup::new(&script)).await;
-    let brief = w.brief("Watch both").await;
+    let brief = w.send("Watch both").await;
     w.settle().await;
     let ceo = w.state().agent(w.ceo).unwrap().clone();
     assert_eq!(ceo.state, AgentState::Waiting(Waiting::OnWaits));

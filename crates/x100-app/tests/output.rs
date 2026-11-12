@@ -1,19 +1,17 @@
 //! An agent's view in the window, against a real daemon running the Fernleaf script on the fake
 //! clock: its output arriving as the script runs, one continuous output across a change of
-//! driver with the change marked, its waits and jobs as the client holds them, a job cancelled
-//! from the view, and the output of an agent that runs agents, one switch away from them.
+//! driver with the change marked, and the output of an agent that runs agents, one switch away
+//! from them.
 
 mod common;
 
 use common::*;
 use gpui::{Entity, VisualTestContext, WindowHandle};
 use x100_app::shell::Shell;
-use x100_app::team::{AgentOutput, FactsModel, SegmentShown, Shown, TeamView};
+use x100_app::team::{AgentOutput, SegmentShown, Shown, TeamView};
 use x100_client::Client;
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, ProjectId};
-use x100_core::job::JobState;
-use x100_core::party::Actor;
 use x100_proto::SetClock;
 
 const BRIEF: &str = "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.";
@@ -58,10 +56,6 @@ fn shown(vcx: &VisualTestContext, output: &Entity<AgentOutput>) -> Vec<SegmentSh
     vcx.read(|cx| output.read(cx).shown(cx))
 }
 
-fn facts(vcx: &VisualTestContext, output: &Entity<AgentOutput>) -> Option<FactsModel> {
-    vcx.read(|cx| output.read(cx).facts().read(cx).shown().cloned())
-}
-
 /// Clicks a row of the Team tab as soon as it is listed, to catch its agent at work.
 fn open(vcx: &mut VisualTestContext, row: &'static str) {
     let until = std::time::Instant::now() + WAIT;
@@ -81,8 +75,8 @@ fn started(run: &mut Run) -> (Client, ProjectId, WindowHandle<Shell>, VisualTest
     let project = run.fernleaf_project(&client);
     let (window, mut vcx) = run.open(client.clone());
     run.rt
-        .block_on(client.send_brief(project, BRIEF, vec![]))
-        .expect("the brief is sent");
+        .block_on(client.send_chat(project, BRIEF, vec![], None))
+        .expect("the first message is sent");
     pump_until(&mut vcx, "the main panel opens", |vcx| {
         bounds(vcx, "tab-Team").is_some()
     });
@@ -141,11 +135,6 @@ fn an_agent_three_levels_down_shows_its_output_as_it_works() {
             .unwrap_or_else(|| panic!("{part:?} is not where it belongs in\n{log}"));
         at += found + part.len();
     }
-    // The facts are the client's, once the window has taken in what it holds.
-    pump_until(&mut vcx, "the facts follow the state", |vcx| {
-        let p = state(&client, project);
-        facts(vcx, &output) == FactsModel::read(&p, &client.state().daemon, migrations)
-    });
 }
 
 #[test]
@@ -162,34 +151,6 @@ fn research_carries_on_across_two_drivers_with_the_change_marked() {
             .first()
             .is_some_and(|s| s.text.contains("── turn ended ──"))
     });
-
-    // What it waits for and the job it scheduled, as the client holds them.
-    let p = state(&client, project);
-    let research = role(&p, "Research");
-    let daemon = client.state().daemon;
-    let model = facts(&vcx, &output).expect("facts");
-    assert_eq!(
-        Some(&model),
-        FactsModel::read(&p, &daemon, research).as_ref()
-    );
-    let wait = p.agent(research).unwrap().waits.values().next().unwrap();
-    assert_eq!(
-        model.waits,
-        [format!(
-            "its job: Pricing pages update at noon; look again., until {}",
-            x100_app::words::moment(wait.deadline)
-        )]
-    );
-    let job = p.jobs_of(research).next().expect("its job");
-    assert_eq!(model.jobs.len(), 1);
-    assert_eq!(model.jobs[0].job, job.job.id);
-    assert!(
-        model.jobs[0]
-            .text
-            .starts_with("Wake itself: Pricing pages update at noon; look again. · at "),
-        "{:?}",
-        model.jobs[0]
-    );
 
     // An hour on, the job wakes Research on a new driver. Its output carries on in the same log,
     // live, with the change marked.
@@ -217,42 +178,6 @@ fn research_carries_on_across_two_drivers_with_the_change_marked() {
          Driver 1 ended: retired, warm too long."
     );
     assert!(log.find(marker).unwrap() < log.find("Two of three price per seat.").unwrap());
-    pump_until(&mut vcx, "the facts follow the state", |vcx| {
-        let p = state(&client, project);
-        facts(vcx, &output) == FactsModel::read(&p, &client.state().daemon, research)
-    });
-    let drivers = facts(&vcx, &output).unwrap().drivers;
-    assert_eq!(drivers.len(), 2, "{drivers:?}");
-    assert!(
-        drivers[1].ends_with("· retired, warm too long"),
-        "{drivers:?}"
-    );
-}
-
-#[test]
-fn a_job_cancelled_from_the_agents_view_reaches_the_daemon() {
-    let mut run = Run::start();
-    let (client, project, _window, mut vcx) = started(&mut run);
-    run.settle(&client, project);
-    open(&mut vcx, "agent-Product");
-    open(&mut vcx, "agent-Research");
-    pump_until(&mut vcx, "the job's Cancel is drawn", |vcx| {
-        bounds(vcx, "cancel-job-0").is_some()
-    });
-    let p = state(&client, project);
-    let research = role(&p, "Research");
-    let job = p.jobs_of(research).next().expect("its job").job.id;
-    click(&mut vcx, "cancel-job-0");
-    run.rt
-        .block_on(client.wait_for(WAIT, |s| {
-            let j = s.projects.get(&project)?.job(job)?;
-            (j.state == JobState::Cancelled).then_some(j.cancelled_by)
-        }))
-        .map(|by| assert_eq!(by, Some(Actor::Builder)))
-        .expect("the daemon cancelled the job");
-    pump_until(&mut vcx, "the job leaves the view", |vcx| {
-        bounds(vcx, "cancel-job-0").is_none()
-    });
 }
 
 #[test]

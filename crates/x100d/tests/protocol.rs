@@ -26,6 +26,7 @@ impl Local {
     async fn start(tweak: impl FnOnce(&mut x100d::Config)) -> Local {
         let env = Env::new();
         let mut config = x100d::Config::new(&env.data);
+        config.projects_root = env.projects_root();
         config.scripts_dir = Some(env.scripts.clone());
         config.fake_program = Some(env!("CARGO_BIN_EXE_x100d-fake-harness").into());
         tweak(&mut config);
@@ -444,7 +445,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "projects.get",
         "projects.create",
         "projects.set",
-        "chat.brief",
+        "projects.rename",
         "chat.send",
         "tasks.raise",
         "files.upload",
@@ -477,37 +478,48 @@ async fn projects_files_tasks_and_settings_work_through_the_protocol() {
     let d = Local::start(|_| {}).await;
     let c = d.client().await;
 
-    // Creating: a relative path and a path twice are refused.
-    let bad = c
-        .request(CreateProject {
-            path: "relative".into(),
-            name: None,
-            settings: None,
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(rpc_code(bad), ErrorCode::Rejected);
+    // Starting on a folder: a relative path, a missing folder and a folder twice are refused.
+    for dir in ["relative".to_owned(), d.env.project_dir("missing")] {
+        let bad = c
+            .request(CreateProject {
+                dir: Some(dir),
+                settings: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(rpc_code(bad), ErrorCode::Rejected);
+    }
     let project = create_project(&c, &d.env, "plants").await;
     let again = c
         .request(CreateProject {
-            path: d.env.project_dir("plants"),
-            name: None,
+            dir: Some(d.env.project_dir("plants")),
             settings: None,
         })
         .await
         .unwrap_err();
     assert_eq!(rpc_code(again), ErrorCode::Rejected);
 
+    // It has its folder and no name until its CEO sets it up, so the builder cannot rename it.
     let list = c.request(ListProjects {}).await.unwrap();
     assert_eq!(list.projects.len(), 1);
+    let plants = std::fs::canonicalize(d.env.project_dir("plants")).unwrap();
     assert_eq!(
         (
-            list.projects[0].name.as_str(),
+            list.projects[0].name.as_deref(),
+            list.projects[0].dir.as_deref(),
             list.projects[0].agents,
             list.projects[0].live
         ),
-        ("plants", 1, false)
+        (None, Some(&*plants.to_string_lossy()), 1, false)
     );
+    let early = c
+        .request(RenameProject {
+            project,
+            name: "Plants".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(rpc_code(early), ErrorCode::WrongState);
     let got = c.request(GetProject { project }).await.unwrap();
     // The client follows the log on its own, so compare once it has applied what the daemon
     // answered from.
@@ -564,7 +576,7 @@ async fn projects_files_tasks_and_settings_work_through_the_protocol() {
     .await
     .unwrap();
 
-    // Files: upload, read, attach to the brief, remove.
+    // Files: upload, read, attach to a message, remove.
     let up = c
         .request(UploadFile {
             project,
@@ -585,32 +597,19 @@ async fn projects_files_tasks_and_settings_work_through_the_protocol() {
     assert_eq!(read.data, Bytes(vec![1, 2, 3]));
     let ghost = x100_core::id::FileId::from_u128(5);
     let no = c
-        .request(SendBrief {
-            project,
-            body: "b".into(),
-            attachments: vec![ghost],
-        })
+        .send_chat(project, "b", vec![ghost], None)
         .await
         .unwrap_err();
     assert_eq!(rpc_code(no), ErrorCode::NotFound);
-    let brief = c
-        .request(SendBrief {
-            project,
-            body: "A site for plants.\nWith a waitlist.".into(),
-            attachments: vec![up.file.id],
-        })
-        .await
-        .unwrap();
-    let twice = c
-        .request(SendBrief {
-            project,
-            body: "again".into(),
-            attachments: vec![],
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(rpc_code(twice), ErrorCode::WrongState);
-    // The brief is delegated to the CEO as a task, and the CEO answers it.
+    c.send_chat(
+        project,
+        "A site for plants.\nWith a waitlist.",
+        vec![up.file.id],
+        None,
+    )
+    .await
+    .unwrap();
+    // The project is not set up, so the message opens no task, and the CEO answers it.
     let s = c
         .wait_for(WAIT, |s| {
             let p = &s.projects[&project];
@@ -620,13 +619,7 @@ async fn projects_files_tasks_and_settings_work_through_the_protocol() {
         })
         .await
         .unwrap();
-    let task = s.task(brief.task).unwrap();
-    assert_eq!(task.task.title, "A site for plants.");
-    assert!(
-        task.state
-            .assignment()
-            .is_some_and(|a| a.assignee == s.project().unwrap().ceo)
-    );
+    assert_eq!(s.tasks().count(), 0);
     let reply = s
         .messages()
         .find(|m| m.message.route == Route::CeoToBuilder)

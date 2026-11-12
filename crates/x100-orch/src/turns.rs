@@ -81,6 +81,8 @@ pub(crate) struct Close {
     pub reply_to: Option<MessageId>,
     pub checkpoint: Option<CommitId>,
     pub limit: u32,
+    /// The driver works in the scratch directory, from before the project had code.
+    pub scratch: bool,
 }
 
 /// The end of a turn, and whether the router ends its driver with it. Decided in the same append
@@ -105,7 +107,10 @@ pub(crate) fn close(
         carried: c.carried,
         accepted: false,
     };
+    let set_up = state.project().is_some_and(|p| p.code_dir.is_some());
     let end: Option<RetireReason> = match route::upkeep_in(shared, state, &warm, clock.now()) {
+        // It cannot move into the code directory, so the agent's next turn is on a new driver.
+        _ if c.scratch && set_up => Some(RetireReason::ProjectSetUp),
         Upkeep::End(why) => Some(why),
         Upkeep::Keep => None,
     };
@@ -175,7 +180,14 @@ pub(crate) fn ended(state: &ProjectState, clock: &dyn Clock, e: Ending) -> Event
     if let Some(a) = state.agent(e.agent) {
         let mut closed: Option<TaskId> = None;
         let task = state.current_task(e.agent).map(|t| t.task.id);
-        if let Some(task) = task.filter(|_| a.waits.is_empty()) {
+        // A task that has not reached the agent yet, such as the one setting the project up just
+        // opened, brings its own turn, so it needs no nudge.
+        let to_come = |task: TaskId| {
+            a.inbox
+                .waiting()
+                .any(|i| a.items.get(&i) == Some(&InboxItem::Task { task }))
+        };
+        if let Some(task) = task.filter(|t| a.waits.is_empty() && !to_come(*t)) {
             let turns = nudged(state, e.agent, &e.given, task) + 1;
             if turns >= e.limit {
                 let summary = format!(

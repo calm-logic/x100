@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # The real-window check of the end-to-end run, as capture.sh does it but on the builder's own
 # logins: x100d on the real clock with a new project's default settings, x100-app on an X11
-# display, driven through XTEST (xtest.py) and captured with xwd. It sends the todo brief that
-# tests/real_e2e.rs sends, so it spends the builder's subscription: run it only when asked to.
-# Builds nothing: run `cargo build -p x100d -p x100-app --bins` first. Coordinates assume the
-# app's 1400x900 window.
+# display, driven through the X server (xtest.py) and captured with xwd. It says "hi" to a new
+# project, then sends the todo brief that tests/real_e2e.rs sends, so it spends the builder's
+# subscription: run it only when asked to. Builds nothing: run
+# `cargo build -p x100d -p x100-app --bins` first. Coordinates assume the app's 1400x900 window.
 #
 # Usage: capture-e2e.sh WORK_DIR [OUT_DIR] [DISPLAY]
-#   WORK_DIR  keeps the project, the daemon's and the app's output. They can hold the builder's
-#             account id, so it belongs outside the repository.
+#   WORK_DIR  keeps the project's code (under WORK_DIR/projects) and the daemon's and the app's
+#             output. They can hold the builder's account id, so it belongs outside the repository.
 #   OUT_DIR   where the screenshots go (default: ./e2e beside this script). Check each for an
 #             account id, an email or a home path before keeping it in the repository: the
 #             program's terminal shows its working directory, which is under WORK_DIR.
@@ -24,7 +24,6 @@ mkdir -p "$work" "$out"
 # Codex will not set up its sandbox in a home under /tmp, so the daemon's data is in the target
 # directory, which git ignores.
 data=$(mktemp -d "$root/target/tmp/e2e-window.XXXXXX")
-project=$work/todo
 daemon= app= xvfb=
 
 stop() {
@@ -48,7 +47,7 @@ fi
 brief="Create a todo app as a proof of concept: one index.html with inline CSS and JavaScript, no build step and no dependencies. I can add a todo, tick it done, and delete it, and the list survives a reload."
 
 env -u X100_CLAUDE_LOGIN -u X100_CODEX_LOGIN -u ANTHROPIC_BASE_URL -u OPENAI_BASE_URL \
-  "$bin/x100d" --data-dir "$data" >"$work/daemon.log" 2>&1 &
+  "$bin/x100d" --data-dir "$data" --projects-root "$work/projects" >"$work/daemon.log" 2>&1 &
 daemon=$!
 until [[ -S $data/x100d.sock ]]; do sleep 0.2; done
 
@@ -82,11 +81,22 @@ until_true() {
   done
 }
 
-# A project from the sidebar, then the brief in the first-run box.
-drive click 60 67 sleep 0.5 type "Todo" click 80 110 type "$project" key Return sleep 2
-drive click 785 440 type "$brief" sleep 0.5
-shot first-run
+# No project: the box for the first message. "hi" creates the project, which the CEO answers on
+# a driver of its own, without setting it up.
+shot new-project
+drive click 785 470 sleep 0.5 type "hi" key Return
+until_true 'compgen -G "$data/harnesses/*-terminal/drv_*" >/dev/null' 120
+sleep 30
+shot new-project-hi
+
+# The brief, in the chat's box. The CEO sets the project up from it, which makes its code
+# directory, and goes on in its worktree on a new driver.
+drive click 380 815 sleep 0.5 type "$brief" sleep 0.5
+shot brief
 drive key Return
+until_true 'compgen -G "$work/projects/*/.git" >/dev/null' 600
+project=$(compgen -G "$work/projects/*" | head -1)
+shot named
 
 # The CEO at work, once its driver's program is up: the Team tab opened on it, then its live
 # terminal a little later. A small brief can be done in under half a minute.

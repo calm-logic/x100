@@ -127,6 +127,14 @@ pub enum ToolCall {
     },
     /// The CEO only, for reflection.
     ProposeChange(Proposal),
+    /// The CEO only. The first call sets the project up: it records the name and the intent,
+    /// makes the code directory, and opens the builder's task with `brief` as what is asked. A
+    /// later call changes the name or the intent and nothing else, so `brief` is for the first.
+    SetUpProject {
+        name: String,
+        intent: String,
+        brief: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

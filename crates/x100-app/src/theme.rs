@@ -7,7 +7,7 @@ use gpui::{Hsla, Rgba, rgb, rgba};
 pub fn bg() -> Rgba {
     rgb(0x0e0e10)
 }
-/// A panel slightly lifted from the window: code blocks, the brief box.
+/// A panel slightly lifted from the window: code blocks, the box for a first message.
 pub fn raised() -> Rgba {
     rgb(0x161618)
 }

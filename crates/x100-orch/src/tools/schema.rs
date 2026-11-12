@@ -125,6 +125,22 @@ pub(crate) fn schema(tool: Tool) -> Value {
             &[],
         ),
         Tool::SetPreview => object(&[("url", text("The address to preview."))], &[]),
+        Tool::SetUpProject => object(
+            &[
+                (
+                    "name",
+                    text("A short name for the project, such as \"Todo app\"."),
+                ),
+                ("intent", text("One line saying what the project is for.")),
+            ],
+            &[(
+                "brief",
+                text(
+                    "The first time only: what the builder asks for, as you understand it from \
+                     the conversation, written as the task you will work from.",
+                ),
+            )],
+        ),
         Tool::LoadSkill => object(&[("skill", skill_ref())], &[]),
         Tool::StartProcess => object(
             &[

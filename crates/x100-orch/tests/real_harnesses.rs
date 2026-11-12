@@ -98,11 +98,11 @@ impl Run {
         }
         let clock = FakeClock::new(common::START);
         let shared: Arc<dyn Clock> = Arc::new(clock);
-        let store = ProjectStore::open(&dir.path().join("fernleaf"), Arc::clone(&shared)).unwrap();
-        store.git.prepare().unwrap();
+        let store = ProjectStore::open(&dir.path().join("store"), Arc::clone(&shared)).unwrap();
+        let code = dir.path().join("fernleaf");
+        x100_store::Git::new(code.clone()).prepare().unwrap();
         let ceo = x100_orch::new_id(&*shared, AgentId::new);
         let created = ProjectEvent::Created {
-            name: "Fernleaf".into(),
             ceo,
             charter: "Own Fernleaf's launch.".into(),
             effort: EffortRange::FULL,
@@ -113,7 +113,19 @@ impl Run {
                 allowed: Default::default(),
             },
         };
-        store.log.append(Actor::Builder, created).unwrap();
+        // Set up already: these tests are about the tools over MCP, not the beginning.
+        let identity = x100_core::project::Identity {
+            name: "Fernleaf".into(),
+            intent: "A waitlist page for a plant shop.".into(),
+        };
+        store
+            .log
+            .append_all(vec![
+                (Actor::Builder, created),
+                (Actor::Builder, ProjectEvent::CodeDirSet { dir: code }),
+                (Actor::Agent(ceo), ProjectEvent::SetUp(identity)),
+            ])
+            .unwrap();
 
         let provider = FakeProvider::start().await.unwrap();
         let (daemon, daemon_jobs) = common::daemon_log(
@@ -185,14 +197,23 @@ impl Run {
         }
     }
 
-    /// The brief opens the CEO's task; the model's replies, which name it, are queued before
-    /// the CEO's driver may start.
+    /// The builder's message opens the CEO's task; the model's replies, which name it, are queued
+    /// before the CEO's driver may start.
     async fn brief(&self, replies: impl FnOnce(TaskId) -> Vec<Reply>) -> TaskId {
-        let (_, task) = self
-            .orch
-            .send_brief(self.project, "Write the BRD, then report.".into(), vec![])
+        self.orch
+            .send_chat(
+                self.project,
+                "Write the BRD, then report.".into(),
+                vec![],
+                None,
+            )
             .await
             .unwrap();
+        let task = self
+            .store
+            .log
+            .with_state(|s| s.tasks().map(|t| t.task.id).last())
+            .expect("the message opened a task");
         for reply in replies(task) {
             self.provider.reply(reply);
         }
@@ -257,8 +278,7 @@ impl Run {
         );
         assert_eq!(self.desk.refusals(), vec![]);
         assert_eq!(
-            std::fs::read_to_string(self.store.git.project_dir().join(".x100/specs/BRD.md"))
-                .unwrap(),
+            std::fs::read_to_string(self.dir.path().join("fernleaf/.x100/specs/BRD.md")).unwrap(),
             BRD
         );
 

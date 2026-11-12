@@ -56,7 +56,6 @@ fn credentials_by_reference_projects_settings_and_jobs() {
     let projects: Vec<_> = s.projects().collect();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].0, FERNLEAF);
-    assert_eq!(projects[0].1.name, "Fernleaf");
 
     assert_eq!(
         *s.settings(),

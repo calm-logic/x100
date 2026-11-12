@@ -27,7 +27,8 @@ use crate::error::{Error, Result, io};
 pub use branch::MergeOutcome;
 pub use snapshot::{Change, ChangeKind, Diff};
 
-/// The directory that holds `.x100/` and the project's own repository.
+/// A project's code directory: its own repository, and `.x100/` beside it with the agents' worktrees
+/// and what x100 writes there for people, kept out of the repository.
 #[derive(Debug, Clone)]
 pub struct Git {
     project: PathBuf,

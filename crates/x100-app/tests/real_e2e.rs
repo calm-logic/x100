@@ -1,7 +1,8 @@
 //! The owner's goal end to end: the desktop app, with no display, against a real `x100d` child
-//! process on the real clock with a new project's default settings. It creates a project from the
-//! sidebar, sends a small brief from the first-run box, waits for the CEO's final report, and
-//! checks what a builder would.
+//! process on the real clock with a new project's default settings. With no project, it says "hi"
+//! from the box the window opens on, which creates the project, then sends a small brief, which
+//! the CEO sets the project up from. It waits for the CEO's final report and checks what a
+//! builder would.
 //!
 //! On the builder's own logins, the work runs on the cheapest terminal models of their local
 //! Claude Code and Codex. That spends their subscription, so it is ignored by default and runs
@@ -11,8 +12,9 @@
 //! X100_REAL_LOGINS=1 cargo test -p x100-app --test real_e2e -- --ignored --nocapture
 //! ```
 //!
-//! With `X100_E2E_OUT=DIR` the project (its log, transcripts and recorded terminals), the daemon's
-//! output and each agent's transcript and terminal screens are kept in `DIR` to be looked at.
+//! With `X100_E2E_OUT=DIR` the project (its code directory under `DIR/projects`, and its store with
+//! the log, transcripts and recorded terminals as `DIR/store`), the daemon's output and each
+//! agent's transcript and terminal screens are kept in `DIR` to be looked at.
 //! They can hold the builder's account id, so `DIR` belongs outside the repository. Without it
 //! everything is removed. The daemon's data directory is never under /tmp, where Codex will not
 //! set up its sandbox.
@@ -37,6 +39,8 @@ use x100_app::shell::Shell;
 use x100_app::tabs::{MainPanel, Tab};
 use x100_app::team::{Shown, TeamView};
 use x100_client::{Client, Options};
+use x100_core::agent::AgentState;
+use x100_core::driver::{DriverState, EndReason, RetireReason};
 use x100_core::id::{AgentId, ProjectId, TaskId};
 use x100_core::message::Route;
 use x100_core::spec::SpecKind;
@@ -134,6 +138,26 @@ impl Models {
         }
     }
 
+    /// What the fake model says to "hi" in a project that is not set up: hello, and nothing else.
+    fn greet(&self) {
+        if let Models::Fake { provider, .. } = self {
+            provider.reply(Reply::Text("Hello! What would you like to build?".into()));
+        }
+    }
+
+    /// What the fake model does with the brief before the project is set up: sets it up, with
+    /// the brief as it understood it, and ends the turn.
+    fn set_up(&self) {
+        let Models::Fake { provider, .. } = self else {
+            return;
+        };
+        provider.reply(Reply::Tool {
+            name: "mcp__x100__set_up_project".into(),
+            input: json!({ "name": "Todo app", "intent": "A todo list in one page.", "brief": BRIEF }),
+        });
+        provider.reply(Reply::Text("A todo app: setting it up now.".into()));
+    }
+
     /// What the fake model does with the brief, as a model told what the start pack says would:
     /// answer first, write the BRD, build the page, keep its note, report, and reply.
     fn script(&self, task: TaskId, worktree: &Path) {
@@ -223,7 +247,7 @@ fn build_from_the_brief(rt: &tokio::runtime::Runtime, models: Models) {
         _ => scratch.path().join("out"),
     };
     std::fs::create_dir_all(&keep).unwrap();
-    let project_dir = keep.join("todo");
+    let projects = keep.join("projects");
     let daemon_log = keep.join("daemon.log");
 
     let log = std::fs::File::create(&daemon_log).unwrap();
@@ -231,6 +255,9 @@ fn build_from_the_brief(rt: &tokio::runtime::Runtime, models: Models) {
     command
         .arg("--data-dir")
         .arg(&data)
+        // Never the builder's own `~/x100`, on their logins too.
+        .arg("--projects-root")
+        .arg(&projects)
         .stdin(Stdio::null())
         .stdout(log.try_clone().unwrap())
         .stderr(log);
@@ -249,35 +276,45 @@ fn build_from_the_brief(rt: &tokio::runtime::Runtime, models: Models) {
         .expect("a window");
     let mut vcx = VisualTestContext::from_window(window.into(), &cx);
 
-    // A project from the sidebar, then the brief from the first-run box.
-    pump(&mut vcx);
-    click(&mut vcx, "new-project");
-    vcx.simulate_input("Todo");
-    click(&mut vcx, "new-project-path");
-    vcx.simulate_input(&project_dir.display().to_string());
-    vcx.simulate_keystrokes("enter");
-    let path = project_dir.display().to_string();
-    let project = rt
-        .block_on(client.wait_for(Duration::from_secs(60), |s| {
-            s.daemon
-                .projects()
-                .find(|(_, e)| e.path == path)
-                .map(|(id, _)| id)
-        }))
-        .expect("the project reached the daemon");
-    common::pump_until(&mut vcx, "the brief box is drawn", |vcx| {
+    // No project: the window opens on the box for the first message. "hi" creates the project,
+    // and the CEO only answers, since it does not know what the project is yet.
+    common::pump_until(&mut vcx, "the message box is drawn", |vcx| {
         bounds(vcx, "composer-input").is_some()
     });
-    click(&mut vcx, "composer-input");
-    vcx.simulate_input(BRIEF);
-    vcx.simulate_keystrokes("enter");
-    let (task, ceo) = rt
-        .block_on(client.wait_for(Duration::from_secs(60), |s| {
+    models.greet();
+    say(&mut vcx, "hi");
+    // Waited for by pumping: the app creates the project and sends in steps the window runs.
+    let project = common::pump_for(
+        &mut vcx,
+        &client,
+        ("the CEO answers hi", Duration::from_secs(600)),
+        |s| {
+            s.projects.iter().find_map(|(id, p)| {
+                let answered = p.messages().any(|m| m.message.route == Route::CeoToBuilder);
+                let idle = p.agent(p.project()?.ceo)?.state == AgentState::Idle;
+                (answered && idle).then_some(*id)
+            })
+        },
+    );
+    let p = client.project(project).expect("the project");
+    assert!(!p.project().unwrap().is_set_up(), "set up from a greeting");
+    assert_eq!(p.tasks().count(), 0, "a greeting opened a task");
+
+    // The brief: the CEO sets the project up, which opens its task, and its work goes on in the
+    // project's worktree on a new driver.
+    models.set_up();
+    say(&mut vcx, BRIEF);
+    let (task, ceo, project_dir) = common::pump_for(
+        &mut vcx,
+        &client,
+        ("the set-up", Duration::from_secs(600)),
+        |s| {
             let p = s.projects.get(&project)?;
-            let task = p.tasks().find(|t| t.task.ask == BRIEF)?.task.id;
-            Some((task, p.project()?.ceo))
-        }))
-        .expect("the brief opened a task");
+            let task = p.tasks().next()?.task.id;
+            let pr = p.project()?;
+            Some((task, pr.ceo, pr.code_dir.clone()?))
+        },
+    );
     models.script(task, &worktree(&project_dir, ceo));
     common::pump_until(&mut vcx, "the main panel opens", |vcx| {
         bounds(vcx, "tab-Team").is_some()
@@ -344,10 +381,35 @@ fn build_from_the_brief(rt: &tokio::runtime::Runtime, models: Models) {
         Err(e2e::Browser::Failed(why)) => panic!("in headless Chromium: {why}"),
     }
 
+    let drivers = &p.agent(ceo).unwrap().drivers;
+    assert!(drivers.len() >= 2, "the work went on on a new driver");
+    assert_eq!(
+        p.driver(drivers[0]).map(|d| d.state.clone()),
+        Some(DriverState::Ended(EndReason::Retired(
+            RetireReason::ProjectSetUp
+        ))),
+        "the driver that set the project up retired"
+    );
+    assert!(project_dir.starts_with(&projects));
+
     drop(vcx);
     daemon.stop();
+    // The project's store, kept with its code for whoever looks at the run.
+    let store = data.join("projects").join(project.to_string());
+    let _ = Command::new("cp")
+        .arg("-a")
+        .arg(&store)
+        .arg(keep.join("store"))
+        .status();
     nothing_left(&[&data, &project_dir]);
     eprintln!("The whole run took {:.0?}.", started.elapsed());
+}
+
+fn say(vcx: &mut VisualTestContext, text: &str) {
+    click(vcx, "composer-input");
+    vcx.simulate_input(text);
+    vcx.simulate_keystrokes("enter");
+    pump(vcx);
 }
 
 fn worktree(project_dir: &Path, agent: AgentId) -> PathBuf {

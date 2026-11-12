@@ -65,7 +65,7 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::GetProject(p) => out(projects::get(hub, p)),
         Call::CreateProject(p) => out(projects::create(hub, p).await),
         Call::ChangeProjectSetting(p) => out(projects::change_setting(hub, p).await),
-        Call::SendBrief(p) => out(chat::brief(hub, p).await),
+        Call::RenameProject(p) => out(projects::rename(hub, p).await),
         Call::SendChat(p) => out(chat::send(hub, p).await),
         Call::RaiseTask(p) => out(chat::raise(hub, p).await),
         Call::UploadFile(p) => out(files::upload(hub, p).await),

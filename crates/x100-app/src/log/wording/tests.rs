@@ -47,6 +47,12 @@ fn every_event_of_the_fernleaf_run_reads_as_a_sentence() {
     has("Held for the builder: ");
     has("Changed Ask me about to");
     has("Brought in a Tech lead");
+    // The beginning: a new project, set up by the CEO, its code directory, the scratch driver.
+    has("Started a new project, not set up yet");
+    has("Set the project up as \u{201c}Fernleaf\u{201d}: A waitlist page");
+    has("Keeps the project's code in /home/builder/x100/fernleaf");
+    has("wants to set the project up as");
+    has("the project was set up, and work goes on in its code directory");
 }
 
 #[test]

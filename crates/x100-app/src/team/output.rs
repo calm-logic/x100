@@ -1,5 +1,5 @@
 //! What an agent that runs no agents of its own is working in: its drivers' live output, one
-//! continuous view across a change of driver, under the facts about it.
+//! continuous view across a change of driver.
 //!
 //! The agent's transcript is the backbone: it is followed from the start, and each driver's
 //! `driver_changed` entry says when one driver gave way to the next. A headless driver's entries
@@ -11,7 +11,7 @@
 //! one ended, so it waits until the client's state holds the new driver.
 //!
 //! Output arriving redraws only the screen it lands in: each segment's terminal is a cached view
-//! of its own, as are the facts. GPUI runs this view's render again too, as it does for every
+//! of its own. GPUI runs this view's render again too, as it does for every
 //! ancestor of a changed view, but that rebuilds only the frame and reuses the cached children.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -28,7 +28,6 @@ use x100_core::terminal::{Chunk, ChunkKind};
 use x100_core::transcript::{Entry, Item};
 use x100_proto::ErrorCode;
 
-use super::facts::{AgentFacts, FACTS_HEIGHT};
 use super::log::{self, LogWriter};
 use crate::session::{Session, SessionEvent};
 use crate::term::{Sizing, TerminalView};
@@ -89,7 +88,6 @@ pub struct AgentOutput {
     session: Entity<Session>,
     project: ProjectId,
     agent: AgentId,
-    facts: Entity<AgentFacts>,
     segments: Vec<Segment>,
     /// Entries not yet shown, in order: the first waits until the state can describe it.
     queue: VecDeque<Entry>,
@@ -111,7 +109,6 @@ impl AgentOutput {
         agent: AgentId,
         cx: &mut Context<Self>,
     ) -> Self {
-        let facts = cx.new(|cx| AgentFacts::new(session.clone(), project, agent, cx));
         let subscription = cx.subscribe(&session, move |this, _, event, cx| match event {
             SessionEvent::Changed(Change::Project { project, .. }) if *project == this.project => {
                 this.state_changed(cx)
@@ -140,7 +137,6 @@ impl AgentOutput {
             session,
             project,
             agent,
-            facts,
             segments: Vec::new(),
             queue: VecDeque::new(),
             packs: HashMap::new(),
@@ -155,10 +151,6 @@ impl AgentOutput {
 
     pub fn agent(&self) -> AgentId {
         self.agent
-    }
-
-    pub fn facts(&self) -> &Entity<AgentFacts> {
-        &self.facts
     }
 
     pub fn renders(&self) -> usize {
@@ -188,7 +180,6 @@ impl AgentOutput {
     }
 
     fn state_changed(&mut self, cx: &mut Context<Self>) {
-        self.facts.update(cx, |f, cx| f.refresh(cx));
         self.pump(cx);
     }
 
@@ -512,7 +503,7 @@ impl Render for AgentOutput {
         });
         div()
             .size_full()
-            .min_h(px(FACTS_HEIGHT + NEWEST_MIN_HEIGHT))
+            .min_h(px(NEWEST_MIN_HEIGHT))
             .flex()
             .flex_col()
             .rounded(px(12.))
@@ -521,11 +512,6 @@ impl Render for AgentOutput {
             .bg(gpui::rgb(crate::term::BACKGROUND))
             .overflow_hidden()
             .child(self.bar(cx))
-            .child(
-                self.facts
-                    .clone()
-                    .cached(StyleRefinement::default().w_full().h(px(FACTS_HEIGHT))),
-            )
             .child(
                 div()
                     .id("agent-output")

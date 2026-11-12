@@ -1,9 +1,9 @@
-//! The scenario's opening: the brief, the team formed, workers started, a question answered, and
+//! The scenario's opening: the builder's first message, the project set up, the team formed, workers started, a question answered, and
 //! the PRD accepted with two trials run.
 
 use super::{MINUTE, deploy_skill, range};
 use crate::agent::{Agent, Position};
-use crate::driver::{DriverEvent, StartReason};
+use crate::driver::{DriverEvent, RetireReason, StartReason};
 use crate::effort::{Effort, EffortRange};
 use crate::event::ProjectEvent;
 use crate::file::{ContentHash, FileRef};
@@ -14,7 +14,7 @@ use crate::memory::{SkillName, SkillRef, SkillScope};
 use crate::message::{Message, Route};
 use crate::money::{Money, Percent};
 use crate::party::{Actor, Party};
-use crate::project::Settings;
+use crate::project::{Identity, Settings};
 use crate::spec::{SpecKind, SpecStatus};
 use crate::task::{Assignment, Opening as TaskOpening, Task};
 use crate::team::LeadSpec;
@@ -63,7 +63,6 @@ pub(super) fn opening(b: &mut LogBuilder) -> Opening {
     b.push(
         Actor::Builder,
         ProjectEvent::Created {
-            name: "Fernleaf".into(),
             ceo,
             charter: "Own Fernleaf's launch, from brief to a live site.".into(),
             effort: EffortRange::FULL,
@@ -71,7 +70,7 @@ pub(super) fn opening(b: &mut LogBuilder) -> Opening {
         },
     );
 
-    // The brief: a message with a sketch, and the task it opens for the CEO.
+    // The builder's first message, with a sketch. The project is not set up, so it opens no task.
     let brief_text = "A landing page for Fernleaf, a plant shop, with a waitlist. Sketch attached.";
     let brief_message = b.id(MessageId::new);
     let sketch = b.id(FileId::new);
@@ -97,26 +96,62 @@ pub(super) fn opening(b: &mut LogBuilder) -> Opening {
             in_reply_to: None,
         }),
     );
-    let brief = b.id(TaskId::new);
-    b.push(
-        Actor::Builder,
-        ProjectEvent::TaskOpened {
-            task: Task {
-                id: brief,
-                title: "Launch Fernleaf".into(),
-                ask: brief_text.into(),
-                part: None,
-                raised_by: Party::Builder,
-                attachments: vec![sketch],
-            },
-            opening: TaskOpening::Delegated(Assignment {
-                delegator: Party::Builder,
-                assignee: ceo,
-                effort: Effort::High,
-            }),
+    b.deliver(
+        ceo,
+        InboxItem::Message {
+            message: brief_message,
         },
     );
-    b.deliver(ceo, InboxItem::Task { task: brief });
+
+    // The CEO, on a driver in a scratch directory, sets the project up, which opens the builder's
+    // task. That driver cannot move into the new code directory, so it retires with the turn.
+    let scratch = b.start_driver(ceo, opus(), Effort::Low, StartReason::Wake);
+    let brief = b.id(TaskId::new);
+    b.turn(scratch, 30_000, |b| {
+        let call = ToolCall::SetUpProject {
+            name: "Fernleaf".into(),
+            intent: "A waitlist page for Fernleaf, a plant shop.".into(),
+            brief: Some(brief_text.into()),
+        };
+        b.tool(scratch, call, |b| {
+            let by = Actor::Agent(ceo);
+            let dir = "/home/builder/x100/fernleaf".into();
+            b.push(by, ProjectEvent::CodeDirSet { dir });
+            b.push(
+                by,
+                ProjectEvent::SetUp(Identity {
+                    name: "Fernleaf".into(),
+                    intent: "A waitlist page for Fernleaf, a plant shop.".into(),
+                }),
+            );
+            b.push(
+                by,
+                ProjectEvent::TaskOpened {
+                    task: Task {
+                        id: brief,
+                        title: "Launch Fernleaf".into(),
+                        ask: brief_text.into(),
+                        part: None,
+                        raised_by: Party::Builder,
+                        attachments: vec![sketch],
+                    },
+                    opening: TaskOpening::Delegated(Assignment {
+                        delegator: Party::Builder,
+                        assignee: ceo,
+                        effort: Effort::High,
+                    }),
+                },
+            );
+            b.deliver(ceo, InboxItem::Task { task: brief });
+        });
+    });
+    b.push(
+        Actor::Daemon,
+        ProjectEvent::Driver {
+            driver: scratch,
+            event: DriverEvent::Retired(RetireReason::ProjectSetUp),
+        },
+    );
 
     // The CEO's first turn: BRD, team, two delegations, and a question for the builder.
     let dc = b.start_driver(

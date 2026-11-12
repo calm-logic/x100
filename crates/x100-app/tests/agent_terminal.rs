@@ -295,8 +295,8 @@ fn terminal_drivers_replay_and_a_refused_one_says_so() {
     );
     assert!(!shown[1].text.contains("Shown on the screen"));
 
-    // Nothing blinks: a tool's output arriving in driver 2's log redraws that log, and neither
-    // the facts nor driver 1's screen. The views that hold the log (this one up to the window's
+    // Nothing blinks: a tool's output arriving in driver 2's log redraws that log, and not
+    // driver 1's screen. The views that hold the log (this one up to the window's
     // root) run their render again, as GPUI does for every ancestor of a changed view, and reuse
     // their cached children as they were.
     let views = vcx.read(|cx| output.read(cx).terminals());
@@ -305,7 +305,6 @@ fn terminal_drivers_replay_and_a_refused_one_says_so() {
             let o = output.read(cx);
             (
                 o.renders(),
-                o.facts().read(cx).renders(),
                 views[0].read(cx).stats().renders,
                 views[1].read(cx).stats().renders,
             )
@@ -334,12 +333,8 @@ fn terminal_drivers_replay_and_a_refused_one_says_so() {
         assert!(Instant::now() < until, "the tool's output did not arrive");
     }
     let after = counts(&vcx);
-    assert_eq!(
-        (after.1, after.2),
-        (before.1, before.2),
-        "{before:?} {after:?}"
-    );
-    assert!(after.3 > before.3, "{before:?} {after:?}");
+    assert_eq!(after.1, before.1, "{before:?} {after:?}");
+    assert!(after.2 > before.2, "{before:?} {after:?}");
 
     // Watching only: the view asked to follow things and asked for nothing else.
     let asked = asked.lock().unwrap().clone();

@@ -92,10 +92,18 @@ impl Env {
         self.dir.path().join(name).to_string_lossy().into_owned()
     }
 
+    /// Where the daemon makes a project's code directory when it is set up.
+    pub fn projects_root(&self) -> PathBuf {
+        self.dir.path().join("projects")
+    }
+
     pub fn daemon_args(&self, fake_harness: &Path) -> Vec<std::ffi::OsString> {
         vec![
             "--data-dir".into(),
             self.data.clone().into(),
+            // Code directories go under the test's own directory, never the builder's `~/x100`.
+            "--projects-root".into(),
+            self.projects_root().into(),
             "--scripts-dir".into(),
             self.scripts.clone().into(),
             "--fake-harness".into(),
@@ -144,8 +152,18 @@ pub struct DaemonProc {
     child: Option<Child>,
 }
 
+/// A test's daemon makes code directories only where the test says, never in the builder's
+/// `~/x100`.
+fn own_projects_root(args: &[std::ffi::OsString]) {
+    assert!(
+        args.iter().any(|a| a == "--projects-root"),
+        "a test's daemon needs --projects-root: {args:?}"
+    );
+}
+
 impl DaemonProc {
     pub fn spawn(args: Vec<std::ffi::OsString>) -> DaemonProc {
+        own_projects_root(&args);
         let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
             .args(args)
             .stdin(Stdio::null())
@@ -156,6 +174,7 @@ impl DaemonProc {
 
     /// A daemon with only the environment given, nothing of the test's own but what it names.
     pub fn spawn_in(args: Vec<std::ffi::OsString>, env: &[(String, String)]) -> DaemonProc {
+        own_projects_root(&args);
         let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
             .args(args)
             .env_clear()
@@ -242,10 +261,11 @@ pub async fn create_project(client: &Client, env: &Env, name: &str) -> ProjectId
         })
         .await
         .expect("the setting is taken");
+    // On a folder of its own, so the CEO works in a worktree from its first turn.
+    std::fs::create_dir_all(env.project_dir(name)).expect("the project's folder");
     let project = client
         .request(CreateProject {
-            path: env.project_dir(name),
-            name: None,
+            dir: Some(env.project_dir(name)),
             settings: None,
         })
         .await

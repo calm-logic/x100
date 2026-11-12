@@ -26,7 +26,7 @@ use x100_core::party::Party;
 use x100_core::task::TaskState;
 use x100_core::transcript::{Entry, Item};
 use x100_core::wait::WaitOn;
-use x100_store::ProjectStore;
+use x100_store::{Git, ProjectStore};
 
 pub use items::{describe, turn_input};
 
@@ -42,6 +42,9 @@ const RESULT_CHARS: usize = 400;
 /// How many of its finished tasks an agent's pack recalls, with their reports and last notes. A
 /// retired driver's context is gone, and this is what the next one needs of it until memories.
 const RECENT_TASKS: usize = 5;
+/// How many of the latest chat messages a CEO's pack recalls, and how much of each.
+const CHAT_MESSAGES: usize = 20;
+const CHAT_CHARS: usize = 2_000;
 
 /// What a start pack is built for, besides the agent's records.
 pub(crate) struct Pack {
@@ -52,8 +55,14 @@ pub(crate) struct Pack {
     pub share_percent: u8,
 }
 
-/// Builds an agent's start pack from its records. Blocks on the store and git.
-pub(crate) fn build(store: &ProjectStore, agent: AgentId, for_: &Pack) -> String {
+/// Builds an agent's start pack from its records. Blocks on the store and git. `git` is the
+/// project's code directory, which a project that is not set up may not have.
+pub(crate) fn build(
+    store: &ProjectStore,
+    git: Option<&Git>,
+    agent: AgentId,
+    for_: &Pack,
+) -> String {
     let (window_tokens, share_percent) = (for_.window_tokens, for_.share_percent);
     let state = store.log.state();
     let task = state.current_task(agent).map(|t| t.task.id);
@@ -63,7 +72,8 @@ pub(crate) fn build(store: &ProjectStore, agent: AgentId, for_: &Pack) -> String
     let diff = history
         .base
         .as_ref()
-        .and_then(|base| branches::diff_since(store, agent, base));
+        .zip(git)
+        .and_then(|(base, git)| branches::diff_since(git, agent, base));
     let mut pack = head(&state, agent, for_);
     if !history.calls.is_empty() {
         pack.push_str("\nDAEMON TOOL CALLS IN THIS TASK (each took effect; do not repeat them):\n");
@@ -95,6 +105,13 @@ fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
     let _ = writeln!(p, "ROLE: {}", a.role);
     let _ = writeln!(p, "Your id: {agent}");
     if let Some(project) = state.project() {
+        let _ = match &project.identity {
+            Some(i) => write!(p, "\nPROJECT: {}\n{}\n", i.name, i.intent),
+            None => write!(
+                p,
+                "\nPROJECT: not set up yet. It has no name, no intent and no code.\n"
+            ),
+        };
         let team = &project.team;
         let (position, place) = match team.position(agent) {
             Some(Position::Ceo { .. }) => (
@@ -194,6 +211,12 @@ fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
         p.push_str("\nYOUR RECENT TASKS, LATEST LAST (what you reported, and your last note):\n");
         p.push_str(&recent);
     }
+    if state.project().is_some_and(|p| p.ceo == agent) {
+        let chat = chat(state);
+        if !chat.is_empty() {
+            let _ = write!(p, "\nYOUR CHAT WITH THE BUILDER, LATEST LAST:\n{chat}");
+        }
+    }
     let business = open_business(state, agent);
     if !business.is_empty() {
         let _ = write!(p, "\nOPEN BUSINESS:\n{business}");
@@ -249,6 +272,32 @@ fn recent_tasks(state: &ProjectState, agent: AgentId) -> String {
         }
     }
     out
+}
+
+/// The last of the messages between the builder and the CEO, so a new driver of the CEO knows the
+/// conversation, its own earlier answers included, even when its transcript has been cut.
+fn chat(state: &ProjectState) -> String {
+    let lines: Vec<String> = state
+        .messages()
+        .filter_map(|m| {
+            let who = match m.message.route {
+                Route::BuilderToCeo => "The builder",
+                Route::CeoToBuilder => "You",
+                _ => return None,
+            };
+            let mut body: String = m.message.body.chars().take(CHAT_CHARS).collect();
+            if body.len() < m.message.body.len() {
+                body.push('…');
+            }
+            let files = match m.message.attachments.len() {
+                0 => String::new(),
+                n => format!(" [{n} attached]"),
+            };
+            Some(format!("- {who}: {}{files}\n", body.replace('\n', "\n  ")))
+        })
+        .collect();
+    let skip = lines.len().saturating_sub(CHAT_MESSAGES);
+    lines[skip..].concat()
 }
 
 /// A member of the team as a labelled line: `Lead Tech: agt_...` or `Worker Backend: agt_...`.

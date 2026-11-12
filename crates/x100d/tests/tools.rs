@@ -30,6 +30,7 @@ async fn post(url: &str, path: &str, token: &str, body: Value) -> std::io::Resul
 async fn the_daemon_serves_its_tools_on_loopback_and_refuses_strangers() {
     let env = Env::new();
     let mut config = x100d::Config::new(&env.data);
+    config.projects_root = env.projects_root();
     config.scripts_dir = Some(env.scripts.clone());
     config.fake_program = Some(env!("CARGO_BIN_EXE_x100d-fake-harness").into());
     let daemon = x100d::Daemon::start(config)

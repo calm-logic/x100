@@ -55,12 +55,13 @@ fn script() -> Open {
         .block_on(client.upload_file(project, "notes.md", "text/markdown", b"# Notes\n".to_vec()))
         .expect("the note is held");
     run.rt
-        .block_on(client.send_brief(
+        .block_on(client.send_chat(
             project,
             "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
             vec![],
+            None,
         ))
-        .expect("the brief is sent");
+        .expect("the first message is sent");
     run.settle(&client, project);
     let (window, mut vcx) = run.open(client.clone());
     pump_until(&mut vcx, "the main panel opens", |vcx| {
@@ -558,6 +559,8 @@ fn credentials_are_added_with_a_value_and_a_scope_and_say_so_while_unavailable()
     let settings = o.open::<SettingsView>(Tab::Settings);
     let creds = vcx_read(&o.vcx, |cx| settings.read(cx).credentials().clone());
     let before = vcx_read(&o.vcx, |cx| creds.read(cx).shown().len());
+    // Credentials are at the foot of the tab, under the project's name, intent and directory.
+    scroll_down(&mut o.vcx);
     o.click("cred-add-open".into());
     o.vcx.simulate_input("Stripe test key");
     scroll_down(&mut o.vcx);

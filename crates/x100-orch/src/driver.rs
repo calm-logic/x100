@@ -16,7 +16,6 @@ use x100_core::id::{AgentId, DriverId, InboxItemId, MessageId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::JobEvent;
 use x100_core::party::{Actor, Party};
-use x100_core::task::TaskState;
 use x100_core::terminal::Chunk;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
 use x100_drivers::{Decision, DriverControl, DriverOutput, Spent, StartError, TurnEnd};
@@ -24,7 +23,7 @@ use x100_router::Choice;
 
 use crate::Shared;
 use crate::branches::{self, Ready};
-use crate::ctx::{Events, ProjectCtx};
+use crate::ctx::{Events, ProjectCtx, git_of};
 use crate::pack;
 use crate::project::Msg;
 use crate::route;
@@ -81,6 +80,8 @@ struct Actor_ {
     ended: bool,
     offer: Option<ModelOffer>,
     turn: Option<Turn>,
+    /// It was started before the project had code, in the scratch directory.
+    scratch: bool,
 }
 
 /// Reports how the driver ended, `Some` for a failure, so the loop can count failures in a row.
@@ -102,6 +103,7 @@ pub(crate) async fn run(
         ended: false,
         offer: None,
         turn: None,
+        scratch: false,
     };
     let failure = actor.drive(start, &mut cmds, &msgs).await;
     // A file write, so on the blocking pool like the store's, where it holds up no other task.
@@ -173,7 +175,13 @@ impl Actor_ {
             Ok(r) => r,
             Err(detail) => return self.fail(error(detail)).await,
         };
-        let start_pack = self.start_pack(why, spec::workspace(&harness.kind())).await;
+        let dir = self
+            .read(move |s| git_of(s).map(|g| g.worktree_path(agent)))
+            .await;
+        self.scratch = dir.is_none();
+        let dir = dir.unwrap_or_else(|| self.ctx.store.scratch());
+        let workspace = spec::workspace(&harness.kind(), self.scratch);
+        let start_pack = self.start_pack(why, workspace).await;
         // The pack is the driver's first entry, so it is on record before the driver can act.
         self.transcript(Item::StartPack {
             text: start_pack.clone(),
@@ -181,7 +189,15 @@ impl Actor_ {
         .await;
         self.transcript(Item::DriverChanged { from: previous })
             .await;
-        let spec = spec::build(&self.shared, &self.ctx, agent, driver, &choice, start_pack);
+        let spec = spec::build(
+            &self.shared,
+            &self.ctx,
+            agent,
+            driver,
+            &choice,
+            dir,
+            start_pack,
+        );
         let mut handle = match harness.start(spec).await {
             Ok(h) => h,
             Err(e) => return self.fail(start_failure(e)).await,
@@ -263,18 +279,19 @@ impl Actor_ {
     }
 
     /// The agent's worktree, there and up to date with the work of whoever delegated it a task
-    /// among `items`, between turns and never mid-turn.
+    /// among `items`, between turns and never mid-turn. Before the project has code, the scratch
+    /// directory instead.
     async fn ready(&self, items: &[InboxItemId]) -> Result<Ready, String> {
         let (ctx, agent, items) = (Arc::clone(&self.ctx), self.agent, items.to_vec());
         blocking(move || {
-            let (home, delegators) = ctx.store.log.with_state(|s| {
+            let (git, home, delegators) = ctx.store.log.with_state(|s| {
                 let home = match s.project().and_then(|p| p.team.parent(agent)) {
                     Some(parent) => Party::Agent(parent),
                     None => Party::Builder,
                 };
-                (home, delegators(s, agent, &items))
+                (git_of(s), home, branches::delegators(s, agent, &items))
             });
-            branches::ready(&ctx.store, agent, home, &delegators)
+            branches::ready(git.as_ref(), &ctx.store.scratch(), agent, home, &delegators)
         })
         .await
     }
@@ -289,7 +306,7 @@ impl Actor_ {
             window_tokens: window,
             share_percent: share,
         };
-        blocking(move || pack::build(&ctx.store, agent, &pack)).await
+        blocking(move || pack::build(&ctx.store, ctx.git().as_ref(), agent, &pack)).await
     }
 
     async fn event(&self, event: DriverEvent) -> Result<(), String> {
@@ -473,16 +490,17 @@ impl Actor_ {
             reply_to: turn.reply_to,
             checkpoint: None,
             limit: (self.shared.settings)().turns_without_progress,
+            scratch: self.scratch,
         };
         let ended = blocking(move || {
-            let dir = ctx.store.git.worktree_path(agent);
-            close.checkpoint = match ctx.store.git.checkpoint(&dir, &agent.to_string()) {
-                Ok(c) => Some(c),
-                Err(e) => {
-                    eprintln!("x100: could not checkpoint {agent}: {e}");
-                    None
-                }
-            };
+            let git = ctx.git();
+            let dir = git.as_ref().map(|g| g.worktree_path(agent));
+            if let (Some(git), Some(dir)) = (git, dir.filter(|d| d.exists())) {
+                close.checkpoint = git
+                    .checkpoint(&dir, &agent.to_string())
+                    .inspect_err(|e| eprintln!("x100: could not checkpoint {agent}: {e}"))
+                    .ok();
+            }
             ctx.commit(|s, clock| turns::close(&shared, s, clock, close))
         })
         .await
@@ -568,29 +586,9 @@ impl Actor_ {
     }
 }
 
-/// Who delegated the tasks among `items` that are in progress with `agent`.
-fn delegators(state: &ProjectState, agent: AgentId, items: &[InboxItemId]) -> Vec<Party> {
-    let Some(a) = state.agent(agent) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for item in items {
-        if let Some(InboxItem::Task { task }) = a.items.get(item)
-            && let Some(TaskState::InProgress(asg)) = state.task(*task).map(|t| &t.state)
-            && asg.assignee == agent
-            && !out.contains(&asg.delegator)
-        {
-            out.push(asg.delegator);
-        }
-    }
-    out
-}
-
 fn error(detail: String) -> Failure {
-    Failure::Error {
-        detail,
-        provider: None,
-    }
+    let provider = None;
+    Failure::Error { detail, provider }
 }
 
 fn start_failure(e: StartError) -> Failure {

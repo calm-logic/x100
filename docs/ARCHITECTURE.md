@@ -426,9 +426,20 @@ the gate can hold. If it conflicts, the task goes back to the assignee with the 
 delegated to an agent that already exists, the delegator's branch is merged into the agent's first, so it
 starts from current work.
 
-**proposed** The builder delegates to the CEO. The brief opens a task delegated by the builder, and so does
-Reflect now. A later message from the builder is a message, and opens a new task for the CEO only if it has
-none open from the builder, so the CEO always works under a task with a progress note. The builder has no
+**decided (owner, 2026-11-12)** A project begins uninitialized. Starting a conversation creates it, with its
+CEO and with no name, intent or code directory. Until it is set up a builder's message opens no task: the CEO
+answers and its turn ends. The CEO sets the project up with `set_up_project` (a name, a line on what it is
+for, and the brief as it understands it) when it knows enough, at once for a clear brief and later if the
+builder only said hello. The first call records the name and intent, makes the code directory, and opens the
+builder's task with the files the builder attached. A later call only changes the name or intent.
+
+**proposed** A CEO that began in its scratch directory cannot move, so setting the project up ends its turn
+and retires that driver, and the task starts a new one in the worktree, whose start pack carries the chat so
+far. A project started on an existing folder has its code directory from the start.
+
+**proposed** The builder delegates to the CEO. Once a project is set up, a message from the builder opens a
+task for the CEO if it has none open from the builder, and so does Reflect now, so the CEO always works
+under a task with a progress note. The builder has no
 review step: a task the builder delegated is accepted when the CEO reports it, the report appears in the chat,
 and the CEO's branch is merged into the project's main branch, which the gate can hold.
 
@@ -454,7 +465,7 @@ number of such turns in a row, the task is reported failed.
 **proposed** Agents act on the organisation through tools the daemon serves to each driver over MCP:
 `delegate`, `review`, `report`, `message`, `wait`, `schedule`, `cancel_job`, `raise_task`, `update_task`,
 `write_spec`, `add_file`, `set_preview`, `start_process`, `stop_process`, `load_skill`, `remember`. `update_task` carries the progress note and,
-where the agent can say, the share of the task that is done. The CEO gets `form_team`, `set_effort` and
+where the agent can say, the share of the task that is done. The CEO gets `set_up_project`, `form_team`, `set_effort` and
 `set_budget` as well, and for reflection `read_log`, `read_memories` and `propose_change`. Only the CEO can
 `message` the builder. Waiting for the builder's answer is a wait on the reply. Every such call is an event.
 This is also where the gate sits: a tool call is an `Action`.
@@ -577,20 +588,24 @@ reaches the agent even if its driver has changed meanwhile.
 **proposed** One git repository per agent under the project, plus one shared skills repository per project.
 
 ```
-<project>/.x100/
-  agents/<agent-id>/memory/*.md     one note per file, with front matter
-  agents/<agent-id>/skills/<name>/SKILL.md
-  skills/<name>/SKILL.md            shared in the project
-  specs/BRD.md  PRD.md  ADD.md
-  team.toml                         the team, written from the event log for people to read
-  store.sqlite                      the project's event log and transcripts
-  files/                            attachments and generated files, by content hash
-  worktrees/<agent-id>/             each agent's worktree
+<data dir>/projects/<project id>/     x100's own state for a project, in the daemon's data directory
+  store.sqlite                        the project's event log, transcripts and terminals
+  files/                              attachments and generated files, by content hash
+  scratch/                            where the CEO works before the project has code
+
+<code dir>/                           the project's git repository
+  .x100/specs/  BRD.md PRD.md ADD.md  written from the event log for people to read
+  .x100/worktrees/<agent-id>/         each agent's worktree
+  .x100/agents/<agent-id>/memory/     one note per file, with front matter (M13)
+  .x100/agents/<agent-id>/skills/     (M13)
+  .x100/skills/<name>/SKILL.md        shared in the project (M13)
+  .x100/team.toml                     the team, written from the event log for people to read
 ```
 
-A project is a directory holding a git repository. Creating a project in a directory without one starts one.
-`.x100/` is excluded from the project's own repository. The specs and `team.toml` there are written from the
-event log.
+A project's state is apart from its code so a project can exist before it has a code directory. The code
+directory is made when the CEO sets the project up, as `<projects root>/<slug of the name>`, made unique if
+taken. The projects root is a daemon setting, `~/x100` by default. Renaming a project moves nothing.
+`.x100/` is excluded from the project's own repository.
 
 Skills use the Agent Skills `SKILL.md` layout so that providers' agents can load them unchanged. Versions are
 git history plus a `version` field. Reflect now gives the CEO a reflection task: the event log for a span of
@@ -643,8 +658,8 @@ same work twice with two teams.
 
 ## Store
 
-**proposed** SQLite per project for the event log and the agents' transcripts, in the project's `.x100/`.
-Attachments and generated files in a content-addressed directory beside it. What belongs to the daemon and not
+**proposed** SQLite per project for the event log and the agents' transcripts, under the project's id in the
+daemon's data directory. Attachments and generated files in a content-addressed directory beside it. What belongs to the daemon and not
 to a project (machines, harnesses and their cool-offs, credentials, the list of projects, and the jobs for the
 daemon's own routines) is in a daemon log of the same form in the user's data directory, with the vault and
 the app's own settings.

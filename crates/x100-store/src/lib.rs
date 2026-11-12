@@ -25,6 +25,6 @@ pub use error::{Error, Result};
 pub use files::FileStore;
 pub use git::Git;
 pub use log::{DaemonLog, EventLog, Folded, Follow, ProjectLog};
-pub use project::{DATABASE, ProjectStore, database_path, open_daemon_log};
+pub use project::{DATABASE, ProjectStore, database_path, open_daemon_log, project_dir};
 pub use terminal::Terminals;
 pub use transcript::Transcripts;

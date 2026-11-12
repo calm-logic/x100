@@ -18,7 +18,8 @@ use x100_core::money::{Money, Percent};
 use x100_core::project::Settings;
 
 /// The CEO plans the project and reviews its leads' work, which medium effort does well enough
-/// for a first project, and the brief, asked at High, runs at Medium. The builder can widen it.
+/// for a first project, and the builder's task, asked at High, runs at Medium. The builder can
+/// widen it.
 pub fn ceo_effort() -> EffortRange {
     EffortRange::new(Effort::Low, Effort::Medium).expect("low is below medium")
 }

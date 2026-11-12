@@ -142,49 +142,23 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   "a client following the terminal sees output as it arrives".
 - **The real end-to-end run.** Whole workspace on the orchestrator's run: 365 tests pass, 0 fail, 6 ignored,
   clippy and fmt clean. See "The owner's goal" for the real run itself.
+- **How a project begins** (the owner's change of 2026-11-12). The orchestrator's run of the whole workspace:
+  496 tests pass, 0 fail, 9 ignored, clippy and fmt clean. Starting a conversation creates an uninitialized
+  project. "hi" gets an answer and opens no task. A brief leads the CEO to call `set_up_project`, after which
+  the code directory exists under the projects root with the slugged name, the task is open with the CEO's
+  wording and the attachments, the scratch driver is retired, and a new driver in the worktree does the work.
+  Two projects with one name get different directories. The Fernleaf script runs from the new beginning,
+  in-process and through the daemon. The real `claude` and `codex` do the same against the fake provider. The
+  app shows the message box with no projects and no form, "New project" until named, and a small control for
+  an existing folder. The orchestrator looked at `new-project.png` and `new-project-hi.png`. Also in this
+  step: "CEO" under the CEO's orb removed, the facts table deleted, and Memories, Skills and Trials not
+  mounted until built (`REFLECTION_SERVED` in `crates/x100-app/src/team/mod.rs`). **Not run:** the gated
+  real-login test and `capture-e2e.sh`, both updated to the new beginning. **Flake seen once by the subagent:**
+  a Codex test in `x100d/tests/terminal.rs` reported no chunk during a turn.
 
 ## In progress
 
-Running, each on its own crates:
-
-- **How a project begins** (the owner's change): starting a conversation creates the project, uninitialized.
-  The CEO sets its name and intent with a tool when it knows enough, which creates the code directory under
-  `~/x100/` and opens the builder's task. A project's own state moves to the daemon's data directory. The
-  name-and-directory form is removed. Also in that step: the facts table above an agent's output is deleted,
-  and memories, skills and trials are hidden until built. Opus subagent, edits most crates.
-
-Built as crates on their own and verified by the orchestrator with `-p`, each twice, clippy and fmt clean.
-**None is wired into the daemon yet**, so nothing an agent does is contained, kept from credentials or held:
-
-- **M10, `x100-sandbox`.** 24 tests: the same 12 on bubblewrap and on containers (Docker; the subagent also
-  ran them on Podman). From inside, deleting the home, writing outside the worktree and a direct outbound
-  connection fail or touch only the sandbox. Two sandboxes cannot see each other. A commit inside merges
-  outside. The next driver finds the last one's files and its background server still serving. Destroy ends
-  everything, a double-forked process included. The real `claude` and `codex` start inside (`--version` only).
-  Both endpoints (proxy, daemon tools) are carried by one tunnel over the helper's standard input and output,
-  so addresses are the same inside and out. Measured by the subagent under load from other builds: create
-  20 ms on bubblewrap and about 190 ms on Docker, a command start 7 ms and 80 ms, and no measurable overhead on
-  a build of the workspace without the app (20.1 s and 21.0 s against 21.7 s outside). Numbers are in
-  `crates/x100-sandbox/MEASUREMENTS.md`. **Limits:** every agent can read and write the project's git objects
-  and other agents' branch refs. On macOS nothing ran, and the container backend there needs Linux builds of
-  the harnesses in the image and cannot reach Claude's Keychain login or Codex's app-server socket.
-- **M11, `x100-vault`.** 46 tests. A client that knows only a reference makes an HTTPS request through the
-  proxy to a local server that requires the real value, and succeeds. The same request to a host not on the
-  credential's list arrives with the reference unreplaced. A search of everything the client saw finds no
-  form of the value. The store's file holds no form of it, and the key file is mode 0600. Streamed bodies of
-  several megabytes pass without being buffered whole, with references and values split across writes still
-  handled. The real `curl`, `claude` and `codex` went through the proxy with only a reference as their key,
-  and a local fake provider received the real value, which settles the certificate-authority unknowns in
-  HARNESSES.md. Encryption is XChaCha20-Poly1305 (RustCrypto), TLS is rustls. **Limits:** a request body over
-  4 MiB with a declared length is passed through unswapped. A value broken up by terminal escape sequences is
-  not caught. With no secret service here the key is a file. The macOS Keychain path is unbuilt and unrun.
-- **M12, `x100-gate`.** 44 tests. One rule table covers every tool (a new tool without a rule does not
-  compile), merges, egress by kind of host and method, and commands by pattern. At each "Ask me about" level
-  the table tests give: at High risk only a production deploy is held and a file edit is not, at Nothing
-  neither, at Every decision both, and a team change is held at every level. What no rule covers goes to a
-  classifier whose answer is parsed strictly, and no answer or an unparseable one is High. An "allowed once"
-  grant is exact, single-use and per agent. **Not run:** the plan's end-to-end part, which needs the wiring,
-  and the classifier's prompt against a real model.
+Nothing is running at this moment. Next is the first item queued.
 
 Queued, in this order:
 
@@ -334,6 +308,22 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From how a project begins:
+
+- **A project's own state is in the daemon's data directory**, under its id. The code directory holds the
+  repository, specs and worktrees.
+- **`chat.brief` is removed.** A builder's message is a message. `projects.create` takes an optional existing
+  folder. `projects.rename` is new.
+- **An incident:** before one test had its own projects root, it wrote two folders under the real `~/x100`,
+  which did not exist before. The subagent deleted `~/x100`. Every test daemon now panics unless it is given a
+  projects root.
+- **`xtest.py` sends keys with `XSendEvent`**: under WSLg, keys sent through XTEST went to whatever Windows
+  had in the foreground.
+- **CI after the three crates' push** failed on both systems for two reasons, both fixed here: the gate crate
+  was committed ahead of the core change it was built against, and the sandbox's helper used a Linux-only call
+  that does not build on macOS. The sandbox's tests now pass over a backend the machine lacks, and Linux CI
+  requires both.
 
 From the real end-to-end run:
 

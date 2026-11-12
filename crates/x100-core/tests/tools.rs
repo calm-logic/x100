@@ -173,6 +173,11 @@ fn every_tool_call_round_trips_inside_an_action() {
             telemetry: "Lead 1 idle for 3 tasks.".into(),
             team_toml: "[leads]".into(),
         }),
+        ToolCall::SetUpProject {
+            name: "Fernleaf".into(),
+            intent: "A waitlist page for a plant shop.".into(),
+            brief: Some("A landing page with a waitlist.".into()),
+        },
     ];
     for call in calls {
         let action = Action {

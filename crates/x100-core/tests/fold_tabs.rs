@@ -284,7 +284,7 @@ fn the_budget_tab_shows_spend_against_each_budget() {
     let (f, s) = scenario();
     let b = s.budget().unwrap();
     assert_eq!(b.project.budget, Money::from_dollars(50));
-    assert_eq!(b.project.spent, dollars(7_658_300));
+    assert_eq!(b.project.spent, dollars(7_688_300));
     assert!(!b.project.stopped);
 
     // Lab runs: twelve runs at three cents, against a tenth of the total.
@@ -303,7 +303,7 @@ fn the_budget_tab_shows_spend_against_each_budget() {
     assert_eq!(marketing.spent, dollars(5_003_300));
     assert!(marketing.stopped);
 
-    assert_eq!(b.agents[&f.ceo].cost, dollars(710_000));
+    assert_eq!(b.agents[&f.ceo].cost, dollars(740_000));
     assert_eq!(b.agents[&f.marketing].cost, dollars(5_000_000));
     assert_eq!(b.agents[&f.backend].cost, dollars(440_000));
     assert!(b.usage.input > 0 && b.usage.cache_read > b.usage.input);
@@ -400,7 +400,11 @@ fn specs_settings_preview_and_the_sidebar() {
     );
 
     let project = s.project().unwrap();
-    assert_eq!(project.name, "Fernleaf");
+    assert_eq!(project.name(), Some("Fernleaf"));
+    assert_eq!(
+        project.code_dir.as_deref(),
+        Some(std::path::Path::new("/home/builder/x100/fernleaf"))
+    );
     assert_eq!(project.settings.ask_me_about, AskMeAbout::MediumAndUp);
     assert_eq!(project.settings.allowed.len(), 3);
     assert_eq!(project.preview.as_deref(), Some("http://localhost:4321"));

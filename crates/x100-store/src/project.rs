@@ -1,4 +1,7 @@
-//! Everything the store keeps for one project, under its `.x100/` directory.
+//! Everything the store keeps for one project in the daemon's data directory, under the project's
+//! id: its event log, transcripts, terminals and files. A project exists before it has code, so
+//! none of this is in its code directory; git for that directory is [`crate::Git`], made from the
+//! directory the log records.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7,29 +10,27 @@ use x100_core::time::Clock;
 
 use crate::error::{Result, io};
 use crate::files::FileStore;
-use crate::git::Git;
 use crate::log::{DaemonLog, ProjectLog};
 use crate::terminal::Terminals;
 use crate::transcript::Transcripts;
 
 pub const DATABASE: &str = "store.sqlite";
 
-/// A project's event log, transcripts, terminals, files and git, opened together.
+/// A project's event log, transcripts, terminals and files, opened together.
 #[derive(Clone)]
 pub struct ProjectStore {
     pub log: ProjectLog,
     pub transcripts: Transcripts,
     pub terminals: Terminals,
     pub files: FileStore,
-    pub git: Git,
+    /// The directory all of this is in.
+    pub dir: PathBuf,
 }
 
 impl ProjectStore {
-    /// Opens `<project>/.x100/`, creating it. Does not touch git: [`Git::prepare`] does that, so
-    /// opening a store never changes the project's repository.
-    pub fn open(project: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
-        let dir = project.join(".x100");
-        std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+    /// Opens the project's store in `dir`, creating it.
+    pub fn open(dir: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
+        std::fs::create_dir_all(dir).map_err(io(dir))?;
         let db = dir.join(DATABASE);
         let log = ProjectLog::open(&db, clock)?;
         Ok(Self {
@@ -37,9 +38,20 @@ impl ProjectStore {
             transcripts: Transcripts::open(&db)?,
             terminals: Terminals::open(&db)?,
             files: FileStore::open(dir.join("files"))?,
-            git: Git::new(project),
+            dir: dir.to_owned(),
         })
     }
+
+    /// Where an agent works while the project has no code directory: a directory x100 owns, so
+    /// a driver can start before there is anything to check out.
+    pub fn scratch(&self) -> PathBuf {
+        self.dir.join("scratch")
+    }
+}
+
+/// Where the daemon keeps project `id`'s store, inside its data directory.
+pub fn project_dir(data_dir: &Path, id: impl std::fmt::Display) -> PathBuf {
+    data_dir.join("projects").join(id.to_string())
 }
 
 /// Opens the daemon's own log, `<dir>/daemon.sqlite`, creating `dir`.
@@ -49,6 +61,6 @@ pub fn open_daemon_log(dir: &Path, clock: Arc<dyn Clock>) -> Result<DaemonLog> {
 }
 
 /// The path of a project's database, for tools that look at it directly.
-pub fn database_path(project: &Path) -> PathBuf {
-    project.join(".x100").join(DATABASE)
+pub fn database_path(store_dir: &Path) -> PathBuf {
+    store_dir.join(DATABASE)
 }

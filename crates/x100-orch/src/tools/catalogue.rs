@@ -32,7 +32,14 @@ pub(crate) enum Tool {
     ReadLog,
     ReadMemories,
     ProposeChange,
+    SetUpProject,
 }
+
+/// What the CEO is told once its call has set the project up.
+pub(crate) const SET_UP: &str = "The project is set up and the builder's task is open. Your work \
+     on it continues in the project's own working directory, starting with your next turn, where \
+     the task reaches you. End this turn now, with at most a short line to the builder and no \
+     further tool calls.";
 
 /// What the model is told after a call that ends its part in the turn.
 pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the turn now, with at \
@@ -40,7 +47,7 @@ pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the t
      reaches your inbox.";
 
 impl Tool {
-    pub const ALL: [Tool; 22] = [
+    pub const ALL: [Tool; 23] = [
         Tool::Delegate,
         Tool::Review,
         Tool::Report,
@@ -63,6 +70,7 @@ impl Tool {
         Tool::ReadLog,
         Tool::ReadMemories,
         Tool::ProposeChange,
+        Tool::SetUpProject,
     ];
 
     pub fn of(call: &ToolCall) -> Tool {
@@ -89,6 +97,7 @@ impl Tool {
             ToolCall::ReadLog { .. } => Tool::ReadLog,
             ToolCall::ReadMemories { .. } => Tool::ReadMemories,
             ToolCall::ProposeChange(_) => Tool::ProposeChange,
+            ToolCall::SetUpProject { .. } => Tool::SetUpProject,
         }
     }
 
@@ -121,6 +130,7 @@ impl Tool {
             Tool::ReadLog => "read_log",
             Tool::ReadMemories => "read_memories",
             Tool::ProposeChange => "propose_change",
+            Tool::SetUpProject => "set_up_project",
         }
     }
 
@@ -134,6 +144,7 @@ impl Tool {
                 | Tool::ReadLog
                 | Tool::ReadMemories
                 | Tool::ProposeChange
+                | Tool::SetUpProject
         )
     }
 
@@ -252,6 +263,16 @@ impl Tool {
             Tool::ProposeChange => {
                 "CEO only, for reflection. Propose a change to a skill or a memory, put on trial, \
                  or to the team, which goes to the builder."
+            }
+            Tool::SetUpProject => {
+                "CEO only. Name a new project and say what it is for, once the builder has told \
+                 you enough to know. The first call sets the project up: it records the name and \
+                 the intent, makes the project's code directory, and opens the builder's task \
+                 with `brief` as what is asked, carrying the files the builder attached. Your \
+                 work then continues on your next turn, in the project's working directory. \
+                 Until this is called there is no task: do not plan, write specs or form a team \
+                 before it. Call it again later only to change the name or the intent; that \
+                 changes nothing else. Returns the task's id the first time."
             }
         }
     }

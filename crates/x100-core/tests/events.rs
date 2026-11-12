@@ -32,7 +32,7 @@ use x100_core::message::{Message, Route};
 use x100_core::money::{LongContext, Money, Percent, Price, Rates, Usage};
 use x100_core::party::{Actor, Party};
 use x100_core::process::{Process, ProcessEnd, ProcessName};
-use x100_core::project::{SettingChange, Settings};
+use x100_core::project::{Identity, SettingChange, Settings};
 use x100_core::settings::DaemonSetting;
 use x100_core::spec::{SpecKind, SpecRevision, SpecStatus};
 use x100_core::task::{Assignment, Opening, Outcome, Report, Task, TaskEvent, TaskFailure};
@@ -88,12 +88,22 @@ fn project_events() -> Vec<ProjectEvent> {
     };
     vec![
         P::Created {
-            name: "Fernleaf".into(),
             ceo: agent(0),
             charter: "Own the outcome.".into(),
             effort: EffortRange::FULL,
             settings,
         },
+        P::CodeDirSet {
+            dir: "/home/b/x100/fernleaf".into(),
+        },
+        P::SetUp(Identity {
+            name: "Fernleaf".into(),
+            intent: "A waitlist page for a plant shop.".into(),
+        }),
+        P::Renamed(Identity {
+            name: "Fernleaf shop".into(),
+            intent: "A waitlist page for a plant shop.".into(),
+        }),
         P::SettingChanged(SettingChange::Allow {
             what: hm(),
             allowed: false,
@@ -162,6 +172,10 @@ fn project_events() -> Vec<ProjectEvent> {
         P::Driver {
             driver: DriverId::from_u128(2),
             event: DriverEvent::Retired(RetireReason::Unfit(Unfit::CoolingOff)),
+        },
+        P::Driver {
+            driver: DriverId::from_u128(3),
+            event: DriverEvent::Retired(RetireReason::ProjectSetUp),
         },
         P::ProcessStarted(Process {
             agent: agent(1),
@@ -461,11 +475,10 @@ fn daemon_events() -> Vec<DaemonEvent> {
         },
         D::ProjectAdded {
             project: ProjectId::from_u128(1),
-            name: "Fernleaf".into(),
-            path: "/home/b/fernleaf".into(),
         },
         D::SettingChanged(DaemonSetting::StallTimeout(Duration::from_secs(600))),
         D::SettingChanged(DaemonSetting::TerminalDriversPerLogin(1)),
+        D::SettingChanged(DaemonSetting::ProjectsRoot("/home/b/code".into())),
         D::JobScheduled(Job {
             id: JobId::from_u128(1),
             when: Schedule::Once { at: at(60_000) },
@@ -484,6 +497,9 @@ fn project_variant(e: &ProjectEvent) -> &'static str {
     use ProjectEvent as P;
     match e {
         P::Created { .. } => "Created",
+        P::CodeDirSet { .. } => "CodeDirSet",
+        P::SetUp(_) => "SetUp",
+        P::Renamed(_) => "Renamed",
         P::SettingChanged(_) => "SettingChanged",
         P::PreviewSet { .. } => "PreviewSet",
         P::AgentAdded(_) => "AgentAdded",
@@ -559,7 +575,7 @@ where
 
 #[test]
 fn every_project_event_round_trips() {
-    round_trip(&project_events(), project_variant, 31);
+    round_trip(&project_events(), project_variant, 34);
 }
 
 #[test]

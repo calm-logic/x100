@@ -1,4 +1,5 @@
-# Fernleaf, modelled on the demo: the brief, a BRD, three leads, workers under two of them and a
+# Fernleaf, modelled on the demo: the builder's first message to a new project, which the CEO sets
+# up from it, a BRD, three leads, workers under two of them and a
 # worker with a worker of its own, a lead asking another lead, a question to the builder, a worker
 # waiting on a job of its own, a daily job delegating smoke tests, and the final report.
 #
@@ -26,6 +27,22 @@ context_window = 200000
 cache_lifetime_secs = 300
 efforts = ["low", "medium", "high", "max"]
 price = { input = 1.0, output = 5.0, cache_read = 0.1 }
+
+# The project is new: the CEO, on a driver in the scratch directory, sets it up from the builder's
+# first message, which opens its task. Its next turn is on a new driver in the code directory.
+[[turn]]
+when = { start_pack_contains = "PROJECT: not set up yet", input_contains = "Launch Fernleaf" }
+steps = [
+  { text = "Fernleaf it is: a waitlist page for a plant shop. Setting it up now." },
+  { call = { set_up_project = { name = "Fernleaf", intent = "A waitlist page for Fernleaf, a plant shop.", brief = "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist." } } },
+  { usage = { input = 900, output = 120, cost_micros = 9000 } },
+]
+
+# Anything else said before the project is set up tells the CEO nothing yet, so it only answers.
+[[turn]]
+when = { start_pack_contains = "PROJECT: not set up yet" }
+repeat = true
+steps = [{ text = "Hello! What would you like to build?" }]
 
 # The CEO answers, writes the BRD, forms the team, delegates to two leads and asks the builder.
 [[turn]]

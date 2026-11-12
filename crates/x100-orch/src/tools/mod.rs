@@ -10,6 +10,7 @@
 mod catalogue;
 mod later;
 mod schema;
+mod setup;
 mod talk;
 mod team;
 mod work;
@@ -28,7 +29,7 @@ use x100_core::tool::ToolCall;
 use crate::branches::Target;
 use crate::ctx::Events;
 
-pub(crate) use catalogue::{END_THE_TURN, Tool};
+pub(crate) use catalogue::{END_THE_TURN, SET_UP, Tool};
 pub(crate) use schema::schema;
 pub(crate) use work::{merged, report_failed};
 
@@ -50,6 +51,16 @@ pub(crate) struct Plan {
     pub events: Events,
     /// A merge that follows the events, whose outcome decides what is appended after it.
     pub merge: Option<MergePlan>,
+    /// A code directory to make before the events are appended, for a project being set up.
+    pub code_dir: Option<NewCodeDir>,
+}
+
+/// Where a project being set up gets its code directory: `<root>/<slug>`, or with a number after
+/// the slug if that is taken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewCodeDir {
+    pub root: std::path::PathBuf,
+    pub slug: String,
 }
 
 /// An accepted task's merge.
@@ -134,6 +145,11 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
             hash,
         } => team::add_file(&at, name, media_type, *size, hash),
         ToolCall::SetPreview { url } => team::set_preview(&at, url),
+        ToolCall::SetUpProject {
+            name,
+            intent,
+            brief,
+        } => setup::set_up(&at, name, intent, brief.as_deref()),
         ToolCall::StartProcess { .. }
         | ToolCall::StopProcess { .. }
         | ToolCall::LoadSkill { .. }
@@ -282,6 +298,16 @@ pub(crate) fn reply(call: &ToolCall, events: &[ProjectEvent]) -> String {
             })
         }),
         ToolCall::SetPreview { url } => json!({ "preview": url }),
+        ToolCall::SetUpProject { .. } => {
+            let mut out = json!({ "name": events.iter().find_map(|e| match e {
+                ProjectEvent::SetUp(i) | ProjectEvent::Renamed(i) => Some(&i.name),
+                _ => None,
+            }) });
+            if let Some(task) = task() {
+                out["task"] = json!(task);
+            }
+            out
+        }
         _ => json!({}),
     };
     if let (Some(extra), Value::Object(m)) = (merge(), &mut out)

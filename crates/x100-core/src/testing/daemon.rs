@@ -144,11 +144,7 @@ pub fn daemon_log(start: Timestamp) -> Vec<Envelope<DaemonEvent>> {
         }),
         D::HarnessAdded(claude()),
         D::HarnessAdded(codex(Duration::from_secs(300))),
-        D::ProjectAdded {
-            project: FERNLEAF,
-            name: "Fernleaf".into(),
-            path: "/home/builder/fernleaf".into(),
-        },
+        D::ProjectAdded { project: FERNLEAF },
         D::CredentialAdded(Credential {
             reference: stripe,
             name: "Stripe test key".into(),

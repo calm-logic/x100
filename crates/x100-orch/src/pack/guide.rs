@@ -7,12 +7,16 @@
 
 /// The guide for an agent in `position`, ending in a newline.
 pub(super) fn guide(position: Position) -> String {
-    let (who, talk, work, report) = match position {
-        Position::Ceo => (CEO, CEO_TALK, CEO_WORK, CEO_REPORT),
-        Position::Lead => (LEAD, MEMBER_TALK, MEMBER_WORK, MEMBER_REPORT),
-        Position::Worker => (WORKER, MEMBER_TALK, MEMBER_WORK, MEMBER_REPORT),
+    let (who, talk, work, task, report) = match position {
+        Position::Ceo => (CEO, CEO_TALK, CEO_WORK, CEO_TASK, CEO_REPORT),
+        Position::Lead => (LEAD, MEMBER_TALK, MEMBER_WORK, MEMBER_TASK, MEMBER_REPORT),
+        Position::Worker => (WORKER, MEMBER_TALK, MEMBER_WORK, MEMBER_TASK, MEMBER_REPORT),
     };
-    format!("{who}\n\n{TURNS}\n\n{talk}\n\n{work}\n\n{TASK} {report}\n\n{IDS}\n")
+    let set_up = match position {
+        Position::Ceo => format!("{SET_UP}\n\n"),
+        _ => String::new(),
+    };
+    format!("{who}\n\n{TURNS}\n\n{talk}\n\n{set_up}{work}\n\n{task} {TASK} {report}\n\n{IDS}\n")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +53,14 @@ const MEMBER_TALK: &str = "Talking. You answer to whoever delegated your task, a
      delegator needs to know in your report. Text you write is recorded but nobody reads it as \
      it comes.";
 
+const SET_UP: &str = "A new project. A new project has no name and no code yet; the PROJECT \
+     section says whether yours is set up. Answer the builder's message. When you know what the \
+     project is, set it up with `set_up_project`: a short name, one line on what it is for, and \
+     the brief, what the builder asks for as you understand it. That opens your task, and your \
+     work goes on in the next turn. If you do not know yet, for example when the builder only \
+     said hello, ask what they want or just answer, and end the turn: the next message brings \
+     you back. Do not start work, write a BRD or form a team before the project is set up.";
+
 const CEO_WORK: &str = "The work. Before building anything, write the business requirements \
      with `write_spec` (spec brd, status draft): the goal, what is in and out of scope, and how \
      the builder will know it is done. Keep it as short as the project. A small project needs no \
@@ -60,9 +72,12 @@ const MEMBER_WORK: &str = "The work. Do it yourself in your working directory. S
      `delegate` only for a part that can go on beside yours; then `wait` on its report and \
      `review` it.";
 
-const TASK: &str = "Your task. You always hold a task, the one on the \"Current task\" line of \
-     each turn's input. After each real step, bring its progress note up to date with \
-     `update_task`: what is done and what is next. If your driver stops, the next one starts \
+const CEO_TASK: &str = "Your task. Once the project is set up you always hold one:";
+
+const MEMBER_TASK: &str = "Your task. You always hold one:";
+
+const TASK: &str = "the task on the \"Current task\" line of each turn's input. After each \
+     real step, bring its progress note up to date with `update_task`: what is done and what is next. If your driver stops, the next one starts \
      from that note. End every turn in one of two ways: `report` the task once its work is \
      done, as completed or as failed with the reason, or `wait` for what it still needs. Never \
      end a turn with the task neither reported nor waited on.";

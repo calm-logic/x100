@@ -205,7 +205,7 @@ fn waiting_for_driver(s: &ProjectState, agent: AgentId) -> Option<Vec<Incompatib
 #[tokio::test(flavor = "multi_thread")]
 async fn a_task_arriving_while_a_compatible_driver_is_warm_reuses_it() {
     let w = world(None, Money::from_dollars(50)).await;
-    w.brief("Start: first\nLevel: low").await;
+    w.send("Start: first\nLevel: low").await;
     w.until("the first task is done", |s| done(s, "first"))
         .await;
     w.settle().await;
@@ -241,7 +241,7 @@ async fn a_task_arriving_while_a_compatible_driver_is_warm_reuses_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn one_arriving_after_the_warm_period_gets_a_new_driver() {
     let w = world(None, Money::from_dollars(50)).await;
-    w.brief("Start: first\nLevel: low").await;
+    w.send("Start: first\nLevel: low").await;
     w.until("the first task is done", |s| done(s, "first"))
         .await;
     w.settle().await;
@@ -266,7 +266,7 @@ async fn one_arriving_after_the_warm_period_gets_a_new_driver() {
 #[tokio::test(flavor = "multi_thread")]
 async fn one_needing_more_effort_than_the_warm_driver_has_gets_a_new_driver() {
     let w = world(None, Money::from_dollars(50)).await;
-    w.brief("Start: first\nLevel: low").await;
+    w.send("Start: first\nLevel: low").await;
     w.until("the first task is done", |s| done(s, "first"))
         .await;
     w.settle().await;
@@ -291,7 +291,7 @@ async fn one_needing_more_effort_than_the_warm_driver_has_gets_a_new_driver() {
 async fn a_driver_past_the_context_threshold_between_tasks_is_retired_and_its_successor_has_what_it_needed()
  {
     let w = world(None, Money::from_dollars(50)).await;
-    w.brief("Start: big-one\nLevel: low").await;
+    w.send("Start: big-one\nLevel: low").await;
     let dev = |s: &ProjectState| s.agents().find(|a| a.role == "Dev").map(|a| a.id);
     w.until("the full driver is retired", |s| {
         dev(s).is_some_and(|d| {
@@ -329,7 +329,7 @@ async fn a_driver_past_the_context_threshold_between_tasks_is_retired_and_its_su
 async fn waiting_for_max() -> (World, AgentId) {
     let allowed: &[(usize, &str)] = &[(0, "cheap")];
     let w = world(Some(allowed), Money::from_dollars(50)).await;
-    w.brief("Start: first\nLevel: max").await;
+    w.send("Start: first\nLevel: max").await;
     let dev = |s: &ProjectState| s.agents().find(|a| a.role == "Dev").map(|a| a.id);
     w.until("the worker waits for a driver", |s| {
         dev(s).is_some_and(|d| waiting_for_driver(s, d).is_some())
@@ -397,7 +397,7 @@ async fn a_login_at_its_cap_makes_the_next_agent_wait_until_a_driver_on_it_ends(
         ..DaemonSettings::default()
     };
     let w = world_on(Some(allowed), Money::from_dollars(50), &[(0, LOGIN)], one).await;
-    w.brief("Start: first\nLevel: low").await;
+    w.send("Start: first\nLevel: low").await;
     let dev = |s: &ProjectState| s.agents().find(|a| a.role == "Dev").map(|a| a.id);
     w.until("the worker waits for a driver", |s| {
         dev(s).is_some_and(|d| waiting_for_driver(s, d).is_some())
@@ -486,7 +486,7 @@ async fn a_wait_for_a_driver_past_its_deadline_reports_the_task_failed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lead_at_its_budget_starts_nothing_while_other_leads_carry_on() {
     let w = world(None, Money::from_dollars(50)).await;
-    w.brief("Team: Tech and Product").await;
+    w.send("Team: Tech and Product").await;
     w.until("Tech's first task is done", |s| done(s, "costly-a"))
         .await;
     w.settle().await;
@@ -537,7 +537,7 @@ async fn a_lead_at_its_budget_starts_nothing_while_other_leads_carry_on() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_at_its_total_starts_nothing() {
     let w = world(None, Money::from_dollars(1)).await;
-    w.brief("Start: costly-x\nLevel: low").await;
+    w.send("Start: costly-x\nLevel: low").await;
     w.until("the project reaches its total", |s| {
         s.budget().is_some_and(|b| b.project.stopped)
     })
@@ -580,7 +580,7 @@ async fn a_project_at_its_total_starts_nothing() {
 async fn a_harness_and_model_that_fail_with_a_provider_error_are_skipped_until_their_cool_off_ends()
 {
     let w = world(None, Money::from_dollars(50)).await;
-    w.brief("Start: flaky-one\nLevel: low").await;
+    w.send("Start: flaky-one\nLevel: low").await;
     w.until("the task is done", |s| done(s, "flaky-one")).await;
     w.settle().await;
     let cheap = on(&w, 0, "cheap");

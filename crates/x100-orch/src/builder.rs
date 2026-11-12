@@ -1,7 +1,9 @@
 //! What the builder's requests do to a project's log. There is one chat per project, with the
 //! CEO: the builder's messages go to the CEO only.
 //!
-//! The builder delegates to the CEO. The brief opens a task, and a later message opens one only
+//! A new project is not set up: its messages open no task, and the CEO answers them until it
+//! knows enough to set the project up, which opens the builder's task from the conversation
+//! ([`crate::tools`]). Once it is set up, the builder delegates to the CEO: a message opens a task
 //! when the CEO has none in progress from the builder, so the CEO always works under a task with a
 //! progress note. Such a message is still delivered as the message it is: the CEO answers the
 //! builder, and finds the task it opened in its records.
@@ -17,6 +19,7 @@ use x100_core::ledger::Budgets;
 use x100_core::message::{Message, Route};
 use x100_core::money::Money;
 use x100_core::party::{Actor, Party};
+use x100_core::project::Identity;
 use x100_core::task::{Assignment, Opening, Task, TaskState};
 use x100_core::team::TeamOp;
 use x100_core::time::Clock;
@@ -60,7 +63,7 @@ fn ceo(state: &ProjectState) -> Result<AgentId, Refused> {
 }
 
 /// A task the builder delegates to the CEO, titled by the first line of what it asks.
-fn builder_task(
+pub(crate) fn builder_task(
     state: &ProjectState,
     clock: &dyn Clock,
     ceo: AgentId,
@@ -108,8 +111,8 @@ pub(crate) fn builder_task_open(state: &ProjectState, ceo: AgentId) -> Option<Ta
     })
 }
 
-/// The builder's message to the CEO, delivered to its inbox, with a task when it has none open
-/// from the builder. Blocks.
+/// The builder's message to the CEO, delivered to its inbox, with a task when the project is set
+/// up and the CEO has none open from the builder. Blocks.
 pub(crate) fn send_chat(
     ctx: &ProjectCtx,
     body: String,
@@ -136,7 +139,8 @@ pub(crate) fn send_chat(
             in_reply_to,
         };
         let mut events = vec![(Actor::Builder, ProjectEvent::MessageSent(message))];
-        if builder_task_open(s, ceo).is_none() {
+        let set_up = s.project().is_some_and(|p| p.is_set_up());
+        if set_up && builder_task_open(s, ceo).is_none() {
             let (_, opened) = builder_task(s, clock, ceo, &body, attachments.clone());
             events.push(opened);
         }
@@ -145,40 +149,27 @@ pub(crate) fn send_chat(
     })?
 }
 
-/// The brief: the project's first message, and the task it delegates to the CEO. Blocks.
-pub(crate) fn send_brief(
-    ctx: &ProjectCtx,
-    body: String,
-    attachments: Vec<FileId>,
-) -> Result<(MessageId, TaskId), Refused> {
-    ctx.commit(|s, clock| -> Decided<(MessageId, TaskId)> {
-        let ceo = match ceo(s) {
-            Ok(c) => c,
-            Err(e) => return refused(e),
-        };
-        if let Err(e) = check_attachments(s, &attachments) {
-            return refused(e);
+/// The builder renames a project its CEO has set up. Its intent and its code directory stay.
+/// Blocks.
+pub(crate) fn rename(ctx: &ProjectCtx, name: String) -> Result<(), Refused> {
+    ctx.commit(|s, _| -> Decided<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return refused(Refused::Rejected("a project's name cannot be empty".into()));
         }
-        if s.messages().next().is_some() {
+        let Some(identity) = s.project().and_then(|p| p.identity.clone()) else {
             return refused(Refused::WrongState(
-                "the brief is the project's first message, and there is one already".into(),
+                "the project is not set up yet: its CEO names it first".into(),
             ));
-        }
-        let message = new_id(clock, MessageId::new);
-        let note = Message {
-            id: message,
-            route: Route::BuilderToCeo,
-            body: body.clone(),
-            attachments: attachments.clone(),
-            in_reply_to: None,
         };
-        let (task, opened) = builder_task(s, clock, ceo, &body, attachments.clone());
-        let events = vec![
-            (Actor::Builder, ProjectEvent::MessageSent(note)),
-            opened,
-            deliver(clock, ceo, InboxItem::Task { task }),
-        ];
-        (events, Ok((message, task)))
+        let renamed = Identity {
+            name: name.to_owned(),
+            ..identity
+        };
+        (
+            vec![(Actor::Builder, ProjectEvent::Renamed(renamed))],
+            Ok(()),
+        )
     })?
 }
 

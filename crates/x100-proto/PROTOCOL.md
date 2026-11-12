@@ -68,6 +68,9 @@ One subscription, `events.subscribe`, follows all of them.
   subscriptions are not limited this way: a connection may follow several agents.
 - A project created after the subscription is followed from its first event (`Created`), so a client that
   gets an event for a project it has no state for starts that project's state empty and applies it.
+- A new project has no name, intent or code directory. Its log gains `code_dir_set` when it gets one (at
+  creation for an existing folder, otherwise when it is set up), `set_up` when the CEO names it with
+  `set_up_project`, and `renamed` for a later change, so a client shows the name the state holds.
 - Each notification is `events.event`, naming the log. The client applies it to the state with the same
   functions the daemon uses (`ProjectState::apply`, `DaemonState::apply`), and a fold error means the client
   missed or repeated an event and must subscribe again.
@@ -132,7 +135,7 @@ The client subscribes with no cursor. The result carries the snapshot: the daemo
 ```
 
 ```json daemon
-{"jsonrpc":"2.0","id":2,"result":{"snapshot":{"daemon":{"cool_offs":[],"credentials":{},"harnesses":{},"jobs":{},"machines":{},"projects":{},"seq":null,"settings":{"cool_off":{"nanos":0,"secs":600},"default_wait_deadline":{"nanos":0,"secs":86400},"last_turn_limit":{"nanos":0,"secs":180},"minimum_repeat":{"nanos":0,"secs":300},"retire_after_age":{"nanos":0,"secs":14400},"retire_after_tasks":10,"retire_at_context":70,"stall_timeout":{"nanos":0,"secs":300},"start_pack_share":50,"terminal_drivers_per_login":4,"turns_without_progress":3}},"projects":{"prj_01M74XBRM00000000000000001":{"actions":{},"agents":{"agt_01M74XBRM00000000000000001":{"charter":"Own Fernleaf's launch, from brief to a live site.","drivers":[],"id":"agt_01M74XBRM00000000000000001","inbox":{"items":{}},"items":{},"joined":1794387601000,"memories":{},"open_tasks":[],"processes":{},"role":"CEO","skills":[],"spent":{"cost":0,"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}},"state":"planned","waits":{}}},"chat":[],"drivers":{},"files":{},"jobs":{},"messages":{},"project":{"ceo":"agt_01M74XBRM00000000000000001","created":1794387601000,"name":"Fernleaf","preview":null,"settings":{"allowed":[{"harness":"hns_00000000000000000000000002","model":"claude-opus"},{"harness":"hns_00000000000000000000000002","model":"claude-sonnet"},{"harness":"hns_00000000000000000000000003","model":"gpt-codex"}],"ask_me_about":"high_risk_only","budget":50000000,"lab_share":10},"team":{"ceo":"agt_01M74XBRM00000000000000001","members":{"agt_01M74XBRM00000000000000001":{"position":{"ceo":{"effort":{"max":"max","min":"low"}}},"retired":false}}}},"seq":1,"skills":[],"specs":{},"spend":{"lab":0,"leads":{},"project":0},"tasks":{},"trials":{},"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}}}},"subscription":1}}
+{"jsonrpc":"2.0","id":2,"result":{"snapshot":{"daemon":{"cool_offs":[],"credentials":{},"harnesses":{},"jobs":{},"machines":{},"projects":{},"seq":null,"settings":{"cool_off":{"nanos":0,"secs":600},"default_wait_deadline":{"nanos":0,"secs":86400},"last_turn_limit":{"nanos":0,"secs":180},"minimum_repeat":{"nanos":0,"secs":300},"projects_root":null,"retire_after_age":{"nanos":0,"secs":14400},"retire_after_tasks":10,"retire_at_context":70,"stall_timeout":{"nanos":0,"secs":300},"start_pack_share":50,"terminal_drivers_per_login":4,"turns_without_progress":3}},"projects":{"prj_01M74XBRM00000000000000001":{"actions":{},"agents":{"agt_01M74XBRM00000000000000001":{"charter":"Own Fernleaf's launch, from brief to a live site.","drivers":[],"id":"agt_01M74XBRM00000000000000001","inbox":{"items":{}},"items":{},"joined":1794387601000,"memories":{},"open_tasks":[],"processes":{},"role":"CEO","skills":[],"spent":{"cost":0,"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}},"state":"planned","waits":{}}},"chat":[],"drivers":{},"files":{},"jobs":{},"messages":{},"project":{"ceo":"agt_01M74XBRM00000000000000001","code_dir":null,"created":1794387601000,"identity":null,"preview":null,"settings":{"allowed":[{"harness":"hns_00000000000000000000000002","model":"claude-opus"},{"harness":"hns_00000000000000000000000002","model":"claude-sonnet"},{"harness":"hns_00000000000000000000000003","model":"gpt-codex"}],"ask_me_about":"high_risk_only","budget":50000000,"lab_share":10},"team":{"ceo":"agt_01M74XBRM00000000000000001","members":{"agt_01M74XBRM00000000000000001":{"position":{"ceo":{"effort":{"max":"max","min":"low"}}},"retired":false}}}},"seq":1,"skills":[],"specs":{},"spend":{"lab":0,"leads":{},"project":0},"tasks":{},"trials":{},"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}}}},"subscription":1}}
 ```
 
 Every event after the snapshot follows as a notification, in order, once. The next two events of the project's log are 2 and 3.
@@ -245,6 +248,7 @@ Errors: rejected
           "nanos": 0,
           "secs": 300
         },
+        "projects_root": null,
         "retire_after_age": {
           "nanos": 0,
           "secs": 14400
@@ -299,8 +303,9 @@ Errors: rejected
         "messages": {},
         "project": {
           "ceo": "agt_01M74XBRM00000000000000001",
+          "code_dir": null,
           "created": 1794387601000,
-          "name": "Fernleaf",
+          "identity": null,
           "preview": null,
           "settings": {
             "allowed": [
@@ -415,7 +420,6 @@ Errors: not_found
             "max": "max",
             "min": "low"
           },
-          "name": "Fernleaf",
           "settings": {
             "allowed": [
               {
@@ -622,6 +626,7 @@ Errors: none
       "nanos": 0,
       "secs": 300
     },
+    "projects_root": null,
     "retire_after_age": {
       "nanos": 0,
       "secs": 14400
@@ -839,9 +844,9 @@ Errors: none
   "projects": [
     {
       "agents": 4,
+      "dir": "/home/ada/x100/fernleaf",
       "live": true,
       "name": "Fernleaf",
-      "path": "/home/ada/fernleaf",
       "project": "prj_01M74XBRM00000000000000001"
     }
   ]
@@ -901,8 +906,9 @@ Errors: not_found
   "messages": {},
   "project": {
     "ceo": "agt_01M74XBRM00000000000000001",
+    "code_dir": null,
     "created": 1794387601000,
-    "name": "Fernleaf",
+    "identity": null,
     "preview": null,
     "settings": {
       "allowed": [
@@ -962,7 +968,7 @@ Errors: not_found
 
 ### `projects.create`
 
-Creates a project in a directory, starting a git repository there if there is none, and with it the CEO. `settings` defaults to the daemon's.
+Creates a project, and with it the CEO. A new project has no name, no intent and no code directory: the CEO sets it up once the builder's messages say what it is. With `dir`, it starts on that existing folder, which is its code directory from the start, and a git repository is started there if there is none. `settings` defaults to the daemon's. A client creates one as the builder sends its first message, then sends that message.
 
 Params type `CreateProject`, result type `ProjectCreated`.
 
@@ -970,8 +976,7 @@ Errors: rejected, unavailable
 
 ```json params
 {
-  "name": "Fernleaf",
-  "path": "/home/ada/fernleaf",
+  "dir": null,
   "settings": {
     "allowed": [
       {
@@ -990,6 +995,25 @@ Errors: rejected, unavailable
 {
   "project": "prj_01M74XBRM00000000000000001"
 }
+```
+
+### `projects.rename`
+
+Renames a project that is set up. Its intent and its code directory stay.
+
+Params type `RenameProject`, result type `Done`.
+
+Errors: not_found, wrong_state, rejected
+
+```json params
+{
+  "name": "Fernleaf Shop",
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{}
 ```
 
 ### `projects.set`
@@ -1033,34 +1057,9 @@ Errors: not_found, wrong_state, unavailable
 }
 ```
 
-### `chat.brief`
-
-Sends the brief, the project's first message, with files already uploaded attached. It is delegated to the CEO as a task.
-
-Params type `SendBrief`, result type `BriefSent`.
-
-Errors: not_found, wrong_state
-
-```json params
-{
-  "attachments": [
-    "fil_01M74XBRM00000000000000003"
-  ],
-  "body": "A landing page for a plant shop, with a waitlist.",
-  "project": "prj_01M74XBRM00000000000000001"
-}
-```
-
-```json result
-{
-  "message": "msg_01M74XBRM00000000000000006",
-  "task": "tsk_01M74XBRM00000000000000005"
-}
-```
-
 ### `chat.send`
 
-Sends a message to the CEO. The builder talks to no one else.
+Sends a message to the CEO, with files already uploaded attached. The builder talks to no one else. Once the project is set up, a message opens a task for the CEO when it holds none from the builder; before, it is only a message, which the CEO answers.
 
 Params type `SendChat`, result type `ChatSent`.
 
@@ -1579,7 +1578,7 @@ which appends events; the client sees the result in the stream, not in the respo
 | `/harnesses/` | snapshot, `daemon.get` | `harnesses.rescan`, `projects.set` (allow or disallow a harness and model) |
 | `/credentials/` | snapshot, `daemon.get` (reference, name, scope: never the value) | `credentials.add`, `.replace`, `.set_scope`, `.remove` |
 | daemon settings | snapshot, `daemon.get` | `daemon.set_setting` |
-| `/projects/` | snapshot, `projects.list`, `projects.get` | `projects.create`, `projects.set`, `projects.reflect` |
+| `/projects/` | snapshot, `projects.list`, `projects.get` | `projects.create`, `projects.rename`, `projects.set`, `projects.reflect` |
 | `/events` | `events.subscribe`, `events.read` | not changed by clients |
 | `/agents/` | snapshot (team, state, current task and driver) | `agents.set_budget`, `agents.set_effort`, `agents.replace_driver` |
 | `/agents/{id}/inbox` | `agents.inbox` | by the daemon |
@@ -1587,8 +1586,8 @@ which appends events; the client sees the result in the stream, not in the respo
 | `/agents/{id}/transcript` | `transcript.read`, `transcript.subscribe` | by the daemon |
 | `/drivers/{id}/terminal` | `terminal.read`, `terminal.subscribe` | by the daemon |
 | `/drivers/` | snapshot, `drivers.start_pack` | `drivers.stop` |
-| `/tasks/` | snapshot | `chat.brief`, `tasks.raise` |
-| `/messages/` | snapshot (the chat) | `chat.brief`, `chat.send` |
+| `/tasks/` | snapshot | `chat.send`, `tasks.raise` |
+| `/messages/` | snapshot (the chat) | `chat.send` |
 | `/jobs/` | snapshot | `jobs.cancel` |
 | `/actions/` | snapshot | `actions.decide` |
 | `/specs/` | snapshot | by agents |

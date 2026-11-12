@@ -46,11 +46,10 @@ pub enum DaemonEvent {
     CredentialRemoved {
         credential: CredentialRef,
     },
-    /// A project directory joined the daemon's list. The project's own log holds the rest.
+    /// A project joined the daemon's list. Its own log, kept in the daemon's data directory under
+    /// its id, holds the rest: its name, once it has one, and its code directory.
     ProjectAdded {
         project: ProjectId,
-        name: String,
-        path: String,
     },
     /// The builder changed one of the daemon's settings. Until the first change each is at its
     /// default.

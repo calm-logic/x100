@@ -219,6 +219,9 @@ async fn run(args: &[String]) -> ExitCode {
     };
     // Whatever the command starts and abandons, a process that left its session included,
     // becomes this process's child, so it can be found and ended.
+    // Linux only, which is where the helper ever runs: inside a sandbox, or inside a container's
+    // Linux. The crate still has to build on macOS, where the daemon starts containers.
+    #[cfg(target_os = "linux")]
     if let Err(e) = nix::sys::prctl::set_child_subreaper(true) {
         return fail(&format!("run: cannot become a subreaper: {e}"));
     }

@@ -16,7 +16,9 @@ use x100_core::effort::EffortRange;
 use x100_core::event::{DaemonEvent, Envelope, ProjectEvent};
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::harness::{HarnessKind, HarnessModel, Machine, ModelOffer, Support};
-use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, ProjectId, TaskId};
+use x100_core::id::{
+    AgentId, DriverId, FileId, HarnessId, MachineId, MessageId, ProjectId, TaskId,
+};
 use x100_core::money::{Money, Percent};
 use x100_core::party::Actor;
 use x100_core::project::Settings as ProjectSettings;
@@ -57,6 +59,17 @@ pub struct World {
 
 pub type Endpoints = Arc<Mutex<HashMap<DriverId, ToolEndpoint>>>;
 
+/// How the project begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// Already set up as Fernleaf, with its code directory, for tests about what comes after.
+    SetUp,
+    /// New: no name, no intent, no code directory, as the builder's first message finds it.
+    New,
+    /// New, on the existing folder `existing` in the test's directory, which holds a README.
+    Existing,
+}
+
 /// One script, and more for more providers. Every model of every provider is allowed unless the
 /// setup names which.
 pub struct Setup<'a> {
@@ -69,6 +82,7 @@ pub struct Setup<'a> {
     pub serve: bool,
     /// The scripts, by number, whose harness the daemon's log puts on a provider login.
     pub logins: &'a [(usize, &'a str)],
+    pub start: Start,
 }
 
 impl<'a> Setup<'a> {
@@ -86,6 +100,7 @@ impl<'a> Setup<'a> {
             settings,
             serve: false,
             logins: &[],
+            start: Start::SetUp,
         }
     }
 }
@@ -168,22 +183,30 @@ fn all_settings(s: &DaemonSettings) -> Vec<DaemonSetting> {
         D::CoolOff(s.cool_off),
         D::TerminalDriversPerLogin(s.terminal_drivers_per_login),
     ]
+    .into_iter()
+    .chain(s.projects_root.clone().map(D::ProjectsRoot))
+    .collect()
 }
 
 /// The daemon's settings as its log holds them now.
 pub fn settings_of(log: &DaemonLog) -> x100_orch::Settings {
     let log = log.clone();
-    Arc::new(move || log.with_state(|d| *d.settings()))
+    Arc::new(move || log.with_state(|d| d.settings().clone()))
 }
 
 impl World {
-    pub async fn new(setup: Setup<'_>) -> World {
+    pub async fn new(mut setup: Setup<'_>) -> World {
         let dir = tempfile::tempdir().expect("a temporary directory");
-        let project_dir = dir.path().join("fernleaf");
+        // Code directories go under the test's own directory, never the builder's `~/x100`.
+        setup
+            .settings
+            .projects_root
+            .get_or_insert_with(|| dir.path().join("projects"));
+        let project = ProjectId::from_u128(1);
         let clock = FakeClock::new(START);
         let shared: Arc<dyn Clock> = Arc::new(clock.clone());
-        let store = ProjectStore::open(&project_dir, Arc::clone(&shared)).expect("a store");
-        store.git.prepare().expect("a repository");
+        let store_dir = x100_store::project_dir(&dir.path().join("data"), project);
+        let store = ProjectStore::open(&store_dir, Arc::clone(&shared)).expect("a store");
         let scripts: Vec<&str> = std::iter::once(setup.script)
             .chain(setup.providers.iter().copied())
             .collect();
@@ -206,7 +229,6 @@ impl World {
         }
         let ceo = x100_orch::new_id(&*shared, AgentId::new);
         let created = ProjectEvent::Created {
-            name: "Fernleaf".into(),
             ceo,
             charter: "Own Fernleaf's launch, from brief to a live site.".into(),
             effort: EffortRange::FULL,
@@ -217,7 +239,32 @@ impl World {
                 allowed,
             },
         };
-        store.log.append(Actor::Builder, created).expect("created");
+        let mut events = vec![(Actor::Builder, created)];
+        let code_dir = match setup.start {
+            Start::SetUp => Some(dir.path().join("projects").join("fernleaf")),
+            Start::Existing => {
+                let existing = dir.path().join("existing");
+                std::fs::create_dir_all(&existing).expect("the folder");
+                std::fs::write(existing.join("README.md"), "# Shop\nAn old shop.\n")
+                    .expect("its README");
+                Some(existing)
+            }
+            Start::New => None,
+        };
+        if let Some(code) = code_dir {
+            x100_store::Git::new(code.clone())
+                .prepare()
+                .expect("a repository");
+            events.push((Actor::Builder, ProjectEvent::CodeDirSet { dir: code }));
+        }
+        if setup.start == Start::SetUp {
+            let identity = x100_core::project::Identity {
+                name: "Fernleaf".into(),
+                intent: "A waitlist page for Fernleaf, a plant shop.".into(),
+            };
+            events.push((Actor::Agent(ceo), ProjectEvent::SetUp(identity)));
+        }
+        store.log.append_all(events).expect("created");
 
         let (daemon, daemon_jobs) = daemon_log(
             &dir.path().join("daemon"),
@@ -273,7 +320,6 @@ impl World {
             sandbox: Arc::new(NoSandbox),
             serial: true,
         });
-        let project = ProjectId::from_u128(1);
         let scheduler = Scheduler::new(store.log.clone(), shared);
         orch.attach(project, store.clone(), scheduler.clone());
         World {
@@ -297,16 +343,40 @@ impl World {
         self.store.log.state()
     }
 
+    /// The project's code directory.
     pub fn project_dir(&self) -> PathBuf {
-        self.store.git.project_dir().to_path_buf()
+        self.state()
+            .project()
+            .and_then(|p| p.code_dir.clone())
+            .expect("the project has a code directory")
     }
 
-    pub async fn brief(&self, body: &str) -> TaskId {
+    /// Where code directories are made.
+    pub fn projects_root(&self) -> PathBuf {
+        self.dir.path().join("projects")
+    }
+
+    /// The builder's message to the CEO.
+    pub async fn say(&self, body: &str) -> MessageId {
+        self.say_with(body, vec![]).await
+    }
+
+    pub async fn say_with(&self, body: &str, attachments: Vec<FileId>) -> MessageId {
         self.orch
-            .send_brief(self.project, body.into(), vec![])
+            .send_chat(self.project, body.into(), attachments, None)
             .await
-            .expect("the brief is sent")
-            .1
+            .expect("the message is sent")
+    }
+
+    /// A message to a project that is set up, and the task it opens for the CEO.
+    pub async fn send(&self, body: &str) -> TaskId {
+        self.say(body).await;
+        self.state()
+            .tasks()
+            .filter(|t| t.task.raised_by == x100_core::party::Party::Builder)
+            .map(|t| t.task.id)
+            .last()
+            .expect("the message opened a task")
     }
 
     /// Waits until nothing more happens without the builder or the clock: no turn running or

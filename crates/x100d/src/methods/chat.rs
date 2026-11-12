@@ -1,16 +1,7 @@
-use x100_proto::{BriefSent, ChatSent, RaiseTask, RpcError, SendBrief, SendChat, TaskRaised};
+use x100_proto::{ChatSent, RaiseTask, RpcError, SendChat, TaskRaised};
 
 use super::refused;
 use crate::hub::Hub;
-
-pub async fn brief(hub: &Hub, p: SendBrief) -> Result<BriefSent, RpcError> {
-    let (message, task) = hub
-        .orch
-        .send_brief(p.project, p.body, p.attachments)
-        .await
-        .map_err(refused)?;
-    Ok(BriefSent { message, task })
-}
 
 pub async fn send(hub: &Hub, p: SendChat) -> Result<ChatSent, RpcError> {
     let message = hub

@@ -48,7 +48,7 @@ async fn world(brief: &str) -> (World, TaskId) {
     let mut setup = Setup::new(SCRIPT);
     setup.serve = true;
     let w = World::new(setup).await;
-    let task = w.brief(brief).await;
+    let task = w.send(brief).await;
     w.settle().await;
     (w, task)
 }
@@ -71,7 +71,7 @@ const LATER: [&str; 7] = [
     "read_log",
     "propose_change",
 ];
-const CEO_ONLY: [&str; 3] = ["form_team", "set_effort", "set_budget"];
+const CEO_ONLY: [&str; 4] = ["form_team", "set_effort", "set_budget", "set_up_project"];
 
 fn parsed(answer: &Answer) -> Value {
     assert!(!answer.is_error, "{answer:?}");
@@ -195,7 +195,7 @@ async fn two_drivers_reach_their_own_tools_over_http_at_once() {
     expected.sort();
     got.sort();
     assert_eq!(got, expected, "a lead gets every other tool the CEO gets");
-    assert_eq!(ceo_names.len(), 15);
+    assert_eq!(ceo_names.len(), 16);
 
     assert_eq!(parsed(&spec)["revision"], 1);
     assert_eq!(parsed(&update)["task"], json!(tech_task));

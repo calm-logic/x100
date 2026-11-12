@@ -46,8 +46,6 @@ pub struct CredentialRecord {
 /// A project on the daemon's list. Its own log holds the rest, the sidebar's live state included.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectEntry {
-    pub name: String,
-    pub path: String,
     pub added: Timestamp,
 }
 
@@ -177,22 +175,14 @@ impl DaemonState {
                 self.credentials.remove(credential).ok_or(unknown(record))?;
                 ch.part(DaemonPart::Credentials).record(record);
             }
-            D::ProjectAdded {
-                project,
-                name,
-                path,
-            } => {
+            D::ProjectAdded { project } => {
                 let record = Record::Project(*project);
-                let entry = ProjectEntry {
-                    name: name.clone(),
-                    path: path.clone(),
-                    added: at,
-                };
+                let entry = ProjectEntry { added: at };
                 insert_new(&mut self.projects, *project, entry, record)?;
                 ch.part(DaemonPart::Projects).record(record);
             }
             D::SettingChanged(change) => {
-                self.settings.set(*change);
+                self.settings.set(change.clone());
                 ch.part(DaemonPart::Settings);
             }
             D::JobScheduled(j) => {

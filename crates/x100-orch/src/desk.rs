@@ -24,12 +24,13 @@ use x100_core::spec::SpecKind;
 use x100_core::tool::ToolCall;
 use x100_drivers::ToolEndpoint;
 use x100_drivers::fake::DaemonTools;
+use x100_store::Git;
 
-use crate::ctx::{Events, ProjectCtx, Writer};
+use crate::ctx::{Events, ProjectCtx, Writer, git_of};
 use crate::gate::{self, Gate};
 use crate::ids::new_id;
 use crate::store::blocking;
-use crate::tools::{self, Ctx, END_THE_TURN, Tool};
+use crate::tools::{self, Ctx, END_THE_TURN, NewCodeDir, SET_UP, Tool};
 use crate::{Settings, branches};
 
 /// How many refusals [`Desk::refusals`] keeps, newest last.
@@ -281,13 +282,21 @@ fn carry_out(
         Ok(plan) => plan,
         Err(refusal) => return refuse(&w, head, action.id, refusal),
     };
+    let git = w.read(git_of);
     for agent in &plan.commit {
-        if let Err(e) = branches::commit(store, *agent) {
+        if let Some(e) = git.as_ref().and_then(|g| branches::commit(g, *agent).err()) {
             return refuse(&w, head, action.id, e);
         }
     }
-    let mut own: Vec<ProjectEvent> = plan.events.iter().map(|(_, e)| e.clone()).collect();
-    head.extend(plan.events);
+    let mut events = plan.events;
+    if let Some(new) = &plan.code_dir {
+        match make_code_dir(new) {
+            Ok(dir) => events.insert(0, (x100_core::party::Actor::Agent(agent), dir)),
+            Err(e) => return refuse(&w, head, action.id, e),
+        }
+    }
+    let mut own: Vec<ProjectEvent> = events.iter().map(|(_, e)| e.clone()).collect();
+    head.extend(events);
     match plan.merge {
         None => {
             head.push(gate::finished(action.id, None));
@@ -308,32 +317,40 @@ fn carry_out(
             }
             // Appended before the merge runs, so the task is Promoting while it does.
             append(&w, head)?;
-            let outcome = branches::merge(store, merge.from, merge.into);
+            let outcome = match w.read(git_of) {
+                Some(git) => branches::merge(&git, merge.from, merge.into),
+                None => Err("the project has no code directory to merge into".into()),
+            };
             let mut tail = w.read(|s| tools::merged(s, clock, &merge, merge_action.id, outcome));
             own.extend(tail.iter().map(|(_, e)| e.clone()));
             tail.push(gate::finished(action.id, None));
             append(&w, tail)?;
         }
     }
-    if let ToolCall::WriteSpec { spec, body, .. } = &call {
-        write_spec_file(ctx, *spec, body);
+    if let (ToolCall::WriteSpec { spec, body, .. }, Some(git)) = (&call, &git) {
+        write_spec_file(git, *spec, body);
     }
     Ok(answer(&call, &own))
 }
 
-/// The reply to a call that was carried out. After `wait` or `report` it also tells the model its
-/// part in the turn is over, which the start pack's record of the call leaves out.
+/// The reply to a call that was carried out. After `wait` or `report`, or the call that sets the
+/// project up, it also tells the model its part in the turn is over, which the start pack's record
+/// of the call leaves out.
 fn answer(call: &ToolCall, events: &[ProjectEvent]) -> String {
     let reply = tools::reply(call, events);
-    if !Tool::of(call).ends_turn() {
+    let next = if events.iter().any(|e| matches!(e, ProjectEvent::SetUp(_))) {
+        SET_UP
+    } else if Tool::of(call).ends_turn() {
+        END_THE_TURN
+    } else {
         return reply;
-    }
+    };
     match serde_json::from_str::<serde_json::Value>(&reply) {
         Ok(serde_json::Value::Object(mut m)) => {
-            m.insert("next".into(), END_THE_TURN.into());
+            m.insert("next".into(), next.into());
             serde_json::Value::Object(m).to_string()
         }
-        _ => format!("{reply}\n{END_THE_TURN}"),
+        _ => format!("{reply}\n{next}"),
     }
 }
 
@@ -354,15 +371,42 @@ fn append(w: &Writer, events: Events) -> Result<(), Outcome> {
         .map_err(|e| Outcome::Refused(format!("the log refused this call: {e}")))
 }
 
-/// Specs are kept as Markdown in the project's `.x100/specs/`, written from the log for people
-/// to read. The log is the record, so a file that cannot be written loses nothing.
-fn write_spec_file(ctx: &ProjectCtx, kind: SpecKind, body: &str) {
+/// Makes a project's code directory under the projects root, named by its slug, or by the slug and
+/// a number when that is taken by a project or anything else, and starts its repository there.
+/// The directory is claimed by creating it, so two projects set up at once cannot get the same one.
+fn make_code_dir(new: &NewCodeDir) -> Result<ProjectEvent, String> {
+    let cannot = |e: &dyn std::fmt::Display| format!("the project's code directory: {e}");
+    std::fs::create_dir_all(&new.root).map_err(|e| cannot(&e))?;
+    let mut n = 1;
+    let dir = loop {
+        let name = match n {
+            1 => new.slug.clone(),
+            _ => format!("{}-{n}", new.slug),
+        };
+        let dir = new.root.join(name);
+        match std::fs::create_dir(&dir) {
+            Ok(()) => break dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(cannot(&e)),
+        }
+    };
+    if let Err(e) = Git::new(dir.clone()).prepare() {
+        // Nothing but x100 has used it, since it was made just now.
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(cannot(&e));
+    }
+    Ok(ProjectEvent::CodeDirSet { dir })
+}
+
+/// Specs are kept as Markdown in the code directory's `.x100/specs/`, written from the log for
+/// people to read. The log is the record, so a file that cannot be written loses nothing.
+fn write_spec_file(git: &Git, kind: SpecKind, body: &str) {
     let name = match kind {
         SpecKind::Brd => "BRD.md",
         SpecKind::Prd => "PRD.md",
         SpecKind::Add => "ADD.md",
     };
-    let dir = ctx.store.git.project_dir().join(".x100").join("specs");
+    let dir = git.project_dir().join(".x100").join("specs");
     if let Err(e) =
         std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(name), body))
     {

@@ -172,9 +172,15 @@ methods! {
     /// One project's state as a one-off read.
     GetProject, "projects.get", GetProject => x100_core::fold::ProjectState, [NotFound];
 
-    /// Creates a project in a directory, starting a git repository there if there is none, and with
-    /// it the CEO. `settings` defaults to the daemon's.
+    /// Creates a project, and with it the CEO. A new project has no name, no intent and no code
+    /// directory: the CEO sets it up once the builder's messages say what it is. With `dir`, it
+    /// starts on that existing folder, which is its code directory from the start, and a git
+    /// repository is started there if there is none. `settings` defaults to the daemon's. A client
+    /// creates one as the builder sends its first message, then sends that message.
     CreateProject, "projects.create", CreateProject => ProjectCreated, [Rejected, Unavailable];
+
+    /// Renames a project that is set up. Its intent and its code directory stay.
+    RenameProject, "projects.rename", RenameProject => Done, [NotFound, WrongState, Rejected];
 
     /// Changes a project setting: Ask me about, the total budget, the lab's share, or whether a
     /// harness and model are allowed. Turning one off hands the work of drivers using it on.
@@ -183,11 +189,9 @@ methods! {
     /// Reflect now: delegates a reflection task to the CEO.
     Reflect, "projects.reflect", Reflect => Reflecting, [NotFound, WrongState, Unavailable];
 
-    /// Sends the brief, the project's first message, with files already uploaded attached. It is
-    /// delegated to the CEO as a task.
-    SendBrief, "chat.brief", SendBrief => BriefSent, [NotFound, WrongState];
-
-    /// Sends a message to the CEO. The builder talks to no one else.
+    /// Sends a message to the CEO, with files already uploaded attached. The builder talks to no
+    /// one else. Once the project is set up, a message opens a task for the CEO when it holds none
+    /// from the builder; before, it is only a message, which the CEO answers.
     SendChat, "chat.send", SendChat => ChatSent, [NotFound];
 
     /// Raises a task as a new idea.

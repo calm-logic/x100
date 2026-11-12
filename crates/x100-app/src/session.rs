@@ -14,7 +14,7 @@ use x100_core::id::{FileId, ProjectId};
 pub enum SessionEvent {
     /// Something in the daemon's state changed, in the client's terms.
     Changed(Change),
-    /// Another project was selected.
+    /// Another project was selected, or a new one is being started.
     Selected,
     /// An image for a preview has arrived.
     Preview,
@@ -28,6 +28,8 @@ enum Preview {
 
 pub struct Session {
     client: Client,
+    /// `None` while the builder is starting a new project: the window shows the CEO and the box
+    /// for the first message, and the project is created when that is sent.
     selected: Option<ProjectId>,
     connected: bool,
     previews: HashMap<FileId, Preview>,
@@ -65,7 +67,7 @@ impl Session {
             _pump: pump,
         };
         session.learn_file_names();
-        session.select_any();
+        session.select_first();
         session
     }
 
@@ -93,6 +95,13 @@ impl Session {
         }
     }
 
+    /// Shows the start of a new project, which exists only once its first message is sent.
+    pub fn start_new(&mut self, cx: &mut Context<Self>) {
+        if self.selected.take().is_some() {
+            cx.emit(SessionEvent::Selected);
+        }
+    }
+
     /// Reads one project's state, with the daemon's for the names of harnesses and machines.
     pub fn project<R>(
         &self,
@@ -115,9 +124,6 @@ impl Session {
         if files_changed {
             self.learn_file_names();
         }
-        if self.selected.is_none() && self.select_any() {
-            cx.emit(SessionEvent::Selected);
-        }
         cx.emit(SessionEvent::Changed(change));
     }
 
@@ -130,14 +136,12 @@ impl Session {
         });
     }
 
-    /// Selects the first project, if there is one and none is selected.
-    fn select_any(&mut self) -> bool {
-        if self.selected.is_none() {
-            self.selected = self
-                .client
-                .with_state(|s| s.daemon.projects().next().map(|(id, _)| id));
-        }
-        self.selected.is_some()
+    /// Opens on the first project, if there is one. With none, the window starts a new one.
+    /// Only when the window opens: later, no selection means a new project is being started.
+    fn select_first(&mut self) {
+        self.selected = self
+            .client
+            .with_state(|s| s.daemon.projects().next().map(|(id, _)| id));
     }
 
     /// The image to preview a file with, fetched from the daemon the first time it is asked for.

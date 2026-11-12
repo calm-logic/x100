@@ -5,8 +5,9 @@
 //! state in a module of its own:
 //!
 //! - [`shell`]: the window's root and its three areas.
-//! - [`sidebar`]: the projects, and creating one.
-//! - [`chat`]: the first-run brief, then the chat with the CEO and attachments.
+//! - [`sidebar`]: the projects, and starting a new one.
+//! - [`chat`]: the start of a new project and its first message, then the chat with the CEO and
+//!   attachments.
 //! - [`tabs`]: the main panel's tab bar and dots, and where each tab's view is made.
 //! - [`team`]: the Team tab, its rows, the drivers list and an agent's view.
 //! - One module per other tab: [`specs`], [`tasks`], [`files`], [`budget`], [`log`], [`preview`],

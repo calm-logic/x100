@@ -1,7 +1,8 @@
 //! Fernleaf: a project from brief to a team at work, as the daemon would log it.
 //!
-//! The builder briefs the CEO with a sketch attached. The CEO writes the BRD, forms a team of three
-//! leads, asks the builder a question and gets an answer. Tech starts Backend and Frontend, and
+//! The builder's first message to a new project carries a brief and a sketch. The CEO sets the
+//! project up from it on a driver in the scratch directory, then, on a new one, writes the BRD,
+//! forms a team of three leads, asks the builder a question and gets an answer. Tech starts Backend and Frontend, and
 //! Backend starts Migrations; Product starts Research and asks Tech a question directly. Backend's
 //! driver fails and another provider's takes over, then a send-back raising the effort hands its
 //! work off on purpose. A production deploy is held and approved, an email out is held and denied.

@@ -1,6 +1,8 @@
 //! The CEO's view in the app, with no display, against the real daemon running the real `claude`
 //! program as a terminal driver: what the view shows is the driver's screen, replayed at the sizes
-//! the daemon recorded, the same as a bare emulator shows for the same chunks.
+//! the daemon recorded, the same as a bare emulator shows for the same chunks. The project is new:
+//! the CEO sets it up on a driver in the scratch directory, and the work is done on a second
+//! driver in the worktree, whose screen is the one checked.
 //!
 //! No request leaves the machine and no real login is touched: the login is a dummy in a throwaway
 //! directory the daemon is pointed at, the daemon's home and environment are throwaway, and the
@@ -132,6 +134,8 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
     let child = Command::new(common::binary("x100d"))
         .arg("--data-dir")
         .arg(&data)
+        .arg("--projects-root")
+        .arg(dir.path().join("projects"))
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
         .env("HOME", &home)
@@ -150,7 +154,8 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
     options.startup_timeout = PATIENCE;
     let client = rt.block_on(Client::connect(options)).unwrap();
 
-    // A brief the CEO's Claude Code terminal driver writes the BRD for and reports.
+    // A first message the CEO sets the project up from, then writes the BRD for and reports, on
+    // Claude Code's terminal.
     let (project, driver) = rt.block_on(async {
         client
             .request(SetDaemonSetting {
@@ -164,21 +169,23 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
             lab_share: Percent::new(10).unwrap(),
             allowed: Default::default(),
         };
-        let path = dir.path().join("todo").display().to_string();
         let project = client
             .request(CreateProject {
-                path,
-                name: None,
+                dir: None,
                 settings: Some(settings),
             })
             .await
             .unwrap()
             .project;
-        let task = client
-            .send_brief(project, "Write the BRD, then report.", vec![])
+        client
+            .send_chat(
+                project,
+                "Write the BRD for a todo app, then report.",
+                vec![],
+                None,
+            )
             .await
-            .unwrap()
-            .task;
+            .unwrap();
         let ceo = client
             .wait_for(PATIENCE, |s| {
                 let p = s.projects.get(&project)?;
@@ -191,19 +198,15 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
             })
             .await
             .unwrap();
-        for reply in [
-            Reply::Tool {
-                name: "mcp__x100__write_spec".into(),
-                input: json!({ "spec": "brd", "status": "draft", "body": "# Todo\n" }),
-            },
-            Reply::Tool {
-                name: "mcp__x100__report".into(),
-                input: json!({ "task": task, "outcome": "completed", "summary": "Done." }),
-            },
-            Reply::Text("The BRD is written.".into()),
-        ] {
-            provider.reply(reply);
-        }
+        provider.reply(Reply::Tool {
+            name: "mcp__x100__set_up_project".into(),
+            input: json!({
+                "name": "Todo app",
+                "intent": "A todo list in the browser.",
+                "brief": "Write the BRD for a todo app, then report.",
+            }),
+        });
+        provider.reply(Reply::Text("Setting it up.".into()));
         let harness = client
             .with_state(|s| {
                 let terminal = HarnessKind::ClaudeCodeTerminal;
@@ -222,6 +225,27 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
             allowed: true,
         };
         client.change_setting(project, allow).await.unwrap();
+        // The task's id is known once the project is set up, seconds before the next driver
+        // starts and asks for its replies.
+        let task = client
+            .wait_for(PATIENCE, |s| {
+                s.projects.get(&project)?.tasks().next().map(|t| t.task.id)
+            })
+            .await
+            .unwrap();
+        for reply in [
+            Reply::Tool {
+                name: "mcp__x100__write_spec".into(),
+                input: json!({ "spec": "brd", "status": "draft", "body": "# Todo\n" }),
+            },
+            Reply::Tool {
+                name: "mcp__x100__report".into(),
+                input: json!({ "task": task, "outcome": "completed", "summary": "Done." }),
+            },
+            Reply::Text("The BRD is written.".into()),
+        ] {
+            provider.reply(reply);
+        }
         let driver = client
             .wait_for(PATIENCE, |s| {
                 let p = s.projects.get(&project)?;
@@ -250,7 +274,8 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
         let shown = output.map(|o| vcx.read(|cx| o.read(cx).shown(cx)));
         let chunks = rt.block_on(read_all(&client, project, driver));
         let want = bare_replay(&chunks);
-        if let Some(shown) = shown.filter(|s| s.len() == 1 && s[0].screen == want) {
+        // The scratch driver's screen first, then the worktree driver's.
+        if let Some(shown) = shown.filter(|s| s.len() == 2 && s[1].screen == want) {
             break (shown, want);
         }
         assert!(
@@ -258,11 +283,11 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
             "the CEO's view never showed its driver's screen"
         );
     };
-    assert_eq!(shown[0].terminal_of, Some(driver));
+    assert_eq!(shown[1].terminal_of, Some(driver));
     assert!(want.iter().any(|line| !line.trim().is_empty()), "{want:#?}");
     assert!(
-        vcx.read(|cx| team.read(cx).reflection().is_some()),
-        "the CEO's memories, skills and trials are under its output"
+        vcx.read(|cx| team.read(cx).reflection().is_none()),
+        "memories, skills and trials are not shown before their milestones"
     );
 
     let attempts = provider.proxy_attempts();

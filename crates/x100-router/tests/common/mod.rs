@@ -199,7 +199,6 @@ impl Project {
         b.push(
             Actor::Builder,
             ProjectEvent::Created {
-                name: "p".into(),
                 ceo,
                 charter: "c".into(),
                 effort: EffortRange::FULL,

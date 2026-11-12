@@ -70,7 +70,7 @@ fn read_all(mut reader: File) -> (File, Vec<u8>) {
 #[tokio::test(flavor = "multi_thread")]
 async fn shutdown_returns_only_once_every_driver_task_has_finished() {
     let w = World::new(Setup::new(SCRIPT)).await;
-    w.brief("Get started.").await;
+    w.send("Get started.").await;
     w.settle().await;
     let driver = w.state().acting_driver(w.ceo).expect("a warm driver");
     let (reader, filled) = hold_the_next_write(&w.dir.path().join("drivers.part"));

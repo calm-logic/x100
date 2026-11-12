@@ -140,6 +140,12 @@ pub enum Corrupt {
     NotCreated,
     #[error("the project was already created")]
     AlreadyCreated,
+    #[error("the project is not set up yet")]
+    NotSetUp,
+    #[error("the project was already set up")]
+    AlreadySetUp,
+    #[error("the project's code directory is set already, and it never moves")]
+    CodeDirAlreadySet,
     #[error(transparent)]
     Rejected(#[from] Rejected),
     #[error(transparent)]

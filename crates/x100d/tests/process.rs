@@ -34,19 +34,13 @@ async fn a_message_to_the_ceo_is_answered_as_events() {
         })
         .await
         .expect("the reply arrives");
-    // The first message opens a task for the CEO, and it is told which.
-    let task = client.with_state(|s| {
-        s.projects[&project]
-            .tasks()
-            .next()
-            .map(|t| t.task.id)
-            .expect("the message opened a task")
-    });
+    // The project is not set up, so the message opens no task and the CEO only answers it.
+    let tasks = client.with_state(|s| s.projects[&project].tasks().count());
+    assert_eq!(tasks, 0);
     assert_eq!(
         reply.message.body,
         format!(
-            "heard: A message from the builder.\nMessage: {}\nFrom: builder\nTask for the \
-             builder: {task}\nping\n\n---\n\nCurrent task: {task}",
+            "heard: A message from the builder.\nMessage: {}\nFrom: builder\nping",
             sent.message
         )
     );
@@ -496,25 +490,18 @@ async fn a_driver_that_fails_is_recorded_with_its_reason_and_its_message_is_kept
     let client = env.client().await;
     let project = create_project(&client, &env, "crash").await;
     client.request(say(project, "CRASH")).await.unwrap();
-    // A driver that fails is replaced, and after three failures in a row the task is given up,
-    // reported failed with each failure.
+    // A driver that fails is replaced, and after three failures in a row the agent stops trying.
+    // The project is not set up, so there is no task to report failed.
     let failed = client
         .wait_for(WAIT, |s| {
             let p = &s.projects[&project];
-            let reported = p.tasks().any(|t| {
-                matches!(
-                    &t.state,
-                    x100_core::task::TaskState::InReview(_, r)
-                        if matches!(
-                            &r.outcome,
-                            x100_core::task::Outcome::Failed(
-                                x100_core::task::TaskFailure::DriverFailures(f)
-                            ) if f.len() == 3
-                        )
-                )
-            });
-            let d = ceo_driver(p)?;
-            (reported && matches!(d.state, DriverState::Failed(_))).then(|| d.clone())
+            let ceo = p.agent(p.project()?.ceo)?;
+            let all_failed = ceo.drivers.len() == 3
+                && ceo.drivers.iter().all(|d| {
+                    p.driver(*d)
+                        .is_some_and(|d| matches!(d.state, DriverState::Failed(_)))
+                });
+            all_failed.then(|| ceo_driver(p).cloned()).flatten()
         })
         .await
         .unwrap();

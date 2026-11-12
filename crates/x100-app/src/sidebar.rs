@@ -1,14 +1,12 @@
-//! The projects sidebar: every project with its live indicator and agent count, and a form to
-//! create one from a name and a directory.
+//! The projects sidebar: every project with its live indicator and agent count, a project not set
+//! up yet as "New project", and "+ New project", which opens the start of another one. That
+//! project is created only when its first message is sent.
 
-use gpui::{
-    Context, Entity, Focusable, FontWeight, SharedString, Subscription, Window, div, prelude::*, px,
-};
+use gpui::{Context, Entity, FontWeight, SharedString, Subscription, Window, div, prelude::*, px};
 use x100_client::Change;
 use x100_core::fold::ProjectPart;
 use x100_core::id::ProjectId;
 
-use crate::input::{InputEvent, TextInput};
 use crate::session::{Session, SessionEvent};
 use crate::{theme, widgets, words};
 
@@ -21,17 +19,8 @@ pub struct ProjectLine {
     pub agents: usize,
 }
 
-struct NewProject {
-    name: Entity<TextInput>,
-    path: Entity<TextInput>,
-    busy: bool,
-    error: Option<String>,
-    _submit: [Subscription; 2],
-}
-
 pub struct Sidebar {
     session: Entity<Session>,
-    creating: Option<NewProject>,
     _subscription: Subscription,
 }
 
@@ -52,7 +41,6 @@ impl Sidebar {
         });
         Self {
             session,
-            creating: None,
             _subscription: subscription,
         }
     }
@@ -62,11 +50,11 @@ impl Sidebar {
         self.session.read(cx).client().with_state(|s| {
             s.daemon
                 .projects()
-                .map(|(id, entry)| {
+                .map(|(id, _)| {
                     let p = s.projects.get(&id);
                     ProjectLine {
                         id,
-                        name: entry.name.clone(),
+                        name: words::project_name(p),
                         live: p.is_some_and(|p| p.is_live()),
                         agents: p.map_or(0, |p| p.agent_count()),
                     }
@@ -75,57 +63,9 @@ impl Sidebar {
         })
     }
 
-    pub fn start_creating(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let name = cx.new(|cx| TextInput::new("Name", false, cx));
-        let path = cx.new(|cx| TextInput::new("Directory", false, cx));
-        window.focus(&name.read(cx).focus_handle(cx), cx);
-        let submit = [&name, &path]
-            .map(|input| cx.subscribe(input, |this, _, InputEvent::Submit, cx| this.create(cx)));
-        self.creating = Some(NewProject {
-            name,
-            path,
-            busy: false,
-            error: None,
-            _submit: submit,
-        });
-        cx.notify();
-    }
-
-    pub fn create(&mut self, cx: &mut Context<Self>) {
-        let Some(form) = &mut self.creating else {
-            return;
-        };
-        let name = form.name.read(cx).text().trim().to_owned();
-        let path = crate::platform::expand_home(form.path.read(cx).text().trim());
-        if path.is_empty() {
-            form.error = Some("A directory is needed.".into());
-            cx.notify();
-            return;
-        }
-        form.busy = true;
-        form.error = None;
-        let client = self.session.read(cx).client().clone();
-        cx.spawn(async move |this, cx| {
-            let created = client
-                .create_project(path, (!name.is_empty()).then_some(name))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                match created {
-                    Ok(project) => {
-                        this.creating = None;
-                        this.session.update(cx, |s, cx| s.select(project, cx));
-                    }
-                    Err(e) => {
-                        if let Some(form) = &mut this.creating {
-                            form.busy = false;
-                            form.error = Some(e.to_string());
-                        }
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+    /// Opens the start of a new project.
+    pub fn start_new(&mut self, cx: &mut Context<Self>) {
+        self.session.update(cx, |s, cx| s.start_new(cx));
         cx.notify();
     }
 }
@@ -180,52 +120,6 @@ impl Render for Sidebar {
                         .child(words::agents(line.agents)),
                 )
         });
-        let form = self.creating.as_ref().map(|form| {
-            let field = |input: &Entity<TextInput>, name: &'static str| {
-                div()
-                    .debug_selector(move || name.into())
-                    .px(px(8.))
-                    .py(px(6.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(theme::line())
-                    .child(input.clone())
-            };
-            div()
-                .mt(px(8.))
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .child(field(&form.name, "new-project-name"))
-                .child(field(&form.path, "new-project-path"))
-                .when_some(form.error.clone(), |d, e| {
-                    d.child(
-                        div()
-                            .text_size(px(theme::TINY))
-                            .text_color(theme::error())
-                            .child(e),
-                    )
-                })
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .child(
-                            widgets::button(
-                                "create",
-                                if form.busy { "Creating…" } else { "Create" },
-                            )
-                            .debug_selector(|| "create-project".into())
-                            .on_click(cx.listener(|this, _, _, cx| this.create(cx))),
-                        )
-                        .child(widgets::button("cancel", "Cancel").on_click(cx.listener(
-                            |this, _, _, cx| {
-                                this.creating = None;
-                                cx.notify();
-                            },
-                        ))),
-                )
-        });
         div()
             .size_full()
             .flex()
@@ -245,24 +139,23 @@ impl Render for Sidebar {
                     .child("PROJECTS"),
             )
             .children(rows)
-            .children(form)
-            .when(self.creating.is_none(), |d| {
-                d.child(
-                    div()
-                        .id("new-project")
-                        .debug_selector(|| "new-project".into())
-                        .mt(px(6.))
-                        .px(px(8.))
-                        .py(px(6.))
-                        .rounded(px(8.))
-                        .cursor_pointer()
-                        .text_color(theme::dim())
-                        .hover(|s| s.text_color(theme::text()).bg(theme::hover()))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.start_creating(window, cx)),
-                        )
-                        .child("+ New project"),
-                )
-            })
+            .child(
+                div()
+                    .id("new-project")
+                    .debug_selector(|| "new-project".into())
+                    .mt(px(6.))
+                    .px(px(8.))
+                    .py(px(6.))
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .text_color(theme::dim())
+                    .hover(|s| s.text_color(theme::text()).bg(theme::hover()))
+                    // Starting a new project is a place of its own, shown as selected.
+                    .when(selected.is_none(), |d| {
+                        d.text_color(theme::text()).bg(theme::selected())
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.start_new(cx)))
+                    .child("+ New project"),
+            )
     }
 }

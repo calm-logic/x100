@@ -123,6 +123,15 @@ pub fn media_type(name: &str) -> &'static str {
     }
 }
 
+/// What a project is called where it is listed: its name, or "New project" until its CEO sets it
+/// up.
+pub fn project_name(p: Option<&x100_core::fold::ProjectState>) -> String {
+    p.and_then(|p| p.project())
+        .and_then(|p| p.name())
+        .unwrap_or("New project")
+        .to_owned()
+}
+
 pub fn agents(n: usize) -> String {
     if n == 1 {
         "1 agent".into()

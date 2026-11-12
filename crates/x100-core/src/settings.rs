@@ -5,6 +5,7 @@
 //! a driver stays warm is not among them: it is the prompt cache lifetime of the driver's model, on
 //! its [`crate::harness::ModelOffer`].
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::job::Interval;
 use crate::money::Percent;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DaemonSettings {
     /// A driver is retired between tasks, or handed off mid-task, once its context passes this
     /// share of the model's window.
@@ -41,6 +42,10 @@ pub struct DaemonSettings {
     /// The most terminal drivers that may run at once on one provider login, across every
     /// project. A subscription's limits assume one person's use.
     pub terminal_drivers_per_login: u32,
+    /// Where a new project's code directory is made when it is set up, as
+    /// `<projects root>/<its name as a slug>`. `None` is the daemon's own default, `~/x100`, which
+    /// the daemon works out since this crate reads no environment.
+    pub projects_root: Option<PathBuf>,
 }
 
 const fn minutes(n: u64) -> Duration {
@@ -61,6 +66,7 @@ impl Default for DaemonSettings {
             turns_without_progress: 3,
             cool_off: minutes(10),
             terminal_drivers_per_login: 4,
+            projects_root: None,
         }
     }
 }
@@ -70,7 +76,7 @@ fn percent(n: u8) -> Percent {
 }
 
 /// A change to one of the daemon's settings, as the daemon's log records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonSetting {
     RetireAtContext(Percent),
@@ -84,6 +90,7 @@ pub enum DaemonSetting {
     TurnsWithoutProgress(u32),
     CoolOff(Duration),
     TerminalDriversPerLogin(u32),
+    ProjectsRoot(PathBuf),
 }
 
 impl DaemonSettings {
@@ -101,6 +108,7 @@ impl DaemonSettings {
             S::TurnsWithoutProgress(v) => self.turns_without_progress = v,
             S::CoolOff(v) => self.cool_off = v,
             S::TerminalDriversPerLogin(v) => self.terminal_drivers_per_login = v,
+            S::ProjectsRoot(v) => self.projects_root = Some(v),
         }
     }
 }

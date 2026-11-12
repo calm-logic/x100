@@ -1,5 +1,7 @@
-//! The app's window against a real daemon running the Fernleaf script, without a display: the
-//! brief typed and sent, the Team tab following the state, opening agents, the drivers list, the
+//! The app's window against a real daemon running the Fernleaf script, without a display: with no
+//! project, the CEO and the box for the first message, which creates the project as it is sent;
+//! a new project shown as "New project" until its CEO names it; "+ New project" and the
+//! existing-folder control; the Team tab following the state, opening agents, the drivers list, the
 //! tabs' dots, rows redrawn only when their own agent changes, and a new client seeing the same.
 
 mod common;
@@ -100,22 +102,23 @@ fn rows_follow_state(
 }
 
 #[test]
-fn the_brief_opens_the_team_tab_which_follows_the_organisation() {
+fn the_first_message_creates_the_project_and_the_team_tab_follows_the_organisation() {
     let mut run = Run::start();
     let client = run.client();
-    let project = run.fernleaf_project(&client);
+    run.long_waits(&client);
     let (window, mut vcx) = run.open(client.clone());
 
-    // First run: the CEO and the brief box, no main panel.
-    pump_until(&mut vcx, "the brief box is drawn", |vcx| {
+    // No project: the CEO and the box for the first message straight away, no form, no panel.
+    pump_until(&mut vcx, "the message box is drawn", |vcx| {
         bounds(vcx, "composer-input").is_some()
     });
     assert!(
         bounds(&mut vcx, "tab-Team").is_none(),
         "the main panel is hidden"
     );
+    assert!(bounds(&mut vcx, "new-project-path").is_none(), "no form");
 
-    // Two files chosen through the platform's file chooser, uploaded through the protocol.
+    // Two files chosen through the platform's file chooser, kept until the project exists.
     let files = run.daemon.dir.path().join("attach");
     std::fs::create_dir_all(&files).unwrap();
     std::fs::write(files.join("sketch.png"), PNG).unwrap();
@@ -123,31 +126,61 @@ fn the_brief_opens_the_team_tab_which_follows_the_organisation() {
     click(&mut vcx, "attach");
     assert!(run.cx.did_prompt_for_paths(), "the file chooser opened");
     let chosen = vec![files.join("sketch.png"), files.join("notes.md")];
-    run.cx.simulate_path_prompt_response(move |_| Some(chosen));
+    run.cx
+        .simulate_path_prompt_response(move |_| Some(chosen.clone()));
     let composer = vcx.read(|cx| {
         window
             .read(cx)
             .unwrap()
-            .project(project)
-            .unwrap()
-            .chat
+            .start()
+            .expect("the start of a new project")
             .read(cx)
             .composer()
             .clone()
     });
-    pump_until(&mut vcx, "both files are uploaded", |vcx| {
-        vcx.read(|cx| composer.read(cx).attachments().len() == 2)
+    pump_until(&mut vcx, "both files are chosen", |vcx| {
+        vcx.read(|cx| composer.read(cx).pending().len() == 2)
     });
-    let attached: Vec<_> = vcx.read(|cx| {
-        composer
-            .read(cx)
-            .attachments()
-            .iter()
-            .map(|f| (f.name.clone(), f.media_type.clone(), f.size))
-            .collect()
-    });
+    assert!(
+        client.with_state(|s| s.projects.is_empty()),
+        "nothing is created before the first message"
+    );
+
+    // The first message, typed and sent with Enter, creates the project.
+    click(&mut vcx, "composer-input");
+    vcx.simulate_input(
+        "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
+    );
+    vcx.simulate_keystrokes("enter");
+    pump(&mut vcx);
+    let (project, first) = pump_for(
+        &mut vcx,
+        &client,
+        ("the first message is sent", WAIT),
+        |s| {
+            s.projects.iter().find_map(|(id, p)| {
+                p.messages()
+                    .find(|m| m.message.route == Route::BuilderToCeo)
+                    .map(|m| (*id, m.message.clone()))
+            })
+        },
+    );
+    assert!(
+        first.body.starts_with("Launch Fernleaf\nA landing page"),
+        "{}",
+        first.body
+    );
+    let p = state(&client, project);
+    let sent: Vec<_> = first
+        .attachments
+        .iter()
+        .map(|f| {
+            let f = &p.file(*f).unwrap().file;
+            (f.name.clone(), f.media_type.clone(), f.size)
+        })
+        .collect();
     assert_eq!(
-        attached,
+        sent,
         [
             (
                 "sketch.png".to_owned(),
@@ -155,32 +188,9 @@ fn the_brief_opens_the_team_tab_which_follows_the_organisation() {
                 PNG.len() as u64
             ),
             ("notes.md".to_owned(), "text/markdown".to_owned(), 30),
-        ]
+        ],
+        "the files went with it"
     );
-
-    // The brief, typed and sent with Enter.
-    click(&mut vcx, "composer-input");
-    vcx.simulate_input(
-        "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
-    );
-    vcx.simulate_keystrokes("enter");
-    pump(&mut vcx);
-    run.rt
-        .block_on(client.wait_for(WAIT, |s| {
-            let p = s.projects.get(&project)?;
-            p.messages()
-                .find(|m| m.message.route == Route::BuilderToCeo)
-                .map(|m| m.message.clone())
-        }))
-        .map(|brief| {
-            assert!(
-                brief.body.starts_with("Launch Fernleaf\nA landing page"),
-                "{}",
-                brief.body
-            );
-            assert_eq!(brief.attachments.len(), 2, "the files went with the brief");
-        })
-        .expect("the brief reached the daemon");
     run.settle(&client, project);
     pump_until(&mut vcx, "the main panel opens", |vcx| {
         bounds(vcx, "tab-Team").is_some()
@@ -356,12 +366,13 @@ fn a_new_client_shows_the_same_project() {
     let client = run.client();
     let project = run.fernleaf_project(&client);
     run.rt
-        .block_on(client.send_brief(
+        .block_on(client.send_chat(
             project,
             "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
             vec![],
+            None,
         ))
-        .expect("the brief is sent");
+        .expect("the first message is sent");
     run.settle(&client, project);
     let (window, mut vcx) = run.open(client.clone());
     let team1 = team(window, &vcx, project);
@@ -403,40 +414,97 @@ fn a_new_client_shows_the_same_project() {
     assert!(bounds(&mut vcx, "tab-Team").is_some(), "past the first run");
 }
 
+/// What the sidebar lists, by name, and the window's title.
+fn listed(window: WindowHandle<Shell>, vcx: &VisualTestContext) -> (Vec<String>, String) {
+    vcx.read(|cx| {
+        let shell = window.read(cx).unwrap();
+        let lines = shell.sidebar().read(cx).lines(cx);
+        (
+            lines.into_iter().map(|l| l.name).collect(),
+            shell.title().to_owned(),
+        )
+    })
+}
+
+fn send(vcx: &mut VisualTestContext, text: &str) {
+    click(vcx, "composer-input");
+    vcx.simulate_input(text);
+    vcx.simulate_keystrokes("enter");
+    pump(vcx);
+}
+
 #[test]
-fn a_project_is_created_from_the_sidebar() {
+fn a_new_project_is_named_when_its_ceo_sets_it_up_and_another_waits_for_its_message() {
     let mut run = Run::start();
     let client = run.client();
+    run.long_waits(&client);
     let (window, mut vcx) = run.open(client.clone());
-    pump(&mut vcx);
-    click(&mut vcx, "new-project");
-    // The name field has the focus; the directory is the next field.
-    vcx.simulate_input("Todo");
-    let path = run.daemon.project_dir("todo");
-    let sidebar = vcx.read(|cx| window.read(cx).unwrap().sidebar().clone());
-    click(&mut vcx, "new-project-path");
-    vcx.simulate_input(&path);
-    vcx.simulate_keystrokes("enter");
-    let project = run
-        .rt
-        .block_on(client.wait_for(WAIT, |s| {
-            s.daemon
-                .projects()
-                .find(|(_, e)| e.name == "Todo" && e.path == path)
-                .map(|(id, _)| id)
-        }))
-        .expect("the project reached the daemon");
-    pump_until(&mut vcx, "the new project is listed and selected", |vcx| {
-        let lines = vcx.read(|cx| sidebar.read(cx).lines(cx));
-        let selected = vcx.read(|cx| window.read(cx).unwrap().session().read(cx).selected());
-        lines
-            .iter()
-            .any(|l| l.id == project && l.agents == 1 && !l.live)
-            && selected == Some(project)
-    });
-    // A new project is in its first run.
-    pump_until(&mut vcx, "the brief box is drawn", |vcx| {
+    pump_until(&mut vcx, "the message box is drawn", |vcx| {
         bounds(vcx, "composer-input").is_some()
     });
-    assert!(bounds(&mut vcx, "tab-Team").is_none());
+
+    // "hi" creates a project, shown as "New project" while the CEO only answers.
+    send(&mut vcx, "hi there");
+    let project = pump_for(&mut vcx, &client, ("the CEO answers", WAIT), |s| {
+        s.projects.iter().find_map(|(id, p)| {
+            p.messages()
+                .any(|m| m.message.route == Route::CeoToBuilder)
+                .then_some(*id)
+        })
+    });
+    pump_until(&mut vcx, "the new project is listed and selected", |vcx| {
+        let selected = vcx.read(|cx| window.read(cx).unwrap().session().read(cx).selected());
+        selected == Some(project)
+            && listed(window, vcx) == (vec!["New project".into()], "x100 \u{b7} New project".into())
+    });
+    assert!(!state(&client, project).project().unwrap().is_set_up());
+
+    // The brief: the CEO sets the project up, and the name follows everywhere.
+    send(
+        &mut vcx,
+        "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
+    );
+    pump_until(&mut vcx, "the project takes its name", |vcx| {
+        listed(window, vcx) == (vec!["Fernleaf".into()], "x100 \u{b7} Fernleaf".into())
+    });
+
+    // "+ New project" opens the start of another, which exists only once its message is sent.
+    click(&mut vcx, "new-project");
+    pump_until(&mut vcx, "the start of a new project", |vcx| {
+        let selected = vcx.read(|cx| window.read(cx).unwrap().session().read(cx).selected());
+        selected.is_none() && bounds(vcx, "composer-input").is_some()
+    });
+    assert_eq!(
+        listed(window, &vcx),
+        (vec!["Fernleaf".into()], "x100".into())
+    );
+    assert_eq!(
+        client.with_state(|s| s.projects.len()),
+        1,
+        "nothing created"
+    );
+
+    // On an existing folder: named under the box, then the first message starts it there.
+    let shop = run.daemon.dir.path().join("shop");
+    std::fs::create_dir_all(&shop).unwrap();
+    std::fs::write(shop.join("README.md"), "# Shop\n").unwrap();
+    click(&mut vcx, "open-folder");
+    vcx.simulate_input(&shop.display().to_string());
+    vcx.simulate_keystrokes("enter");
+    pump_until(&mut vcx, "the folder is named", |vcx| {
+        bounds(vcx, "no-folder").is_some()
+    });
+    send(&mut vcx, "hi there");
+    let started = pump_for(&mut vcx, &client, ("a project on the folder", WAIT), |s| {
+        s.projects
+            .iter()
+            .find(|(id, _)| **id != project)
+            .and_then(|(id, p)| Some((*id, p.project()?.code_dir.clone()?)))
+    });
+    assert_eq!(started.1, shop.canonicalize().unwrap());
+    pump_until(&mut vcx, "it is listed as new and selected", |vcx| {
+        let selected = vcx.read(|cx| window.read(cx).unwrap().session().read(cx).selected());
+        selected == Some(started.0) && listed(window, vcx).0.len() == 2
+    });
+    assert!(listed(window, &vcx).0.contains(&"New project".to_owned()));
 }

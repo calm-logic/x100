@@ -25,8 +25,7 @@ use x100_core::id::{AgentId, DriverId, FileId, MessageId, ProjectId};
 use x100_core::terminal::{Chunk, TermPos};
 use x100_core::transcript::{Entry, Pos};
 use x100_proto::{
-    BriefSent, Bytes, Call, CreateProject, Method, ReadFile, RpcError, SendBrief, SendChat,
-    Snapshot, UploadFile,
+    Bytes, Call, CreateProject, Method, ReadFile, RpcError, SendChat, Snapshot, UploadFile,
 };
 
 pub use stream::{Follow, TerminalStream, TranscriptStream};
@@ -288,36 +287,17 @@ impl Client {
         answer.await.map_err(|_| ClientError::Closed)?
     }
 
-    /// Creates a project in `path`, named after the directory unless `name` is given, with the
-    /// daemon's default settings.
-    pub async fn create_project(
-        &self,
-        path: impl Into<String>,
-        name: Option<String>,
-    ) -> Result<ProjectId, ClientError> {
+    /// Creates a project with the daemon's default settings, as the builder sends its first
+    /// message. It has no name or code until its CEO sets it up, unless `dir` names an existing
+    /// folder to start on.
+    pub async fn create_project(&self, dir: Option<String>) -> Result<ProjectId, ClientError> {
         let created = self
             .request(CreateProject {
-                path: path.into(),
-                name,
+                dir,
                 settings: None,
             })
             .await?;
         Ok(created.project)
-    }
-
-    /// Sends a project's first message, which the CEO takes as a task.
-    pub async fn send_brief(
-        &self,
-        project: ProjectId,
-        body: impl Into<String>,
-        attachments: Vec<FileId>,
-    ) -> Result<BriefSent, ClientError> {
-        self.request(SendBrief {
-            project,
-            body: body.into(),
-            attachments,
-        })
-        .await
     }
 
     /// Sends a message to the CEO, answering `in_reply_to` if it is one of its questions.

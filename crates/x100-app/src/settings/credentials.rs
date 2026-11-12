@@ -13,8 +13,8 @@ use x100_core::id::{CredentialRef, ProjectId};
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
-use crate::theme;
 use crate::widgets;
+use crate::{theme, words};
 
 /// A credential as the list shows it. Never the value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,7 +299,7 @@ impl Credentials {
         let projects: Vec<(ProjectId, String)> = self.session.read(cx).client().with_state(|s| {
             s.daemon
                 .projects()
-                .map(|(id, e)| (id, e.name.clone()))
+                .map(|(id, _)| (id, words::project_name(s.projects.get(&id))))
                 .collect()
         });
         let field = |input: &Entity<TextInput>| {
@@ -429,7 +429,7 @@ impl Render for Credentials {
         let projects: Vec<(ProjectId, String)> = self.session.read(cx).client().with_state(|s| {
             s.daemon
                 .projects()
-                .map(|(id, e)| (id, e.name.clone()))
+                .map(|(id, _)| (id, words::project_name(s.projects.get(&id))))
                 .collect()
         });
         let field = |sel: &'static str, input: &Entity<TextInput>| {

@@ -8,6 +8,16 @@ use crate::action::AskMeAbout;
 use crate::harness::HarnessModel;
 use crate::money::{Money, Percent};
 
+/// What a project is called and what it is for. A new project has neither: its CEO sets them with
+/// `set_up_project` once the builder has said enough, and the CEO or the builder may change them
+/// later.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Identity {
+    pub name: String,
+    /// One line saying what the project is for.
+    pub intent: String,
+}
+
 /// A project's settings. Lead budgets and effort ranges show in Settings but live on the agents.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Settings {

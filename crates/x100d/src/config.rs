@@ -19,6 +19,7 @@ pub const QUEUE_CAPACITY: usize = 4096;
 pub const LAG_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub const DATA_DIR_ENV: &str = "X100_DATA_DIR";
+pub const PROJECTS_ROOT_ENV: &str = "X100_PROJECTS_ROOT";
 pub const SCRIPTS_ENV: &str = "X100_FAKE_SCRIPTS";
 pub const FAKE_PROGRAM_ENV: &str = "X100_FAKE_HARNESS";
 pub const CLAUDE_LOGIN_ENV: &str = "X100_CLAUDE_LOGIN";
@@ -30,8 +31,12 @@ pub const CODEX_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
 
 #[derive(Clone)]
 pub struct Config {
-    /// Holds the daemon's log, the socket and the list of driver processes.
+    /// Holds the daemon's log, the socket, the list of driver processes, and each project's own
+    /// store under `projects/<id>`.
     pub data_dir: PathBuf,
+    /// Where a project's code directory is made when it is set up, unless the daemon's setting
+    /// names another: `~/x100` unless named.
+    pub projects_root: PathBuf,
     /// A directory of fake-harness scripts (`*.toml`). When given, those are the only harnesses:
     /// the daemon looks for no real one.
     pub scripts_dir: Option<PathBuf>,
@@ -57,8 +62,10 @@ pub struct Config {
 
 impl Config {
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
         Self {
             data_dir: data_dir.into(),
+            projects_root: projects_root(home),
             scripts_dir: None,
             fake_program: None,
             max_line: MAX_LINE,
@@ -77,20 +84,22 @@ impl Config {
         self.data_dir.join("x100d.sock")
     }
 
-    /// From `--data-dir`, `--scripts-dir`, `--fake-harness`, `--claude-login` and `--codex-login`
-    /// arguments, each of which falls back to its environment variable, and `--fake-clock`. The
-    /// data directory then falls back to the user's data directory, and each login to the
-    /// program's own directory in the user's home.
+    /// From `--data-dir`, `--projects-root`, `--scripts-dir`, `--fake-harness`, `--claude-login`
+    /// and `--codex-login` arguments, each of which falls back to its environment variable, and
+    /// `--fake-clock`. The data directory then falls back to the user's data directory, the
+    /// projects root to `~/x100`, and each login to the program's own directory in the user's
+    /// home.
     pub fn from_args(
         args: impl IntoIterator<Item = OsString>,
         env: impl Fn(&str) -> Option<OsString>,
     ) -> Result<Self, String> {
         let (mut data, mut scripts, mut fake, mut clock) = (None, None, None, None);
-        let (mut claude, mut codex) = (None, None);
+        let (mut claude, mut codex, mut root) = (None, None, None);
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let slot = match arg.to_str() {
                 Some("--data-dir") => &mut data,
+                Some("--projects-root") => &mut root,
                 Some("--scripts-dir") => &mut scripts,
                 Some("--fake-harness") => &mut fake,
                 Some("--fake-clock") => &mut clock,
@@ -109,6 +118,10 @@ impl Config {
             .or_else(default_data_dir)
             .ok_or("no data directory: set --data-dir or X100_DATA_DIR")?;
         let mut config = Config::new(data_dir);
+        config.projects_root = root
+            .or_else(|| env(PROJECTS_ROOT_ENV))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| projects_root(env("HOME").map(PathBuf::from)));
         config.scripts_dir = scripts
             .map(PathBuf::from)
             .or_else(|| env(SCRIPTS_ENV).map(PathBuf::from));
@@ -143,6 +156,12 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+/// `~/x100`, where new projects' code goes by default. Without a home, the current directory's
+/// `x100`.
+fn projects_root(home: Option<PathBuf>) -> PathBuf {
+    home.unwrap_or_default().join("x100")
 }
 
 /// `name` in the user's home, where each program keeps its login by default.
@@ -240,6 +259,19 @@ mod tests {
         let c = Config::from_args(args.map(OsString::from), named).unwrap();
         assert_eq!(c.claude_login, Some(PathBuf::from("/throwaway/claude")));
         assert_eq!(c.codex_login, Some(PathBuf::from("/elsewhere/codex")));
+    }
+
+    #[test]
+    fn the_projects_root_is_named_or_x100_in_the_home() {
+        let home = |k: &str| (k == "HOME").then(|| OsString::from("/home/b"));
+        let c = Config::from_args(["--data-dir".into(), "/d".into()], home).unwrap();
+        assert_eq!(c.projects_root, PathBuf::from("/home/b/x100"));
+        let args = ["--data-dir", "/d", "--projects-root", "/code"];
+        let c = Config::from_args(args.map(OsString::from), home).unwrap();
+        assert_eq!(c.projects_root, PathBuf::from("/code"));
+        let env = |k: &str| (k == PROJECTS_ROOT_ENV).then(|| OsString::from("/env"));
+        let c = Config::from_args(["--data-dir".into(), "/d".into()], env).unwrap();
+        assert_eq!(c.projects_root, PathBuf::from("/env"));
     }
 
     #[test]

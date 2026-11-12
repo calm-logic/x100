@@ -131,7 +131,10 @@ pub fn line(e: &Envelope<ProjectEvent>, n: &Names) -> Line {
 fn text(event: &ProjectEvent, n: &Names) -> String {
     use ProjectEvent as P;
     match event {
-        P::Created { name, .. } => format!("Created the project {name}"),
+        P::Created { .. } => "Started a new project, not set up yet".into(),
+        P::CodeDirSet { dir } => format!("Keeps the project's code in {}", dir.display()),
+        P::SetUp(i) => format!("Set the project up as {}: {}", quote(&i.name), i.intent),
+        P::Renamed(i) => format!("Renamed the project {}: {}", quote(&i.name), i.intent),
         P::SettingChanged(change) => setting(n, change),
         P::PreviewSet { url } => format!("Set the preview address to {url}"),
         P::AgentAdded(a) => match &a.position {

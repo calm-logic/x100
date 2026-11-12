@@ -24,8 +24,14 @@ use crate::ctx::ProjectCtx;
 pub(crate) const PERMISSIONS: Permissions = Permissions::Worktree;
 
 /// What a model is told [`PERMISSIONS`] lets it do with a driver of `harness`, before it plans
-/// work it could not carry out.
-pub(crate) fn workspace(harness: &HarnessKind) -> String {
+/// work it could not carry out. A driver started before the project has code works in a scratch
+/// directory, and is told so.
+pub(crate) fn workspace(harness: &HarnessKind, scratch: bool) -> String {
+    if scratch {
+        return "Your working directory is a scratch directory: the project is not set up yet and \
+                has no code. Nothing you write there is kept, so do not start work in it."
+            .to_owned();
+    }
     let base = "Your working directory is your own copy of the project, on a git branch of its \
                 own. Change files only there; they are committed when you report.";
     let more = match harness {
@@ -50,15 +56,16 @@ pub(crate) const REFUSED: &str = "Commands are not available here yet, and neith
      directly in your working directory with your file tools, and say in your report what you \
      could not run or check.";
 
+/// `dir` is the agent's worktree, or the project's scratch directory before it has code.
 pub(crate) fn build(
     shared: &Shared,
     ctx: &Arc<ProjectCtx>,
     agent: AgentId,
     driver: DriverId,
     choice: &Choice,
+    dir: PathBuf,
     start_pack: String,
 ) -> DriverSpec {
-    let dir = ctx.store.git.worktree_path(agent);
     // The path is passed on to the harness, which reaches the login there; x100 never opens it.
     let login = shared.daemon.with_state(|d| {
         d.harness(choice.harness)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The real-window check of an agent's view, as capture.sh does it: x100d on the fake clock with
-# the Fernleaf script, x100-app on the X11 display, driven through XTEST and captured with xwd.
+# the Fernleaf script, x100-app on the X11 display, driven through the X server (xtest.py) and captured with xwd.
 # Builds nothing: run `cargo build -p x100d -p x100-app --bins` and
 # `cargo build -p x100-app --release --example replay` first.
 #
@@ -26,7 +26,7 @@ stop() {
 }
 trap stop EXIT
 
-"$bin/x100d" --data-dir "$work/data" --scripts-dir "$root/crates/x100-orch/tests/scripts" \
+"$bin/x100d" --data-dir "$work/data" --projects-root "$work/projects" --scripts-dir "$root/crates/x100-orch/tests/scripts" \
   --fake-harness "$bin/x100d-fake-harness" --fake-clock 1794387600000 >"$work/daemon.log" 2>&1 &
 daemon=$!
 until [[ -S $work/data/x100d.sock ]]; do sleep 0.2; done
@@ -62,9 +62,8 @@ for i, (m, p) in enumerate([("hello", {"client": "capture", "protocol": 1}),
 PY
 }
 
-# A project and its brief, as capture.sh makes them.
-drive click 60 67 sleep 0.5 type "Fernleaf" click 80 110 type "$work/fernleaf" key Return sleep 2
-drive click 785 440 type "Launch Fernleaf" key shift+Return \
+# The brief as the first message of a new project, which the CEO sets up from it at once.
+drive click 785 470 sleep 0.5 type "Launch Fernleaf" key shift+Return \
   type "A landing page for Fernleaf, a plant shop, with a waitlist." sleep 0.5 key Return sleep 6
 
 # Leads are listed Marketing, Product, Tech. Product runs Research.

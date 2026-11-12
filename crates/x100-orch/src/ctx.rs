@@ -15,7 +15,7 @@ use x100_core::id::ProjectId;
 use x100_core::party::Actor;
 use x100_core::time::Clock;
 use x100_jobs::Scheduler;
-use x100_store::ProjectStore;
+use x100_store::{Git, ProjectStore};
 
 use crate::settle::settle;
 
@@ -44,6 +44,12 @@ impl ProjectCtx {
             jobs,
             lock: Mutex::new(()),
         })
+    }
+
+    /// Git for the project's code directory, once it has one. A new project has none until its
+    /// CEO sets it up.
+    pub fn git(&self) -> Option<Git> {
+        self.store.log.with_state(git_of)
     }
 
     /// Takes the lock. Blocks, so it is called on a blocking thread.
@@ -98,4 +104,12 @@ impl Writer<'_> {
         }
         Ok(appended)
     }
+}
+
+/// Git for the code directory `state` records, if it records one.
+pub(crate) fn git_of(state: &ProjectState) -> Option<Git> {
+    state
+        .project()
+        .and_then(|p| p.code_dir.as_ref())
+        .map(|dir| Git::new(dir.clone()))
 }

@@ -1,5 +1,6 @@
-//! The box the builder writes in: the brief before the first message, then every message to the
-//! CEO. It carries attachments, and answers the CEO's open question unless told not to.
+//! The box the builder writes in, for every message to the CEO. It carries attachments, and
+//! answers the CEO's open question unless told not to. For a new project it also creates the
+//! project as the first message is sent: files chosen before then are uploaded once it exists.
 
 use std::path::PathBuf;
 
@@ -25,11 +26,23 @@ enum Reply {
     To(MessageId),
 }
 
+/// Where a message goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Project(ProjectId),
+    /// A project that does not exist yet, on an existing folder if one is named.
+    New {
+        folder: Option<String>,
+    },
+}
+
 pub struct Composer {
     session: Entity<Session>,
-    project: ProjectId,
+    target: Target,
     input: Entity<TextInput>,
     attachments: Vec<FileRef>,
+    /// Files chosen for a new project, uploaded once the project exists.
+    pending: Vec<PathBuf>,
     uploading: usize,
     reply: Reply,
     sending: bool,
@@ -40,14 +53,15 @@ pub struct Composer {
 }
 
 impl Composer {
-    pub fn new(session: Entity<Session>, project: ProjectId, cx: &mut Context<Self>) -> Self {
+    pub fn new(session: Entity<Session>, target: Target, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| TextInput::new("Write to the CEO", true, cx));
         let subscription = cx.subscribe(&input, |this, _, InputEvent::Submit, cx| this.send(cx));
         Self {
             session,
-            project,
+            target,
             input,
             attachments: Vec::new(),
+            pending: Vec::new(),
             uploading: 0,
             reply: Reply::Latest,
             sending: false,
@@ -59,6 +73,30 @@ impl Composer {
 
     pub fn attachments(&self) -> &[FileRef] {
         &self.attachments
+    }
+
+    /// The files chosen for a new project, not uploaded yet.
+    pub fn pending(&self) -> &[PathBuf] {
+        &self.pending
+    }
+
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
+    /// The existing folder a new project starts on, or none.
+    pub fn set_folder(&mut self, folder: Option<String>, cx: &mut Context<Self>) {
+        if let Target::New { folder: f } = &mut self.target {
+            *f = folder;
+            cx.notify();
+        }
+    }
+
+    fn project(&self) -> Option<ProjectId> {
+        match self.target {
+            Target::Project(p) => Some(p),
+            Target::New { .. } => None,
+        }
     }
 
     /// Shows or hides the field for a file's path.
@@ -95,7 +133,7 @@ impl Composer {
         let reply = self.reply;
         self.session
             .read(cx)
-            .project(self.project, |p, _| {
+            .project(self.project()?, |p, _| {
                 let mut open: Vec<_> = p.open_questions().collect();
                 open.sort_by_key(|m| m.at);
                 let question = match reply {
@@ -136,9 +174,13 @@ impl Composer {
     /// Uploads each file and attaches it once the daemon has it, one after another, so they are
     /// attached in the order they were chosen however long each takes.
     pub fn attach(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let Some(project) = self.project() else {
+            self.pending.extend(paths);
+            cx.notify();
+            return;
+        };
         self.uploading += paths.len();
         let client = self.session.read(cx).client().clone();
-        let project = self.project;
         cx.spawn(async move |this, cx| {
             for path in paths {
                 let read = cx.background_spawn({
@@ -170,7 +212,8 @@ impl Composer {
 
     pub fn send(&mut self, cx: &mut Context<Self>) {
         let body = self.input.read(cx).text().trim().to_owned();
-        if self.sending || (body.is_empty() && self.attachments.is_empty()) {
+        let empty = self.attachments.is_empty() && self.pending.is_empty();
+        if self.sending || (body.is_empty() && empty) {
             return;
         }
         if self.uploading > 0 {
@@ -178,54 +221,93 @@ impl Composer {
             cx.notify();
             return;
         }
-        let session = self.session.read(cx);
-        let client = session.client().clone();
-        let project = self.project;
-        let briefed = session
-            .project(project, |p, _| super::briefed(p))
-            .unwrap_or(false);
-        let files = self.attachments.iter().map(|f| f.id).collect();
+        let client = self.session.read(cx).client().clone();
+        let mut files: Vec<_> = self.attachments.iter().map(|f| f.id).collect();
         let reply = self.answering(cx).map(|(id, _)| id);
+        let target = self.target.clone();
+        let pending = std::mem::take(&mut self.pending);
         self.sending = true;
         self.error = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let sent = if briefed {
-                client
-                    .send_chat(project, body, files, reply)
-                    .await
-                    .map(drop)
-            } else {
-                client.send_brief(project, body, files).await.map(drop)
-            };
-            let _ = this.update(cx, |c, cx| {
-                c.sending = false;
-                match sent {
-                    Ok(()) => {
-                        c.input.update(cx, |i, cx| i.set_text("", cx));
-                        c.attachments.clear();
-                        c.reply = Reply::Latest;
+            // A new project is made now, and what was chosen for it uploaded to it.
+            let project = match target {
+                Target::Project(p) => p,
+                Target::New { folder } => match client.create_project(folder).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = this.update(cx, |c, cx| c.failed(None, pending, e.to_string(), cx));
+                        return;
                     }
-                    Err(e) => c.error = Some(format!("Not sent: {e}")),
+                },
+            };
+            for (i, path) in pending.iter().enumerate() {
+                let read = cx.background_spawn({
+                    let path = path.clone();
+                    async move { std::fs::read(path) }
+                });
+                match attach::upload(client.clone(), project, path.clone(), read.await).await {
+                    Ok(up) => files.push(up.file.id),
+                    Err(e) => {
+                        let rest = pending[i..].to_vec();
+                        let _ = this.update(cx, |c, cx| c.failed(Some(project), rest, e, cx));
+                        return;
+                    }
                 }
-                cx.notify();
+            }
+            let sent = client.send_chat(project, body, files, reply).await;
+            let _ = this.update(cx, |c, cx| match sent {
+                Ok(_) => {
+                    c.sending = false;
+                    c.input.update(cx, |i, cx| i.set_text("", cx));
+                    c.attachments.clear();
+                    c.reply = Reply::Latest;
+                    if c.project().is_none() {
+                        // The start is ready for another project; this one is shown.
+                        c.target = Target::New { folder: None };
+                        c.session.update(cx, |s, cx| s.select(project, cx));
+                    }
+                    cx.notify();
+                }
+                Err(e) => c.failed(Some(project), Vec::new(), e.to_string(), cx),
             });
         })
         .detach();
     }
 
+    /// A send that did not go through. A project made on the way is kept, so trying again sends
+    /// to it rather than making another.
+    fn failed(
+        &mut self,
+        made: Option<ProjectId>,
+        pending: Vec<PathBuf>,
+        error: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.sending = false;
+        if let Some(project) = made {
+            self.target = Target::Project(project);
+        }
+        self.pending.extend(pending);
+        self.error = Some(format!("Not sent: {error}"));
+        cx.notify();
+    }
+
     fn render_attachments(&self, cx: &mut Context<Self>) -> AnyElement {
-        let project = self.project;
-        let previews: Vec<_> = self
-            .attachments
-            .iter()
-            .map(|f| {
-                let image = self
-                    .session
-                    .update(cx, |s, cx| s.image(project, f.id, &f.media_type, cx));
-                attach::preview(f, image)
-            })
-            .collect();
+        let mut previews: Vec<_> = match self.project() {
+            Some(project) => self
+                .attachments
+                .iter()
+                .map(|f| {
+                    let image = self
+                        .session
+                        .update(cx, |s, cx| s.image(project, f.id, &f.media_type, cx));
+                    attach::preview(f, image)
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        previews.extend(self.pending.iter().map(|p| attach::pending(p)));
         div()
             .flex()
             .flex_wrap()
@@ -246,11 +328,15 @@ impl Composer {
 
 impl Render for Composer {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let briefed = self
-            .session
-            .read(cx)
-            .project(self.project, |p, _| super::briefed(p))
-            .unwrap_or(true);
+        // Before a project's first message the box draws the eye.
+        let first = match self.project() {
+            Some(p) => !self
+                .session
+                .read(cx)
+                .project(p, |p, _| super::started(p))
+                .unwrap_or(true),
+            None => true,
+        };
         let answering = self.answering(cx);
         let attachments = self.render_attachments(cx);
         div()
@@ -264,10 +350,10 @@ impl Render for Composer {
             .rounded(px(12.))
             .border_1()
             .border_color(gpui::rgba(0xffffff60))
-            // Opaque, so the brief box's glow stays outside it.
+            // Opaque, so the first message's glow stays outside it.
             .bg(gpui::rgb(0x18181a))
-            .when(!briefed, |d| {
-                // The brief box draws the eye, as on the mock.
+            .when(first, |d| {
+                // As on the mock.
                 d.border_color(gpui::rgba(0xffffffbf))
                     .shadow(vec![BoxShadow {
                         color: hsla(0., 0., 1., 0.25),
@@ -313,8 +399,12 @@ impl Render for Composer {
             })
             .child(
                 div()
+                    .id("composer-input")
                     .debug_selector(|| "composer-input".into())
-                    .when(!briefed, |d| d.min_h(px(72.)))
+                    .when(first, |d| d.min_h(px(72.)))
+                    .cursor_text()
+                    // The box is taller than its first line: a click anywhere in it writes there.
+                    .on_click(cx.listener(|this, _, window, cx| this.focus(window, cx)))
                     .child(self.input.clone()),
             )
             .child(attachments)

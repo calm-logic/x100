@@ -315,8 +315,8 @@ pub fn samples() -> Vec<Sample> {
             ProjectList {
                 projects: vec![ProjectSummary {
                     project: prj,
-                    name: "Fernleaf".into(),
-                    path: "/home/ada/fernleaf".into(),
+                    name: Some("Fernleaf".into()),
+                    dir: Some("/home/ada/x100/fernleaf".into()),
                     live: true,
                     agents: 4,
                 }],
@@ -325,11 +325,17 @@ pub fn samples() -> Vec<Sample> {
         s(GetProject { project: prj }, small_project()),
         s(
             CreateProject {
-                path: "/home/ada/fernleaf".into(),
-                name: Some("Fernleaf".into()),
+                dir: None,
                 settings: Some(settings()),
             },
             ProjectCreated { project: prj },
+        ),
+        s(
+            RenameProject {
+                project: prj,
+                name: "Fernleaf Shop".into(),
+            },
+            Done {},
         ),
         s(
             ChangeProjectSetting {
@@ -339,17 +345,6 @@ pub fn samples() -> Vec<Sample> {
             Done {},
         ),
         s(Reflect { project: prj }, Reflecting { task: tsk }),
-        s(
-            SendBrief {
-                project: prj,
-                body: "A landing page for a plant shop, with a waitlist.".into(),
-                attachments: vec![fil],
-            },
-            BriefSent {
-                message: msg,
-                task: tsk,
-            },
-        ),
         s(
             SendChat {
                 project: prj,
