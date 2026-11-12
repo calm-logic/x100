@@ -6,9 +6,6 @@
 //! subscriptions. The daemon starts again from the store: drivers do not outlive it, so what the
 //! log shows as live is settled first, and a process a killed daemon left behind is stopped.
 
-// x100_store::Error is over 128 bytes and every store call returns it; boxing it is the store's change.
-#![allow(clippy::result_large_err)]
-
 mod chooser;
 mod config;
 mod conn;

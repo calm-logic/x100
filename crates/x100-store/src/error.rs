@@ -2,15 +2,16 @@ use std::path::PathBuf;
 
 use x100_core::fold::FoldError;
 
+// The fold errors are boxed so that `Result<_, Error>` stays small for every caller.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The fold refused the event, so nothing was written. The log is unchanged.
     #[error("event refused: {0}")]
-    Rejected(FoldError),
+    Rejected(Box<FoldError>),
     /// Folding the stored log failed, so the database is damaged. `0` names the event by its
     /// sequence number and the record it is about.
     #[error("the stored log is corrupt: {0}")]
-    Corrupt(FoldError),
+    Corrupt(Box<FoldError>),
     /// A stored row would not parse back into its type.
     #[error("row {row} of {table} cannot be read: {source}")]
     Undecodable {

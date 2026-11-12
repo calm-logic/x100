@@ -20,6 +20,15 @@ pub(crate) async fn append(
     blocking(move || log.append(by, event)).await
 }
 
+/// Appends events that belong together as one unit: all of them are in the log or none is.
+pub(crate) async fn append_all(
+    store: &ProjectStore,
+    events: Vec<(Actor, ProjectEvent)>,
+) -> x100_store::Result<Vec<Envelope<ProjectEvent>>> {
+    let log = store.log.clone();
+    blocking(move || log.append_all(events)).await
+}
+
 /// Reads the folded state under the log's lock. The lock is also held while an append writes, so
 /// this goes through the blocking pool too.
 pub(crate) async fn read<T: Send + 'static>(

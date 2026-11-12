@@ -20,7 +20,7 @@ use x100_core::time::{Clock, Timestamp};
 use x100_core::tool::ToolCall;
 
 use crate::handle::{Command, DriverControl, DriverHandle, DriverInfo, InputError};
-use crate::harness::{CommandLine, Permissions, StallPolicy, StartError};
+use crate::harness::{CommandLine, Permissions, SpawnHook, StallPolicy, StartError};
 use crate::output::{Decision, DriverOutput, PermissionId};
 use crate::process;
 use crate::protocol::{Effects, Input, Protocol, Ready};
@@ -48,6 +48,7 @@ pub(crate) struct Launch {
     pub daemon_call: Option<DaemonCall>,
     /// Removed once the driver has ended: its per-driver configuration.
     pub cleanup: Option<PathBuf>,
+    pub on_spawn: SpawnHook,
 }
 
 enum StartOutcome {
@@ -100,6 +101,7 @@ pub(crate) async fn launch(
         }
     };
     let pid = child.id().unwrap_or_default();
+    launch.on_spawn.call(pid);
     let stdout = BufReader::new(child.stdout.take().expect("stdout is piped")).lines();
     let stdin = spawn_writer(child.stdin.take().expect("stdin is piped"));
     let stderr = spawn_stderr(child.stderr.take().expect("stderr is piped"));

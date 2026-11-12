@@ -139,7 +139,7 @@ fn run(steps: Vec<Step>) -> Result<(), TestCaseError> {
                     // Ended jobs, cancelled or done, cannot be cancelled.
                     prop_assert!(matches!(
                         &result,
-                        Err(Error::Store(e)) if matches!(**e, x100_store::Error::Rejected(_))
+                        Err(Error::Store(e)) if matches!(*e, x100_store::Error::Rejected(_))
                     ));
                 }
             }

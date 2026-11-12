@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use x100_core::event::Seq;
+use x100_core::event::{ProjectEvent, Seq};
 use x100_core::fold::ProjectState;
 use x100_store::ProjectStore;
 
@@ -43,7 +43,7 @@ fn every_event_and_entry_a_killed_writer_reported_is_there_after_reopening() {
     let (mut last_event, mut last_entry) = (0u64, 0u64);
     let mut kills_with_progress = 0;
 
-    for round in 0..40 {
+    for round in 0..40u32 {
         let mut child = Command::new(env!("CARGO_BIN_EXE_x100-store-appender"))
             .arg(dir.path())
             .stdout(Stdio::piped())
@@ -101,6 +101,7 @@ fn every_event_and_entry_a_killed_writer_reported_is_there_after_reopening() {
             stored.len()
         );
         assert_eq!(store.log.last(), Some(Seq(stored.len() as u64)));
+        assert_batches_whole(&stored, round, seed);
         assert_eq!(ProjectState::fold(&stored).unwrap(), store.log.state());
         let entries = store.transcripts.read(ceo, None, usize::MAX >> 1).unwrap();
         assert!(
@@ -120,4 +121,46 @@ fn every_event_and_entry_a_killed_writer_reported_is_there_after_reopening() {
         kills_with_progress >= 20,
         "the child rarely got anywhere before it was killed; the test proves little"
     );
+}
+
+/// A batch is tagged `batch/<round>/<k>/<size>/...`. Whatever the kill interrupted, each batch
+/// found is complete and in order: all of it is stored, or none.
+fn assert_batches_whole(
+    stored: &[x100_core::event::Envelope<ProjectEvent>],
+    round: u32,
+    seed: u64,
+) {
+    let mut at = 0;
+    while at < stored.len() {
+        let ProjectEvent::PreviewSet { url } = &stored[at].event else {
+            at += 1;
+            continue;
+        };
+        let Some(rest) = url.strip_prefix("batch/") else {
+            at += 1;
+            continue;
+        };
+        let parts: Vec<&str> = rest.split('/').collect();
+        let (i, k, size): (&str, usize, usize) = (
+            parts[0],
+            parts[1].parse().unwrap(),
+            parts[2].parse().unwrap(),
+        );
+        assert_eq!(
+            k, 0,
+            "round {round}, seed {seed}: batch {i} starts part-way"
+        );
+        for j in 0..size {
+            let tag = stored.get(at + j).and_then(|e| match &e.event {
+                ProjectEvent::PreviewSet { url } => url.strip_prefix("batch/"),
+                _ => None,
+            });
+            let want = format!("{i}/{j}/{size}/");
+            assert!(
+                tag.is_some_and(|t| t.starts_with(&want)),
+                "round {round}, seed {seed}: batch {i} is cut short at part {j}"
+            );
+        }
+        at += size;
+    }
 }

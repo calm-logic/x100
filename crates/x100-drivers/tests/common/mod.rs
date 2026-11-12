@@ -11,7 +11,8 @@ use x100_core::effort::Effort;
 use x100_core::harness::ModelName;
 use x100_core::id::DriverId;
 use x100_drivers::{
-    CommandWrapper, DriverHandle, DriverOutput, DriverSpec, Permissions, StallPolicy, ToolEndpoint,
+    CommandWrapper, DriverHandle, DriverOutput, DriverSpec, Permissions, SpawnHook, StallPolicy,
+    ToolEndpoint,
 };
 
 /// How long a test waits for a driver to say something before it gives up. Only a guard against a
@@ -39,6 +40,7 @@ pub fn spec(n: u128, dir: &Path, model: &str, effort: Effort) -> DriverSpec {
         env: Vec::new(),
         stall: stall_policy(),
         permissions: Permissions::AllowAll,
+        on_spawn: SpawnHook::ignore(),
     }
 }
 

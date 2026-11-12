@@ -1,6 +1,6 @@
 //! Test helper for the crash tests, not part of x100. Appends events and transcript entries to the
 //! project store in the directory it is given, forever, and prints each committed number as it
-//! learns it: `event N` once the event is durable, `transcript N` likewise. The test kills it with
+//! learns it (every third round appends a batch, whose numbers are printed together once it commits): `event N` once the event is durable, `transcript N` likewise. The test kills it with
 //! SIGKILL and checks that nothing it printed was lost.
 
 use std::io::Write;
@@ -18,6 +18,8 @@ use x100_core::project::Settings;
 use x100_core::time::{Clock, Timestamp};
 use x100_core::transcript::{Entry, Item};
 use x100_store::ProjectStore;
+
+const BATCH: usize = 4;
 
 struct SystemClock;
 
@@ -57,11 +59,20 @@ fn main() {
         i += 1;
         // Rows of very different sizes, so a kill lands in the middle of writes of every shape.
         let url = format!("http://preview/{i}/{}", "x".repeat(i * 37 % 4000));
-        let e = store
-            .log
-            .append(Actor::Daemon, ProjectEvent::PreviewSet { url })
-            .expect("appends");
-        writeln!(out, "event {}", e.seq.0).expect("stdout");
+        // Every third round is a batch, tagged so the test can tell whether all of it is there.
+        let events = if i.is_multiple_of(3) {
+            (0..BATCH)
+                .map(|k| {
+                    let url = format!("batch/{i}/{k}/{BATCH}/{}", "y".repeat(i * 53 % 3000));
+                    (Actor::Daemon, ProjectEvent::PreviewSet { url })
+                })
+                .collect()
+        } else {
+            vec![(Actor::Daemon, ProjectEvent::PreviewSet { url })]
+        };
+        for e in store.log.append_all(events).expect("appends") {
+            writeln!(out, "event {}", e.seq.0).expect("stdout");
+        }
         out.flush().expect("flush");
         let entry = Entry {
             at: SystemClock.now(),

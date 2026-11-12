@@ -14,7 +14,7 @@ use x100_core::time::Clock;
 use x100_store::ProjectStore;
 
 use crate::ids::new_id;
-use crate::store::{append, read};
+use crate::store::{append, append_all, read};
 
 /// Why a request was refused.
 #[derive(Debug, thiserror::Error)]
@@ -34,27 +34,20 @@ fn check_attachments(state: &ProjectState, files: &[FileId]) -> Result<(), Refus
     }
 }
 
-async fn deliver(
-    store: &ProjectStore,
-    clock: &dyn Clock,
-    agent: AgentId,
-    what: InboxItem,
-) -> Result<InboxItemId, Refused> {
+/// The event that puts `what` in the agent's inbox. It is appended with the event that caused it,
+/// so a crash cannot leave the cause in the log without the delivery.
+fn delivery(clock: &dyn Clock, agent: AgentId, what: InboxItem) -> (Actor, ProjectEvent) {
     let item = new_id(clock, InboxItemId::new);
-    append(
-        store,
+    (
         Actor::Daemon,
         ProjectEvent::Agent {
             agent,
             event: AgentEvent::Delivered { item, what },
         },
     )
-    .await?;
-    Ok(item)
 }
 
-/// The builder's message to the CEO. A crash between the two appends leaves a message the CEO was
-/// never told of, since the store has no append of several events at once.
+/// The builder's message to the CEO, and its delivery to the CEO's inbox, in one append.
 pub async fn send_chat(
     store: &ProjectStore,
     clock: &dyn Clock,
@@ -84,8 +77,14 @@ pub async fn send_chat(
         attachments,
         in_reply_to,
     };
-    append(store, Actor::Builder, ProjectEvent::MessageSent(message)).await?;
-    deliver(store, clock, ceo, InboxItem::Message { message: id }).await?;
+    append_all(
+        store,
+        vec![
+            (Actor::Builder, ProjectEvent::MessageSent(message)),
+            delivery(clock, ceo, InboxItem::Message { message: id }),
+        ],
+    )
+    .await?;
     Ok(id)
 }
 
@@ -132,7 +131,6 @@ pub async fn send_brief(
         attachments: attachments.clone(),
         in_reply_to: None,
     };
-    append(store, Actor::Builder, ProjectEvent::MessageSent(note)).await?;
     let opening = Opening::Delegated(Assignment {
         delegator: Party::Builder,
         assignee: ceo,
@@ -146,16 +144,21 @@ pub async fn send_brief(
         raised_by: Party::Builder,
         attachments,
     };
-    append(
+    append_all(
         store,
-        Actor::Builder,
-        ProjectEvent::TaskOpened {
-            task: task_record,
-            opening,
-        },
+        vec![
+            (Actor::Builder, ProjectEvent::MessageSent(note)),
+            (
+                Actor::Builder,
+                ProjectEvent::TaskOpened {
+                    task: task_record,
+                    opening,
+                },
+            ),
+            delivery(clock, ceo, InboxItem::Task { task }),
+        ],
     )
     .await?;
-    deliver(store, clock, ceo, InboxItem::Task { task }).await?;
     Ok((message, task))
 }
 
@@ -207,6 +210,7 @@ pub async fn deliver_job(
     job: JobId,
     note: String,
 ) -> Result<(), Refused> {
-    deliver(store, clock, agent, InboxItem::Job { job, note }).await?;
+    let (by, event) = delivery(clock, agent, InboxItem::Job { job, note });
+    append(store, by, event).await?;
     Ok(())
 }

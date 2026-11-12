@@ -122,26 +122,48 @@ impl<S: Folded> EventLog<S> {
     ///
     /// The event is refused with [`Error::Rejected`] if the fold does not accept it.
     pub fn append(&self, by: Actor, event: S::Event) -> Result<Envelope<S::Event>> {
+        let mut done = self.append_all(vec![(by, event)])?;
+        Ok(done.pop().expect("one event in, one out"))
+    }
+
+    /// Appends events as one unit and returns them with their sequence numbers and times.
+    ///
+    /// They are folded in order and written in one transaction, so after a crash all are in the
+    /// log or none is, and a follower sees them in order with no other event between. If the fold
+    /// refuses any of them the result is [`Error::Rejected`], nothing is written and the state is
+    /// as it was.
+    pub fn append_all(&self, events: Vec<(Actor, S::Event)>) -> Result<Vec<Envelope<S::Event>>> {
         let mut sh = self.shared();
-        let seq = Seq(sh.state.last().map_or(1, |s| s.0 + 1));
-        let envelope = Envelope {
-            seq,
-            at: self.inner.clock.now(),
-            by,
-            event,
-        };
-        // The fold may leave the state part-way when it refuses, so the state is rebuilt from the
-        // table on any failure. Failures are rare, and cloning the state for every append is not.
-        if let Err(e) = sh.state.apply(&envelope) {
-            sh.state = fold_stored(&sh.conn)?;
-            return Err(Error::Rejected(e));
+        let first = sh.state.last().map_or(1, |s| s.0 + 1);
+        let envelopes: Vec<_> = events
+            .into_iter()
+            .zip(first..)
+            .map(|((by, event), seq)| Envelope {
+                seq: Seq(seq),
+                at: self.inner.clock.now(),
+                by,
+                event,
+            })
+            .collect();
+        // The fold may leave the state part-way through an event when it refuses, and earlier
+        // events of the batch are already applied. Either way the state is rebuilt from the table,
+        // which holds none of this batch. Failures are rare, and cloning the state for every
+        // append is not.
+        for envelope in &envelopes {
+            if let Err(e) = sh.state.apply(envelope) {
+                sh.state = fold_stored(&sh.conn)?;
+                return Err(Error::Rejected(Box::new(e)));
+            }
         }
-        if let Err(e) = insert(&mut sh.conn, &envelope) {
+        if let Err(e) = insert(&mut sh.conn, &envelopes) {
             sh.state = fold_stored(&sh.conn)?;
             return Err(e);
         }
-        sh.followers.retain(|f| f.send(envelope.clone()).is_ok());
-        Ok(envelope)
+        // Still under the lock, so no other append's events can fall between these.
+        for envelope in &envelopes {
+            sh.followers.retain(|f| f.send(envelope.clone()).is_ok());
+        }
+        Ok(envelopes)
     }
 
     /// The last sequence number, or `None` for an empty log.
@@ -209,14 +231,16 @@ enum Dir {
     Before(Option<Seq>),
 }
 
-fn insert<E: Serialize>(conn: &mut Connection, e: &Envelope<E>) -> Result<()> {
-    let by = serde_json::to_string(&e.by).expect("an actor serialises");
-    let event = serde_json::to_string(&e.event).expect("an event serialises");
+fn insert<E: Serialize>(conn: &mut Connection, events: &[Envelope<E>]) -> Result<()> {
     let tx = conn.transaction()?;
-    tx.execute(
-        "INSERT INTO events (seq, at, by, event) VALUES (?1, ?2, ?3, ?4)",
-        params![e.seq.0 as i64, e.at.as_millis() as i64, by, event],
-    )?;
+    for e in events {
+        let by = serde_json::to_string(&e.by).expect("an actor serialises");
+        let event = serde_json::to_string(&e.event).expect("an event serialises");
+        tx.execute(
+            "INSERT INTO events (seq, at, by, event) VALUES (?1, ?2, ?3, ?4)",
+            params![e.seq.0 as i64, e.at.as_millis() as i64, by, event],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -273,7 +297,7 @@ fn fold_stored<S: Folded>(conn: &Connection) -> Result<S> {
         };
         from = Some(last);
         for e in &page {
-            state.apply(e).map_err(Error::Corrupt)?;
+            state.apply(e).map_err(|e| Error::Corrupt(Box::new(e)))?;
         }
     }
 }

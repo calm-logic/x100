@@ -8,12 +8,5 @@ pub enum Error {
     /// The log refused the event or could not store it. `Store(Rejected)` on a cancel means the
     /// job is unknown or has already ended.
     #[error(transparent)]
-    Store(Box<x100_store::Error>),
-}
-
-// Boxed because the store's error is large and this one is returned from every call.
-impl From<x100_store::Error> for Error {
-    fn from(e: x100_store::Error) -> Self {
-        Error::Store(Box::new(e))
-    }
+    Store(#[from] x100_store::Error),
 }

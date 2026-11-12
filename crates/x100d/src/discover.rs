@@ -35,6 +35,8 @@ pub fn discover(
         None => real(config),
     };
     let mut found = HashMap::new();
+    // Appended together after the loop, so a crash during discovery leaves the log as it was.
+    let mut events = Vec::new();
     for harness in candidates {
         let record = Harness {
             // Replaced below by the id the log already has for this kind, if it has one.
@@ -46,7 +48,7 @@ pub fn discover(
         let known = log.with_state(|s| s.harnesses().find(|h| h.kind == record.kind).cloned());
         let id = match known {
             None => {
-                log.append(Actor::Daemon, DaemonEvent::HarnessAdded(record.clone()))?;
+                events.push((Actor::Daemon, DaemonEvent::HarnessAdded(record.clone())));
                 record.id
             }
             Some(old) => {
@@ -55,7 +57,7 @@ pub fn discover(
                     ..record
                 };
                 if record != old {
-                    log.append(Actor::Daemon, DaemonEvent::HarnessUpdated(record))?;
+                    events.push((Actor::Daemon, DaemonEvent::HarnessUpdated(record)));
                 }
                 old.id
             }
@@ -66,7 +68,7 @@ pub fn discover(
         Some(id) => id,
         None => {
             let id = new_id(&*config.clock, MachineId::new);
-            log.append(
+            events.push((
                 Actor::Daemon,
                 DaemonEvent::MachineAdded(Machine {
                     id,
@@ -74,10 +76,11 @@ pub fn discover(
                     harnesses: found.keys().copied().collect(),
                     cap: 16,
                 }),
-            )?;
+            ));
             id
         }
     };
+    log.append_all(events)?;
     Ok(Found {
         harnesses: found,
         machine,

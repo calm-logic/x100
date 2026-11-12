@@ -15,8 +15,8 @@ use x100_core::message::{Message, Route};
 use x100_core::party::Actor;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
 use x100_drivers::{
-    CommandWrapper, Decision, DriverControl, DriverOutput, DriverSpec, Permissions, Spent,
-    StallPolicy, StartError, TurnEnd,
+    CommandWrapper, Decision, DriverControl, DriverOutput, DriverSpec, Permissions, SpawnHook,
+    Spent, StallPolicy, StartError, TurnEnd,
 };
 use x100_store::ProjectStore;
 
@@ -25,7 +25,7 @@ use crate::choose::Choice;
 use crate::ids::new_id;
 use crate::pack;
 use crate::project::Msg;
-use crate::store::{append, blocking, read};
+use crate::store::{append, append_all, blocking, read};
 
 pub(crate) enum Cmd {
     /// Give the driver a turn with these inbox items.
@@ -161,16 +161,21 @@ impl Actor_ {
             env: Vec::new(),
             stall: StallPolicy::from_settings(&(self.shared.settings)()),
             permissions: Permissions::AllowAll,
+            // Written down before the handshake, since a daemon killed during it would otherwise
+            // leave a process nobody recorded. A blocking write, but a short one.
+            on_spawn: SpawnHook::new({
+                let processes = Arc::clone(&self.shared.processes);
+                move |pid| {
+                    if let Err(e) = processes.record(driver, pid) {
+                        eprintln!("x100: could not write down driver {driver}'s process: {e}");
+                    }
+                }
+            }),
         };
         let mut handle = match harness.start(spec).await {
             Ok(h) => h,
             Err(e) => return self.fail(start_failure(e)).await,
         };
-        let processes = Arc::clone(&self.shared.processes);
-        let pid = handle.info().pid;
-        if let Err(e) = blocking(move || processes.record(driver, pid)).await {
-            eprintln!("x100: could not write down driver {driver}'s process: {e}");
-        }
         let control = handle.control();
         if let Err(detail) = self.begin_turn(&control, first).await {
             return self.abort(&control, detail).await;
@@ -365,9 +370,9 @@ impl Actor_ {
         }
     }
 
-    /// The turn completed: checkpoint the work, answer the builder if the CEO was asked, and only
-    /// then count the items handled. A crash before the last step gives the items to the next
-    /// driver, so a reply can be repeated and is never lost.
+    /// The turn completed: checkpoint the work, answer the builder if the CEO was asked, and count
+    /// the items handled, all in one append. A crash before it gives the items to the next driver,
+    /// so a reply can be repeated and is never lost, and none is ever half recorded.
     async fn finish_turn(&mut self, msgs: &mpsc::UnboundedSender<Msg>) -> Result<(), String> {
         let Some(turn) = self.turn.take() else {
             return Ok(());
@@ -382,12 +387,12 @@ impl Actor_ {
             store.git.checkpoint(&dir, &agent.to_string())
         })
         .await;
+        // One append, so a crash cannot leave a reply without the turn's end, or the end without
+        // the handled items it implies: the next driver either repeats the turn or does not.
+        let mut events = Vec::new();
         match checkpoint {
             Ok(commit) => {
-                let event = ProjectEvent::Checkpointed { agent, commit };
-                if let Err(e) = append(&self.store, Actor::Daemon, event).await {
-                    eprintln!("x100: checkpoint of {agent}: {e}");
-                }
+                events.push((Actor::Daemon, ProjectEvent::Checkpointed { agent, commit }))
             }
             Err(e) => eprintln!("x100: could not checkpoint {agent}: {e}"),
         }
@@ -404,12 +409,18 @@ impl Actor_ {
                 attachments: Vec::new(),
                 in_reply_to: turn.reply_to,
             };
-            let event = ProjectEvent::MessageSent(message);
-            if let Err(e) = append(&self.store, Actor::Agent(agent), event).await {
-                eprintln!("x100: the reply of {agent}: {e}");
-            }
+            events.push((Actor::Agent(agent), ProjectEvent::MessageSent(message)));
         }
-        self.event(DriverEvent::TurnEnded).await?;
+        events.push((
+            Actor::Daemon,
+            ProjectEvent::Driver {
+                driver: self.driver,
+                event: DriverEvent::TurnEnded,
+            },
+        ));
+        append_all(&self.store, events)
+            .await
+            .map_err(|e| format!("the log refused the end of a turn: {e}"))?;
         // Nothing to do and nothing to wait for: the agent rests until something reaches it.
         let resting = read(&self.store, move |s| {
             s.agent(agent).is_some_and(|a| {

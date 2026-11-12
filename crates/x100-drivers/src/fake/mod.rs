@@ -138,6 +138,7 @@ impl Harness for FakeHarness {
             clock: Arc::clone(&self.clock),
             daemon_call,
             cleanup: None,
+            on_spawn: spec.on_spawn.clone(),
         };
         supervisor::launch(launch, Box::new(protocol)).await
     }

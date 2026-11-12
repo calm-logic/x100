@@ -59,6 +59,13 @@ One subscription, `events.subscribe`, follows all of them.
 - **With `resume`**, the client says how far it had read each log. The daemon notifies every later event of
   each log first, then new ones as they come, and the result carries no snapshot. A log the cursor lacks is
   read from its first event. A cursor ahead of a log is `rejected`.
+- **Order of result and notices.** The result of `events.subscribe` always arrives before the first
+  `events.event` of that subscription, even when the daemon has events ready to send. The same holds for
+  `transcript.subscribe` and `transcript.entry`. A client may therefore learn the subscription id from the
+  result and treat any notice carrying it as belonging to a subscription it knows.
+- **One events subscription per connection.** A connection has at most one live `events.subscribe`. A second
+  one is `rejected` until the first is ended with `unsubscribe` or by `subscription.closed`. Transcript
+  subscriptions are not limited this way: a connection may follow several agents.
 - A project created after the subscription is followed from its first event (`Created`), so a client that
   gets an event for a project it has no state for starts that project's state empty and applies it.
 - Each notification is `events.event`, naming the log. The client applies it to the state with the same

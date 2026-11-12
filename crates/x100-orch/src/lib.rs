@@ -10,9 +10,6 @@
 //! - `driver::Actor::finish_turn` is where a completed turn is recorded, and where reports, waits
 //!   and the nudge for a turn that neither reported nor waited will go.
 
-// x100_store::Error is over 128 bytes and every store call returns it; boxing it is the store's change.
-#![allow(clippy::result_large_err)]
-
 mod builder;
 mod choose;
 mod driver;

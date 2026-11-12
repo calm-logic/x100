@@ -124,7 +124,7 @@ fn a_job_that_has_ended_cannot_be_cancelled() {
     assert_eq!(fired(&sched).len(), 1);
     let err = sched.cancel(Actor::Builder, id).unwrap_err();
     assert!(
-        matches!(&err, Error::Store(e) if matches!(**e, x100_store::Error::Rejected(_))),
+        matches!(&err, Error::Store(e) if matches!(*e, x100_store::Error::Rejected(_))),
         "{err}"
     );
 }

@@ -49,6 +49,9 @@ pub struct DriverSpec {
     pub env: Vec<(String, String)>,
     pub stall: StallPolicy,
     pub permissions: Permissions,
+    /// Called with the child's process id as soon as it is spawned, before any handshake, so a
+    /// daemon killed during the handshake has already written the process down.
+    pub on_spawn: SpawnHook,
 }
 
 /// This driver's own address for the daemon's tools over MCP (streamable HTTP), and the token
@@ -140,6 +143,32 @@ impl Default for CommandWrapper {
 impl fmt::Debug for CommandWrapper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("CommandWrapper")
+    }
+}
+
+/// What a harness calls with a child's process id right after spawning it. It runs on the
+/// starting task, so it should be quick.
+#[derive(Clone)]
+pub struct SpawnHook(Arc<dyn Fn(u32) + Send + Sync>);
+
+impl SpawnHook {
+    /// A hook that does nothing, for a caller that has no use for the pid.
+    pub fn ignore() -> Self {
+        Self(Arc::new(|_| {}))
+    }
+
+    pub fn new(hook: impl Fn(u32) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(hook))
+    }
+
+    pub(crate) fn call(&self, pid: u32) {
+        (self.0)(pid)
+    }
+}
+
+impl fmt::Debug for SpawnHook {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SpawnHook")
     }
 }
 

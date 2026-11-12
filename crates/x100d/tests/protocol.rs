@@ -1,9 +1,6 @@
 //! The protocol against a daemon in this process: its limits, the methods one by one, and the
 //! jobs clock. Raw sockets where the client library would hide what is being tested.
 
-// x100_store::Error is over 128 bytes and every store call returns it; boxing it is the store's change.
-#![allow(clippy::result_large_err)]
-
 mod common;
 
 use std::time::Duration;

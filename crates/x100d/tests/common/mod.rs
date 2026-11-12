@@ -89,20 +89,25 @@ impl Env {
         self.dir.path().join(name).to_string_lossy().into_owned()
     }
 
-    pub fn daemon_args(&self) -> Vec<std::ffi::OsString> {
+    pub fn daemon_args(&self, fake_harness: &Path) -> Vec<std::ffi::OsString> {
         vec![
             "--data-dir".into(),
             self.data.clone().into(),
             "--scripts-dir".into(),
             self.scripts.clone().into(),
             "--fake-harness".into(),
-            env!("CARGO_BIN_EXE_x100d-fake-harness").into(),
+            fake_harness.into(),
         ]
     }
 
     pub fn spawn(&self) -> DaemonProc {
+        self.spawn_with(Path::new(env!("CARGO_BIN_EXE_x100d-fake-harness")))
+    }
+
+    /// A daemon whose drivers are started by `fake_harness` instead of the usual program.
+    pub fn spawn_with(&self, fake_harness: &Path) -> DaemonProc {
         let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
-            .args(self.daemon_args())
+            .args(self.daemon_args(fake_harness))
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");

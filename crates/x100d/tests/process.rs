@@ -1,8 +1,5 @@
 //! The daemon as a child process, and the client library as the only way in.
 
-// x100_store::Error is over 128 bytes and every store call returns it; boxing it is the store's change.
-#![allow(clippy::result_large_err)]
-
 mod common;
 
 use common::*;
@@ -603,7 +600,9 @@ async fn a_client_that_finds_no_daemon_starts_one() {
     let mut options = x100_client::Options::new(env.socket(), "test");
     options.launch = Some(x100_client::Launch {
         program: env!("CARGO_BIN_EXE_x100d").into(),
-        args: env.daemon_args(),
+        args: env.daemon_args(std::path::Path::new(env!(
+            "CARGO_BIN_EXE_x100d-fake-harness"
+        ))),
     });
     options.startup_timeout = WAIT;
     let client = x100_client::Client::connect(options)
@@ -624,4 +623,53 @@ async fn a_client_that_finds_no_daemon_starts_one() {
     )
     .unwrap();
     gone(&[pid as u32]).await;
+}
+
+/// The fake harness cannot pause in its handshake by script, so the program the daemon starts is a
+/// shell script that sleeps first and then becomes the fake harness. The sleeping script is the
+/// driver's process: the daemon has spawned it and the handshake cannot finish.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_driver_killed_with_the_daemon_during_its_handshake_is_reaped_on_the_next_start() {
+    let env = Env::new();
+    let slow = env.dir.path().join("slow-harness.sh");
+    std::fs::write(
+        &slow,
+        format!(
+            "#!/bin/sh\nsleep 600\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_x100d-fake-harness")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&slow, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let mut daemon = env.spawn_with(&slow);
+    let client = env.client().await;
+    let project = create_project(&client, &env, "slow").await;
+    client.request(say(project, "ping")).await.unwrap();
+
+    // The process is written down while it is still asleep, long before any handshake.
+    let mut recorded = Vec::new();
+    for _ in 0..400 {
+        recorded = env.recorded_pids();
+        if !recorded.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(recorded.len(), 1, "the driver is written down at spawn");
+    let pid = recorded[0].1;
+    let members = group_members(pid);
+    assert!(members.contains(&pid) && members.len() >= 2, "{members:?}");
+    assert!(
+        ceo_driver(&client.state().projects[&project])
+            .is_some_and(|d| d.state != DriverState::Warm && d.state != DriverState::Running),
+        "the driver has not finished starting"
+    );
+    drop(client);
+
+    daemon.kill9();
+    assert!(running(pid), "a killed daemon cannot stop what it started");
+    let _daemon = env.spawn();
+    let _client = env.client().await;
+    gone(&members).await;
 }

@@ -408,3 +408,26 @@ async fn compaction_reports_the_context_left() {
         ]
     );
 }
+
+#[tokio::test]
+async fn the_spawn_hook_is_called_with_a_live_pid_before_start_returns() {
+    let s = setup(REPLAY);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut spec = spec_in(&s.work);
+    spec.on_spawn = x100_drivers::SpawnHook::new({
+        let seen = Arc::clone(&seen);
+        move |pid| seen.lock().unwrap().push(pid)
+    });
+    let handle = s.harness.start(spec).await.unwrap();
+
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(
+        seen,
+        [handle.info().pid],
+        "called once, with the child's pid"
+    );
+    assert!(seen[0] > 0);
+    // Signal 0 only asks whether the process exists; the child is still running.
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(seen[0] as i32), None).expect("alive");
+    handle.stop().await;
+}

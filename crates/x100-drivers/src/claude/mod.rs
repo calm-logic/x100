@@ -265,6 +265,7 @@ impl Harness for ClaudeCode {
             clock: Arc::clone(&self.clock),
             daemon_call: None,
             cleanup: Some(driver_dir),
+            on_spawn: spec.on_spawn.clone(),
         };
         supervisor::launch(launch, Box::new(protocol)).await
     }
