@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use x100_core::harness::HarnessKind;
 use x100_core::id::{AgentId, DriverId};
 use x100_drivers::{DriverSpec, Permissions, SpawnHook, StallPolicy};
 use x100_router::Choice;
@@ -21,6 +22,33 @@ use crate::ctx::ProjectCtx;
 /// and every edit outside its worktree, is put to the daemon, which refuses it until the gate
 /// exists (M12). Nothing prompts on the terminal: nobody can type into it.
 pub(crate) const PERMISSIONS: Permissions = Permissions::Worktree;
+
+/// What a model is told [`PERMISSIONS`] lets it do with a driver of `harness`, before it plans
+/// work it could not carry out.
+pub(crate) fn workspace(harness: &HarnessKind) -> String {
+    let base = "Your working directory is your own copy of the project, on a git branch of its \
+                own. Change files only there; they are committed when you report.";
+    let more = match harness {
+        HarnessKind::ClaudeCode | HarnessKind::ClaudeCodeTerminal => {
+            "Commands are not available here yet: every shell command is refused, so do not try \
+             one, and do not plan to run, install or test anything. Create and edit the files \
+             directly with your file tools."
+        }
+        HarnessKind::Codex | HarnessKind::CodexTerminal => {
+            "You may run commands there, in a sandbox that can write only to that directory and \
+             /tmp and has no network, so nothing can be installed or downloaded."
+        }
+        HarnessKind::Custom { .. } => "",
+    };
+    format!("{base} {more}").trim_end().to_owned()
+}
+
+/// What a model is told when the harness asks the daemon about something [`PERMISSIONS`] does not
+/// let through, such as a shell command, so it carries on rather than trying again.
+pub(crate) const REFUSED: &str = "Commands are not available here yet, and neither are web \
+     requests or changes outside your working directory. Do not try again: write the files \
+     directly in your working directory with your file tools, and say in your report what you \
+     could not run or check.";
 
 pub(crate) fn build(
     shared: &Shared,

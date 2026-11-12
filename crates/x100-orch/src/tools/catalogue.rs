@@ -35,8 +35,9 @@ pub(crate) enum Tool {
 }
 
 /// What the model is told after a call that ends its part in the turn.
-pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the turn now. You get a \
-     new turn when something reaches your inbox.";
+pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the turn now, with at \
+     most a short closing line and no further tool calls. You get a new turn when something \
+     reaches your inbox.";
 
 impl Tool {
     pub const ALL: [Tool; 22] = [
@@ -171,8 +172,10 @@ impl Tool {
             }
             Tool::Report => {
                 "End a task you were given, as completed or failed, with a summary for whoever \
-                 delegated it. Your worktree is committed with the report, so there is no need \
-                 to commit first. This ends your part in the turn. Returns the task's id."
+                 delegated it. Your working directory is committed with the report, so there is \
+                 no need to commit first. For the builder's task, the summary goes to the builder \
+                 and your work is merged into the project's main branch. This ends your part in \
+                 the turn. Returns the task's id."
             }
             Tool::Message => {
                 "Send a message to another agent, or, for the CEO alone, to the builder. Use it to \

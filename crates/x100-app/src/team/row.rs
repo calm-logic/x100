@@ -236,6 +236,11 @@ impl AgentHeader {
     pub fn agent(&self) -> AgentId {
         self.agent
     }
+
+    /// What it shows.
+    pub fn shown(&self) -> Option<&AgentModel> {
+        self.model.as_ref()
+    }
 }
 
 impl Render for AgentHeader {

@@ -1,6 +1,7 @@
 //! The Team tab: the agent it is opened on (the CEO to begin with), a trail back to the CEO, and
-//! either the agents it runs or what it is working in. A switch lists the project's live drivers
-//! instead.
+//! either the agents it runs or what it is working in. An agent that runs agents is opened on
+//! them, with a switch to its own output, since it works in a terminal of its own too. Another
+//! switch lists the project's live drivers instead.
 //!
 //! The view itself is not cached and redraws cheaply whenever anything under it does. Each agent
 //! and each driver is a cached view of its own. When an event changes the Team part (core's
@@ -30,12 +31,21 @@ pub use row::{AgentHeader, AgentModel, AgentRow, RowEvent};
 
 use crate::reflection::Reflection;
 use crate::session::{Session, SessionEvent};
-use crate::{theme, widgets};
+use crate::{theme, widgets, words};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Listing {
     Agents,
     Drivers,
+}
+
+/// What an agent that runs agents is opened on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shown {
+    /// The agents it runs.
+    Agents,
+    /// What it is working in itself.
+    Output,
 }
 
 pub struct TeamView {
@@ -44,6 +54,8 @@ pub struct TeamView {
     listing: Listing,
     /// The agent the view is opened on; `None` is the CEO.
     focus: Option<AgentId>,
+    /// Whether that agent's agents or its output are shown, while it runs any.
+    shown: Shown,
     header: Option<Entity<AgentHeader>>,
     /// Every row made so far, kept so a row seen again keeps its entity.
     rows: HashMap<AgentId, Entity<AgentRow>>,
@@ -69,6 +81,7 @@ impl TeamView {
             project,
             listing: Listing::Agents,
             focus: None,
+            shown: Shown::Agents,
             header: None,
             rows: HashMap::new(),
             listed: Vec::new(),
@@ -89,6 +102,15 @@ impl TeamView {
 
     pub fn listing(&self) -> Listing {
         self.listing
+    }
+
+    pub fn shown(&self) -> Shown {
+        self.shown
+    }
+
+    /// The agent the view is opened on, as its header shows it.
+    pub fn header(&self) -> Option<Entity<AgentHeader>> {
+        self.header.clone()
     }
 
     /// The rows listed now, in order.
@@ -114,9 +136,18 @@ impl TeamView {
     /// Opens an agent, or the CEO for `None`.
     pub fn open(&mut self, agent: Option<AgentId>, cx: &mut Context<Self>) {
         self.focus = agent;
+        self.shown = Shown::Agents;
         self.header = None;
         self.output = None;
         self.reflection = None;
+        self.relist(cx);
+        cx.notify();
+    }
+
+    /// Shows the opened agent's agents or its own output. An agent with no agents shows its
+    /// output whatever this says.
+    pub fn show(&mut self, shown: Shown, cx: &mut Context<Self>) {
+        self.shown = shown;
         self.relist(cx);
         cx.notify();
     }
@@ -185,7 +216,7 @@ impl TeamView {
             }
         }
         // An agent with no agents under it shows what it is working in instead.
-        let wants_output = children.is_empty();
+        let wants_output = children.is_empty() || self.shown == Shown::Output;
         if wants_output
             && self
                 .output
@@ -292,6 +323,30 @@ impl TeamView {
         .into_any_element()
     }
 
+    /// Between an agent's header and what is under it, when it runs agents.
+    fn shown_switch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.shown;
+        let agents = words::agents(self.listed.len());
+        widgets::segments(
+            [
+                (Shown::Agents, agents),
+                (Shown::Output, "Its output".into()),
+            ]
+            .map(|(shown, label)| {
+                let name = match shown {
+                    Shown::Agents => "Agents",
+                    Shown::Output => "Output",
+                };
+                // Its own id, since the listing switch beside it has an "Agents" too.
+                widgets::segment(("shown", shown as usize), label, on == shown)
+                    .debug_selector(move || format!("shown-{name}"))
+                    .on_click(cx.listener(move |this, _, _, cx| this.show(shown, cx)))
+                    .into_any_element()
+            }),
+        )
+        .into_any_element()
+    }
+
     fn agents(&self, cx: &mut Context<Self>) -> AnyElement {
         let names: Vec<String> = self
             .state(cx, |p| {
@@ -319,26 +374,30 @@ impl TeamView {
                         .h(px(row::HEADER_HEIGHT)),
                 )
             }))
-            .when(!self.listed.is_empty(), |d| {
-                d.child(
-                    div()
-                        .w_full()
-                        .max_w(px(460.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .children(self.listed.iter().zip(names).map(|(agent, name)| {
-                            // The wrapper is part of this view, so tests find a row by name even
-                            // while the row itself is reused from its cache.
-                            div()
-                                .w_full()
-                                .debug_selector(move || format!("agent-{name}"))
-                                .child(self.rows[agent].clone().cached(
-                                    StyleRefinement::default().w_full().h(px(row::ROW_HEIGHT)),
-                                ))
-                        })),
-                )
-            })
+            .when(!self.listed.is_empty(), |d| d.child(self.shown_switch(cx)))
+            .when(
+                !self.listed.is_empty() && self.shown == Shown::Agents,
+                |d| {
+                    d.child(
+                        div()
+                            .w_full()
+                            .max_w(px(460.))
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.))
+                            .children(self.listed.iter().zip(names).map(|(agent, name)| {
+                                // The wrapper is part of this view, so tests find a row by name even
+                                // while the row itself is reused from its cache.
+                                div()
+                                    .w_full()
+                                    .debug_selector(move || format!("agent-{name}"))
+                                    .child(self.rows[agent].clone().cached(
+                                        StyleRefinement::default().w_full().h(px(row::ROW_HEIGHT)),
+                                    ))
+                            })),
+                    )
+                },
+            )
             .children(
                 self.output
                     .clone()

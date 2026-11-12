@@ -173,7 +173,7 @@ impl Actor_ {
             Ok(r) => r,
             Err(detail) => return self.fail(error(detail)).await,
         };
-        let start_pack = self.start_pack(why).await;
+        let start_pack = self.start_pack(why, spec::workspace(&harness.kind())).await;
         // The pack is the driver's first entry, so it is on record before the driver can act.
         self.transcript(Item::StartPack {
             text: start_pack.clone(),
@@ -279,11 +279,17 @@ impl Actor_ {
         .await
     }
 
-    async fn start_pack(&self, why: StartReason) -> String {
+    async fn start_pack(&self, why: StartReason, workspace: String) -> String {
         let (ctx, agent) = (Arc::clone(&self.ctx), self.agent);
         let window = self.offer.as_ref().map_or(200_000, |o| o.context_window);
         let share = (self.shared.settings)().start_pack_share.value();
-        blocking(move || pack::build(&ctx.store, agent, &why, window, share)).await
+        let pack = pack::Pack {
+            why,
+            workspace,
+            window_tokens: window,
+            share_percent: share,
+        };
+        blocking(move || pack::build(&ctx.store, agent, &pack)).await
     }
 
     async fn event(&self, event: DriverEvent) -> Result<(), String> {
@@ -382,12 +388,11 @@ impl Actor_ {
             }
             DriverOutput::PermissionRequest(request) => {
                 // The gate is M12. Until then nothing is allowed that the harness would ask about.
-                let reason = "the gate is not built yet, so nothing that needs asking is allowed";
                 let _ = control
                     .answer(
                         request.id,
                         Decision::Deny {
-                            reason: reason.into(),
+                            reason: spec::REFUSED.into(),
                         },
                     )
                     .await;
@@ -408,7 +413,10 @@ impl Actor_ {
                 });
             }
             DriverOutput::Terminal(chunk) => self.terminal(chunk).await,
-            DriverOutput::Warning(_) | DriverOutput::Failed(_) => {}
+            // Nothing in the log holds a warning yet, such as a login's usage window nearly used,
+            // so the daemon's own output is where the builder can see it.
+            DriverOutput::Warning(w) => eprintln!("x100: driver {}: {w}", self.driver),
+            DriverOutput::Failed(_) => {}
         }
         Ok(())
     }

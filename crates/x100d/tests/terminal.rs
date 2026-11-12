@@ -242,7 +242,7 @@ async fn a_brief_runs_on_claude_codes_terminal_and_is_followed_live() {
     // What the model was told of its command, in the request after it.
     let told = r.provider.requests()[1].body["messages"].to_string();
     assert!(
-        told.contains("the gate is not built yet"),
+        told.contains("Commands are not available here yet"),
         "the command was put to the daemon and refused: {told}"
     );
 

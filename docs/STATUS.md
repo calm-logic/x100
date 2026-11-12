@@ -140,29 +140,45 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   fake harness). A killed daemon's Codex terminal driver, both processes, is gone after restart. In the app,
   with no display, the CEO's view shows the terminal's screen equal to a bare replay. This completes M3T's
   "a client following the terminal sees output as it arrives".
+- **The real end-to-end run.** Whole workspace on the orchestrator's run: 365 tests pass, 0 fail, 6 ignored,
+  clippy and fmt clean. See "The owner's goal" for the real run itself.
 
 ## In progress
 
-- The end-to-end run of the owner's goal: a small real project through the desktop app on local logins.
-  Opus subagent, with a budget of real turns. It also fixes what stands in the way: the CEO's terminal is not
-  reachable from the Team tab once it has leads, and the CEO's charter and start pack have never met a real
-  model.
+Nothing is running. The owner's goal of 2026-11-12 is met, see below. What v1 still needs, in the plan's
+order: M7 (terminal interface), M9 (handoff), M10 (sandbox), M11 (vault), M12 (gate), M13 (memory and skills),
+M14 (lab), M17 (hardening). M10 and M12 come first in practice: until they exist a Claude Code driver cannot
+run commands and no real driver is isolated.
 
 ## Waiting on the owner
 
 Nothing blocks. Open questions 1 and 2 in `PRODUCT.md` are built on their recommended answers: the CEO may
 invent any role with a charter, and team changes need the builder's agreement.
 
-## The current goal
+## The owner's goal of 2026-11-12: met
 
-Set by the owner on 2026-11-12: carry on without stopping until the GPUI desktop app builds, matches the
-demo, and an end-to-end test works in full on a simple project, such as "create a todo app as a proof of
-concept". The orchestrator reads this as the say-so for real runs on the builder's local logins where that
-goal needs them (M3T's check and the end-to-end run), on the cheapest models, kept few and counted here.
+"A working GPUI that matches the demo version with integration/e2e test working in full on a simple project."
 
-Order to get there: the contract fixes, M6b, then M3T, M7, M8 and M15 side by side on their own crates, then
-M16 and the end-to-end run. M15 starts beside M7 rather than after it, to reach the goal sooner. M9 to M14
-follow, and none of them is needed for the first end-to-end run.
+- **The test:** `X100_REAL_LOGINS=1 cargo test -p x100-app --test real_e2e -- --ignored --nocapture`. The app
+  with no display, a real `x100d` on the real clock with default settings, the builder's local logins. It
+  creates a project, types "Create a todo app as a proof of concept: one index.html ..." into the first-run
+  box, and waits for the CEO's final report. It then checks: the CEO replied in the chat, a BRD exists, the
+  task is Done, `index.html` is on main with an input, a list and `localStorage`, the Team tab showed the CEO
+  on a terminal driver with recorded chunks, Budget shows spend, the Log has the driver choice and the report,
+  nothing is left running, and in headless Chromium a todo can be added and survives a reload.
+- **The orchestrator's own run**, on the Codex login only (`claude` taken off the PATH, since the Claude login
+  was at 91% of its five-hour window): passed in 60 seconds. One turn on gpt-6-luna at Medium, 21,594 input and
+  2,258 output tokens, 0.0042 dollars at list price. The CEO worked alone. `index.html` (5,326 bytes) and the
+  BRD are on the project's main branch. No process left.
+- **The subagent's runs:** one full pass of the test on Claude Code (claude-haiku-5-5, 21 seconds, one turn),
+  two runs of the real window on Codex for the screenshots in `crates/x100-app/screenshots/e2e/`, and one run
+  stopped when the Claude login passed 90% of its five-hour window. 4 turns and about 29 model requests in all.
+- **Real turns used on the owner's logins so far, everything counted:** Claude Code 6 turns, Codex 7 turns.
+- **Not shown by this:** a team. The brief is small, so the CEO worked alone, as rule 4 allows. Leads and
+  workers have met only scripted and fake models. The final code was not confirmed end to end on Claude Code,
+  since that run was stopped by the usage guard.
+- **Rough in the real window:** a terminal driver's screen is scaled down to fit and is hard to read at
+  1400 by 900. On Codex the CEO's first chat line arrives only when the turn ends, after the report card.
 
 ## Owner's decisions during the build
 
@@ -239,6 +255,23 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From the real end-to-end run:
+
+- **A guide at the head of every start pack** (`x100-orch/src/pack/guide.rs`), one each for the CEO, a lead and
+  a worker: answer first, write the BRD before building, a small project needs no team, keep the progress
+  note, end every turn with `report` or `wait`, use only ids you were given. Nothing had told a real model how
+  x100 works. Both programs then did the brief in one turn.
+- **The workspace rules are told up front**, and a refused command reads as an instruction to write the files
+  directly, not as an error to retry.
+- **Tool schemas no longer carry example ids** a model could copy. "Share done" is a percentage from 0 to 100.
+- **The Team tab** has a switch between an agent's own agents and its output, so the CEO's terminal stays
+  reachable once it has leads.
+- **Spend under a cent** shows as "<$0.01". Driver warnings, the usage-window warning among them, are printed
+  by the daemon.
+- **Open:** which program the CEO gets is decided by a tie on price between Haiku and luna, broken by harness
+  id, so it differs per machine. Claude Code on a subscription wrote the one-hour cache, while the model table
+  assumes five minutes for price and warm period.
 
 From the wiring of terminal drivers:
 

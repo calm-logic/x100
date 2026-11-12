@@ -163,8 +163,9 @@ pub fn describe(state: &ProjectState, item: &InboxItem) -> String {
             who(state, Party::Agent(*lead))
         ),
         InboxItem::Nudge { task, turns } => format!(
-            "Your last {turns} turn(s) ended with your task neither reported nor waited on. \
-             Carry on, wait for what it needs with `wait`, or `report` it.\nTask: {task}"
+            "Your last {turns} turn(s) ended with your task neither reported nor waited on. If \
+             its work is done, `report` it now. If it needs something first, `wait` for that. \
+             Otherwise carry on, and end this turn with one of the two.\nTask: {task}"
         ),
     }
 }

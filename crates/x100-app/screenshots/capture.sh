@@ -57,10 +57,11 @@ shot first-run
 drive key Return sleep 6
 shot team
 
-# Opening agents, down to one that runs none. Leads are listed Marketing, Product, Tech.
-drive click 999 664 sleep 1
+# Opening agents, down to one that runs none. Leads are listed Marketing, Product, Tech, under the
+# switch between an agent's agents and its own output.
+drive click 999 692 sleep 1
 shot agent
-drive click 999 331 sleep 0.7 click 999 331 sleep 1
+drive click 999 383 sleep 0.7 click 999 383 sleep 1
 shot output
 drive click 635 79 sleep 0.7 click 1349 80 sleep 1
 shot drivers

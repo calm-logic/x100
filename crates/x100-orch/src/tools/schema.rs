@@ -247,12 +247,16 @@ fn array(items: Value, description: &str) -> Value {
     json!({ "type": "array", "items": items, "description": description })
 }
 
-/// An id as it is written: its kind's prefix, an underscore and a ULID.
+/// An id as it is written: its kind's prefix, an underscore and a ULID. No example id is given, so
+/// a model has none to copy in place of a real one.
 fn id(prefix: &str, description: &str) -> Value {
     json!({
         "type": "string",
         "pattern": format!("^{prefix}_[0-9A-HJKMNP-TV-Z]{{26}}$"),
-        "description": format!("{description} An id such as {prefix}_01JC6Q4ZB0Q1V7XK4N5W1D8M3E."),
+        "description": format!(
+            "{description} An id you were given, `{prefix}_` and 26 letters and digits; never \
+             make one up."
+        ),
     })
 }
 
@@ -301,7 +305,7 @@ fn progress() -> Value {
         )],
         &[(
             "done",
-            percent("The share of the task done, if you can say."),
+            percent("How much of the task is done, as a percentage from 0 to 100, if you can say."),
         )],
     );
     s["description"] = json!("Your progress note on the task.");

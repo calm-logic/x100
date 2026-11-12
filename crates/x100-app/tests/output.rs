@@ -1,14 +1,14 @@
 //! An agent's view in the window, against a real daemon running the Fernleaf script on the fake
 //! clock: its output arriving as the script runs, one continuous output across a change of
-//! driver with the change marked, its waits and jobs as the client holds them, and a job
-//! cancelled from the view.
+//! driver with the change marked, its waits and jobs as the client holds them, a job cancelled
+//! from the view, and the output of an agent that runs agents, one switch away from them.
 
 mod common;
 
 use common::*;
 use gpui::{Entity, VisualTestContext, WindowHandle};
 use x100_app::shell::Shell;
-use x100_app::team::{AgentOutput, FactsModel, SegmentShown, TeamView};
+use x100_app::team::{AgentOutput, FactsModel, SegmentShown, Shown, TeamView};
 use x100_client::Client;
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, ProjectId};
@@ -253,4 +253,48 @@ fn a_job_cancelled_from_the_agents_view_reaches_the_daemon() {
     pump_until(&mut vcx, "the job leaves the view", |vcx| {
         bounds(vcx, "cancel-job-0").is_none()
     });
+}
+
+#[test]
+fn an_agent_that_runs_agents_shows_its_own_output_too() {
+    let mut run = Run::start();
+    let (client, project, window, mut vcx) = started(&mut run);
+    run.settle(&client, project);
+    let team = team(window, &vcx, project);
+    let p = state(&client, project);
+    let ceo = p.project().unwrap().ceo;
+    pump_until(&mut vcx, "the CEO's leads are listed", |vcx| {
+        bounds(vcx, "agent-Tech").is_some()
+    });
+    assert!(vcx.read(|cx| team.read(cx).output()).is_none());
+
+    // The CEO runs three leads, and its own terminal is one switch away.
+    click(&mut vcx, "shown-Output");
+    let output = output(&vcx, &team);
+    assert_eq!(vcx.read(|cx| output.read(cx).agent()), ceo);
+    pump_until(&mut vcx, "the CEO's turn is shown", |vcx| {
+        shown(vcx, &output)
+            .first()
+            .is_some_and(|s| s.text.contains("── turn ended ──"))
+    });
+    assert!(
+        bounds(&mut vcx, "agent-Tech").is_none(),
+        "its leads give way"
+    );
+    click(&mut vcx, "shown-Agents");
+    assert!(vcx.read(|cx| team.read(cx).output()).is_none());
+    assert!(bounds(&mut vcx, "agent-Tech").is_some());
+
+    // The same for a lead that runs a worker, and going back to the CEO starts on its agents.
+    open(&mut vcx, "agent-Tech");
+    assert!(bounds(&mut vcx, "agent-Backend").is_some());
+    click(&mut vcx, "shown-Output");
+    let tech = role(&state(&client, project), "Tech");
+    let output = vcx
+        .read(|cx| team.read(cx).output())
+        .expect("Tech's output");
+    assert_eq!(vcx.read(|cx| output.read(cx).agent()), tech);
+    click(&mut vcx, "crumb-0");
+    assert_eq!(vcx.read(|cx| team.read(cx).shown()), Shown::Agents);
+    assert!(bounds(&mut vcx, "agent-Tech").is_some());
 }

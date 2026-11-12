@@ -62,8 +62,13 @@ pub fn driver_state(state: &DriverState) -> &'static str {
     }
 }
 
+/// Dollars and cents. Spend that rounds to no cents is shown as under a cent, not as nothing: a
+/// small task on a cheap model costs a fraction of one.
 pub fn money(m: Money) -> String {
     let cents = (m.micros() + 5_000) / 10_000;
+    if cents == 0 && m.micros() > 0 {
+        return "<$0.01".into();
+    }
     format!("${}.{:02}", cents / 100, cents % 100)
 }
 
@@ -236,6 +241,7 @@ mod tests {
     #[test]
     fn amounts_round_to_the_cent() {
         assert_eq!(money(Money::ZERO), "$0.00");
+        assert_eq!(money(Money::from_micros(4_000)), "<$0.01");
         assert_eq!(money(Money::from_micros(42_000)), "$0.04");
         assert_eq!(money(Money::from_micros(45_000)), "$0.05");
         assert_eq!(money(Money::from_dollars(15)), "$15.00");

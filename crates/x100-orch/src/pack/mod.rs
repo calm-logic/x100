@@ -2,13 +2,15 @@
 //!
 //! Every driver starts from a start pack built from the daemon's records, never from a provider's
 //! own memory of the work, so a fresh task, a wake after a long wait and a new driver after a
-//! failure all start the same way and differ only in what the records hold. The sections follow
-//! ARCHITECTURE "What lives outside a driver". Memories, skills and running processes arrive with
-//! later milestones and have no section yet.
+//! failure all start the same way and differ only in what the records hold. A guide to the agent's
+//! position and to what its driver may do comes first, since nothing else tells a model how x100
+//! works; the sections after it follow ARCHITECTURE "What lives outside a driver". Memories, skills
+//! and running processes arrive with later milestones and have no section yet.
 //!
 //! The pack takes at most the daemon's set share of the model's context window. The transcript's
 //! older part is what gets cut, which is why the progress note matters.
 
+mod guide;
 mod history;
 mod items;
 
@@ -41,14 +43,18 @@ const RESULT_CHARS: usize = 400;
 /// retired driver's context is gone, and this is what the next one needs of it until memories.
 const RECENT_TASKS: usize = 5;
 
+/// What a start pack is built for, besides the agent's records.
+pub(crate) struct Pack {
+    pub why: StartReason,
+    /// What the driver may do in its working directory, which depends on its harness.
+    pub workspace: String,
+    pub window_tokens: u64,
+    pub share_percent: u8,
+}
+
 /// Builds an agent's start pack from its records. Blocks on the store and git.
-pub(crate) fn build(
-    store: &ProjectStore,
-    agent: AgentId,
-    why: &StartReason,
-    window_tokens: u64,
-    share_percent: u8,
-) -> String {
+pub(crate) fn build(store: &ProjectStore, agent: AgentId, for_: &Pack) -> String {
+    let (window_tokens, share_percent) = (for_.window_tokens, for_.share_percent);
     let state = store.log.state();
     let task = state.current_task(agent).map(|t| t.task.id);
     let history = task
@@ -58,7 +64,7 @@ pub(crate) fn build(
         .base
         .as_ref()
         .and_then(|base| branches::diff_since(store, agent, base));
-    let mut pack = head(&state, agent, why);
+    let mut pack = head(&state, agent, for_);
     if !history.calls.is_empty() {
         pack.push_str("\nDAEMON TOOL CALLS IN THIS TASK (each took effect; do not repeat them):\n");
         for call in &history.calls {
@@ -81,30 +87,44 @@ pub(crate) fn build(
 }
 
 /// Everything but the calls, the diff and the transcript.
-fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
+fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
     let Some(a) = state.agent(agent) else {
         return String::new();
     };
     let mut p = String::new();
     let _ = writeln!(p, "ROLE: {}", a.role);
     let _ = writeln!(p, "Your id: {agent}");
-    let _ = writeln!(p, "You are {}, an agent of an x100 team.", a.role);
     if let Some(project) = state.project() {
         let team = &project.team;
-        let place = match team.position(agent) {
-            Some(Position::Ceo { .. }) => "the CEO: you answer to the builder".to_owned(),
-            Some(Position::Lead { budget, .. }) => {
+        let (position, place) = match team.position(agent) {
+            Some(Position::Ceo { .. }) => (
+                guide::Position::Ceo,
+                "You are the CEO, and you answer to the builder.".to_owned(),
+            ),
+            Some(Position::Lead { budget, .. }) => (
+                guide::Position::Lead,
                 format!(
-                    "a lead under the CEO, with a budget of {} micro-dollars",
+                    "You are {}, a lead under the CEO, with a budget of {} micro-dollars.",
+                    a.role,
                     budget.micros()
-                )
-            }
-            Some(Position::Worker { parent, .. }) => {
-                format!("a worker under {}", who(state, Party::Agent(*parent)))
-            }
-            None => "not on the team".to_owned(),
+                ),
+            ),
+            Some(Position::Worker { parent, .. }) => (
+                guide::Position::Worker,
+                format!(
+                    "You are {}, a worker under {}.",
+                    a.role,
+                    who(state, Party::Agent(*parent))
+                ),
+            ),
+            None => (
+                guide::Position::Worker,
+                format!("You are {}, no longer on the team.", a.role),
+            ),
         };
-        let _ = writeln!(p, "You are {place}.");
+        let _ = write!(p, "\nHOW YOU WORK:\n{}", guide::guide(position));
+        let _ = write!(p, "\nYOUR WORKING DIRECTORY:\n{}\n", for_.workspace);
+        let _ = write!(p, "\nYOU:\n{place}\n");
         if let Some(range) = team.effort(agent) {
             let _ = writeln!(
                 p,
@@ -189,7 +209,7 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
     let _ = write!(
         p,
         "\nWHY THIS DRIVER IS STARTING:\n{}\n",
-        reason(state, agent, why)
+        reason(state, agent, &for_.why)
     );
     p
 }

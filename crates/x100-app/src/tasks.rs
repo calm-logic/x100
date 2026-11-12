@@ -214,7 +214,15 @@ impl Render for TaskRow {
                         .text_size(px(theme::TEXT))
                         .text_color(theme::text())
                         .when(m.live, |d| d.child(widgets::dot(7., theme::live())))
-                        .child(m.title.clone()),
+                        // A long title, such as a brief's first line, stops at its column.
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(m.title.clone()),
+                        ),
                 ),
             div()
                 .flex()
