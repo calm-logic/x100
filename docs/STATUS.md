@@ -35,6 +35,12 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   checkpoint of a worktree with staged, unstaged, untracked, deleted and executable files restores the same
   files without moving the branch or index. Git is the command line, SQLite is rusqlite bundled. 37 protocol
   methods, each checked against `crates/x100-proto/PROTOCOL.md` by a test.
+- **M4, jobs and the clock.** The orchestrator's run with `-p x100-jobs`: 19 tests pass, clippy and rustfmt
+  clean, and the real-clock test passed five times in a row. On the fake clock a one-off job fires once at its
+  time, a repeat fires at each interval, a cancelled job never fires, and a job due across a restart fires
+  once. Property tests over random schedules, cancels, restarts and clock moves hold the job invariants
+  against a real store. **Owed:** the four workspace-wide commands, which could not run while M3 was mid-edit
+  in `x100-drivers`. They are run when M3 is accepted.
 
 ## In progress
 
@@ -146,5 +152,10 @@ From M1a, where the documents were silent:
 - Anything on macOS. There is no Mac, and nothing is pushed, so hosted CI has not run. That includes the
   store's git plumbing.
 - Durability against power loss. Only a killed process was tested.
+- A crash between deciding to fire a job and appending it. The append is the commit, so it follows from the
+  store's kill test, but no test kills the scheduler there.
+- This machine's wall clock steps: M4 measured it 16 seconds off the monotonic clock within 30 seconds under
+  WSL2. Jobs are timed on the wall clock, since they must survive a restart, so here a job can fire that much
+  early or late. The runner re-reads the clock at least every 30 seconds.
 - S1 on macOS and native Linux. Under WSL nobody saw the window on the real screen (the Windows session was
   locked) and no input was sent to it, so flicker by eye, clicks, keys and scrolling are unchecked.

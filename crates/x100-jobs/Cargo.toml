@@ -7,3 +7,17 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+x100-core = { path = "../x100-core" }
+x100-store = { path = "../x100-store" }
+thiserror = "2"
+# The daemon's runtime. `rt` for spawn_blocking, since the store blocks on SQLite.
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+# Default features, for the randomness in a job's id: core builds ids from parts only.
+ulid = "3"
+
+[dev-dependencies]
+x100-core = { path = "../x100-core", features = ["testing"] }
+proptest = "1"
+tempfile = "3"
