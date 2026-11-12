@@ -1240,11 +1240,13 @@ dependencies = [
  "nix",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "ulid",
  "x100-core",
  "x100-drivers",
+ "x100-jobs",
  "x100-store",
 ]
 

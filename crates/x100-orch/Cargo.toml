@@ -8,6 +8,13 @@ repository.workspace = true
 [lints]
 workspace = true
 
+# The fake harness as a program of this package, so its tests can find it without depending on
+# another package's binary having been built.
+[[bin]]
+name = "x100-orch-fake-harness"
+path = "src/bin/fake_harness.rs"
+test = false
+
 [dependencies]
 x100-core = { path = "../x100-core" }
 x100-store = { path = "../x100-store" }
@@ -20,3 +27,9 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 # Default features, for the randomness in an id: core builds ids from parts only.
 ulid = "3"
+
+[dev-dependencies]
+x100-core = { path = "../x100-core", features = ["testing"] }
+x100-jobs = { path = "../x100-jobs" }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

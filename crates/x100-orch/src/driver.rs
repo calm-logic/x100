@@ -1,36 +1,49 @@
-//! One driver's life: record its start, give it turns, record its stream, and end it. A task per
-//! driver owns the process handle; the project's loop sends it turns and never touches the handle.
+//! One driver's life: record its start, build its start pack, give it turns, record its stream,
+//! and end it. A task per driver owns the process handle; the project's loop sends it turns and
+//! never touches the handle.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
-use x100_core::agent::AgentEvent;
-use x100_core::agent::AgentState;
-use x100_core::driver::{Driver, DriverEvent, Failure, Purpose, StartReason, StopReason};
+use x100_core::driver::{
+    Driver, DriverEvent, Failure, Purpose, RetireReason, StartReason, StopReason,
+};
 use x100_core::event::ProjectEvent;
+use x100_core::fold::ProjectState;
+use x100_core::harness::ModelOffer;
 use x100_core::id::{AgentId, DriverId, InboxItemId, MessageId};
 use x100_core::inbox::InboxItem;
+use x100_core::job::JobEvent;
 use x100_core::ledger::{Charge, ChargeSource};
 use x100_core::message::{Message, Route};
-use x100_core::party::Actor;
+use x100_core::party::{Actor, Party};
+use x100_core::task::TaskState;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
 use x100_drivers::{
-    CommandWrapper, Decision, DriverControl, DriverOutput, DriverSpec, Permissions, SpawnHook,
-    Spent, StallPolicy, StartError, TurnEnd,
+    Decision, DriverControl, DriverOutput, DriverSpec, Permissions, SpawnHook, Spent, StallPolicy,
+    StartError, TurnEnd,
 };
-use x100_store::ProjectStore;
 
 use crate::Shared;
+use crate::branches::{self, Ready};
 use crate::choose::Choice;
+use crate::ctx::{Events, ProjectCtx};
 use crate::ids::new_id;
 use crate::pack;
 use crate::project::Msg;
-use crate::store::{append, append_all, blocking, read};
+use crate::store::blocking;
+use crate::turns::{self, Ending};
+
+/// How long a driver stays warm when its model does not say.
+const DEFAULT_WARM: Duration = Duration::from_secs(300);
 
 pub(crate) enum Cmd {
     /// Give the driver a turn with these inbox items.
     Turn(Vec<InboxItemId>),
     Stop(How, oneshot::Sender<()>),
+    /// Its warm period is over: end it.
+    Retire(oneshot::Sender<()>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,38 +63,42 @@ pub(crate) struct Start {
 
 /// The turn in progress.
 struct Turn {
+    given: Vec<InboxItemId>,
     text: Vec<String>,
     reply_to: Option<MessageId>,
 }
 
 struct Actor_ {
     shared: Arc<Shared>,
-    store: ProjectStore,
+    ctx: Arc<ProjectCtx>,
     agent: AgentId,
     driver: DriverId,
+    offer: Option<ModelOffer>,
     turn: Option<Turn>,
 }
 
-/// Returns whether the driver failed, so the loop does not start another for the same items until
-/// something new reaches the agent.
+/// Reports how the driver ended, `Some` for a failure, so the loop can count failures in a row.
 pub(crate) async fn run(
     shared: Arc<Shared>,
-    store: ProjectStore,
+    ctx: Arc<ProjectCtx>,
     start: Start,
     mut cmds: mpsc::UnboundedReceiver<Cmd>,
     msgs: mpsc::UnboundedSender<Msg>,
 ) {
-    let agent = start.agent;
+    let (agent, driver) = (start.agent, start.driver);
+    shared.desk.seat(driver, Arc::clone(&ctx), agent);
     let mut actor = Actor_ {
         shared,
-        store,
+        ctx,
         agent,
-        driver: start.driver,
+        driver,
+        offer: None,
         turn: None,
     };
-    let failed = actor.drive(start, &mut cmds, &msgs).await;
-    let _ = actor.shared.processes.forget(actor.driver);
-    let _ = msgs.send(Msg::Exited { agent, failed });
+    let failure = actor.drive(start, &mut cmds, &msgs).await;
+    actor.shared.desk.unseat(driver);
+    let _ = actor.shared.processes.forget(driver);
+    let _ = msgs.send(Msg::Exited { agent, failure });
 }
 
 impl Actor_ {
@@ -90,22 +107,26 @@ impl Actor_ {
         start: Start,
         cmds: &mut mpsc::UnboundedReceiver<Cmd>,
         msgs: &mpsc::UnboundedSender<Msg>,
-    ) -> bool {
+    ) -> Option<Failure> {
         let Start { choice, first, .. } = start;
         let (agent, driver) = (self.agent, self.driver);
+        let harness = self.shared.harnesses.get(&choice.harness).cloned();
+        self.offer = harness
+            .as_ref()
+            .and_then(|h| h.models().into_iter().find(|m| m.model == choice.model));
         let given = first.clone();
-        let (why, pack, previous) = read(&self.store, move |s| {
-            let task = given
-                .iter()
-                .find_map(|i| match s.agent(agent)?.items.get(i)? {
-                    InboxItem::Task { task } => Some(*task),
-                    _ => None,
-                });
-            let why = task.map_or(StartReason::Wake, |task| StartReason::NewTask { task });
-            let previous = s.agent(agent).and_then(|a| a.drivers.last().copied());
-            (why, pack::start_pack(s, agent), previous)
-        })
-        .await;
+        let (why, previous) = self
+            .read(move |s| {
+                let task = given
+                    .iter()
+                    .find_map(|i| match s.agent(agent)?.items.get(i)? {
+                        InboxItem::Task { task } => Some(*task),
+                        _ => None,
+                    });
+                let why = task.map_or(StartReason::Wake, |task| StartReason::NewTask { task });
+                (why, s.agent(agent).and_then(|a| a.drivers.last().copied()))
+            })
+            .await;
         let record = Driver {
             id: driver,
             agent,
@@ -114,49 +135,39 @@ impl Actor_ {
             effort: choice.effort,
             machine: choice.machine,
             purpose: Purpose::Work,
-            why,
+            why: why.clone(),
         };
-        if let Err(e) = append(
-            &self.store,
-            Actor::Daemon,
-            ProjectEvent::DriverStarted(record),
-        )
-        .await
+        if let Err(e) = self
+            .append(vec![(Actor::Daemon, ProjectEvent::DriverStarted(record))])
+            .await
         {
             eprintln!("x100: driver {driver} could not be recorded: {e}");
-            return true;
+            return Some(Failure::Error {
+                detail: e,
+                provider: None,
+            });
         }
         self.transcript(Item::DriverChanged { from: previous })
             .await;
-
-        let dir = match self.worktree().await {
-            Ok(dir) => dir,
-            Err(detail) => {
-                return self
-                    .fail(Failure::Error {
-                        detail,
-                        provider: None,
-                    })
-                    .await;
-            }
-        };
-        let Some(harness) = self.shared.harnesses.get(&choice.harness).cloned() else {
+        let Some(harness) = harness else {
             let detail = format!("harness {} is not registered", choice.harness);
-            return self
-                .fail(Failure::Error {
-                    detail,
-                    provider: None,
-                })
-                .await;
+            return self.fail(error(detail)).await;
         };
+        let ready = match self.ready(&first).await {
+            Ok(r) => r,
+            Err(detail) => return self.fail(error(detail)).await,
+        };
+        let start_pack = self.start_pack(why).await;
+        let dir = self.ctx.store.git.worktree_path(agent);
         let spec = DriverSpec {
             driver,
             model: choice.model,
             effort: choice.effort,
+            wrap: self.shared.sandbox.wrap(agent, &dir),
             dir,
-            wrap: CommandWrapper::identity(),
-            start_pack: pack,
-            // The daemon's tools are M6: no endpoint, so a real harness has nothing to call.
+            start_pack,
+            // The fake harness reaches the tools through the desk directly. Serving them to the
+            // real harnesses over MCP is M6b.
             tools: None,
             env: Vec::new(),
             stall: StallPolicy::from_settings(&(self.shared.settings)()),
@@ -177,14 +188,18 @@ impl Actor_ {
             Err(e) => return self.fail(start_failure(e)).await,
         };
         let control = handle.control();
-        if let Err(detail) = self.begin_turn(&control, first).await {
+        if let Err(detail) = self.begin_turn(&control, first, ready).await {
             return self.abort(&control, detail).await;
         }
         loop {
             tokio::select! {
                 cmd = cmds.recv() => match cmd {
                     Some(Cmd::Turn(items)) => {
-                        if let Err(detail) = self.begin_turn(&control, items).await {
+                        let ready = match self.ready(&items).await {
+                            Ok(r) => r,
+                            Err(detail) => return self.abort(&control, detail).await,
+                        };
+                        if let Err(detail) = self.begin_turn(&control, items, ready).await {
                             return self.abort(&control, detail).await;
                         }
                     }
@@ -192,13 +207,19 @@ impl Actor_ {
                         control.stop().await;
                         self.stopped(how).await;
                         let _ = ack.send(());
-                        return false;
+                        return None;
+                    }
+                    Some(Cmd::Retire(ack)) => {
+                        control.stop().await;
+                        self.end(DriverEvent::Retired(RetireReason::WarmTooLong)).await;
+                        let _ = ack.send(());
+                        return None;
                     }
                     // The loop that owns this driver is gone, so nothing can use it.
                     None => {
                         control.stop().await;
                         self.stopped(How::Shutdown).await;
-                        return false;
+                        return None;
                     }
                 },
                 out = handle.next() => match out {
@@ -214,22 +235,50 @@ impl Actor_ {
         }
     }
 
-    /// Creates the agent's worktree on its own branch the first time a driver needs it.
-    async fn worktree(&self) -> Result<std::path::PathBuf, String> {
-        let (store, agent) = (self.store.clone(), self.agent);
+    async fn read<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&ProjectState) -> T + Send + 'static,
+    ) -> T {
+        let ctx = Arc::clone(&self.ctx);
+        blocking(move || ctx.store.log.with_state(f)).await
+    }
+
+    /// Appends through the project's writer, so the waits these events end are closed with them.
+    async fn append(&self, events: Events) -> Result<(), String> {
+        let ctx = Arc::clone(&self.ctx);
+        blocking(move || ctx.writer().append(events).map(drop))
+            .await
+            .map_err(|e| format!("the log refused a driver's events: {e}"))
+    }
+
+    /// The agent's worktree, there and up to date with the work of whoever delegated it a task
+    /// among `items`, between turns and never mid-turn.
+    async fn ready(&self, items: &[InboxItemId]) -> Result<Ready, String> {
+        let (ctx, agent, items) = (Arc::clone(&self.ctx), self.agent, items.to_vec());
         blocking(move || {
-            let path = store.git.worktree_path(agent);
-            if !path.exists() {
-                let base = store
-                    .git
-                    .current_branch(store.git.project_dir())
-                    .map_err(|e| format!("could not read the project's branch: {e}"))?;
-                store
-                    .git
-                    .create_worktree(agent, &format!("x100/{agent}"), &base)
-                    .map_err(|e| format!("could not create the worktree: {e}"))?;
+            let (home, delegators) = ctx.store.log.with_state(|s| {
+                let home = match s.project().and_then(|p| p.team.parent(agent)) {
+                    Some(parent) => Party::Agent(parent),
+                    None => Party::Builder,
+                };
+                (home, delegators(s, agent, &items))
+            });
+            branches::ready(&ctx.store, agent, home, &delegators)
+        })
+        .await
+    }
+
+    /// Builds the start pack and keeps it beside the log, as the driver was given it.
+    async fn start_pack(&self, why: StartReason) -> String {
+        let (ctx, agent, driver) = (Arc::clone(&self.ctx), self.agent, self.driver);
+        let window = self.offer.as_ref().map_or(200_000, |o| o.context_window);
+        let share = (self.shared.settings)().start_pack_share.value();
+        blocking(move || {
+            let text = pack::build(&ctx.store, agent, &why, window, share);
+            if let Err(e) = crate::packs::keep(&ctx.store, driver, &text) {
+                eprintln!("x100: could not keep the start pack of {driver}: {e}");
             }
-            Ok(path)
+            text
         })
         .await
     }
@@ -239,32 +288,25 @@ impl Actor_ {
             driver: self.driver,
             event,
         };
-        append(&self.store, Actor::Daemon, event)
-            .await
-            .map(drop)
-            .map_err(|e| format!("the log refused a driver event: {e}"))
+        self.append(vec![(Actor::Daemon, event)]).await
     }
 
     async fn transcript(&self, item: Item) {
         let entry = Entry {
-            at: self.shared.clock.now(),
+            at: self.ctx.clock.now(),
             driver: self.driver,
             item,
         };
-        let (store, agent) = (self.store.clone(), self.agent);
-        if let Err(e) = blocking(move || store.transcripts.append(agent, entry)).await {
+        let (ctx, agent) = (Arc::clone(&self.ctx), self.agent);
+        if let Err(e) = blocking(move || ctx.store.transcripts.append(agent, entry)).await {
             eprintln!("x100: transcript of {}: {e}", self.agent);
         }
     }
 
     /// The driver is healthy but the log would not take what it did: stop it and record why.
-    async fn abort(&mut self, control: &DriverControl, detail: String) -> bool {
+    async fn abort(&mut self, control: &DriverControl, detail: String) -> Option<Failure> {
         control.stop().await;
-        self.fail(Failure::Error {
-            detail,
-            provider: None,
-        })
-        .await
+        self.fail(error(detail)).await
     }
 
     /// Records the turn and gives it to the driver.
@@ -272,16 +314,22 @@ impl Actor_ {
         &mut self,
         control: &DriverControl,
         items: Vec<InboxItemId>,
+        ready: Ready,
     ) -> Result<(), String> {
-        let (agent, given) = (self.agent, items.clone());
-        let (text, reply_to) = read(&self.store, move |s| pack::turn_input(s, agent, &given)).await;
+        let (agent, given, notes) = (self.agent, items.clone(), ready.notes);
+        let (text, reply_to) = self
+            .read(move |s| pack::turn_input(s, agent, &given, &notes))
+            .await;
         self.turn = Some(Turn {
+            given: items.clone(),
             text: Vec::new(),
             reply_to,
         });
         self.transcript(Item::TurnStarted).await;
-        self.event(DriverEvent::TurnStarted { given: items })
-            .await?;
+        let (ctx, driver, refreshed) = (Arc::clone(&self.ctx), self.driver, ready.events);
+        blocking(move || ctx.commit(|s, _| (turns::started(s, driver, items, refreshed), ())))
+            .await
+            .map_err(|e| format!("the log refused the start of a turn: {e}"))?;
         // If the driver is already gone, its output ends with the reason and the loop records it.
         let _ = control.turn(text).await;
         Ok(())
@@ -347,103 +395,86 @@ impl Actor_ {
 
     async fn charge(&self, spent: Spent) {
         self.transcript(Item::Usage { usage: spent.usage }).await;
-        let agent = self.agent;
-        let Some(payer) = read(&self.store, move |s| {
-            s.project().and_then(|p| p.team.payer(agent))
+        let (agent, driver) = (self.agent, self.driver);
+        let ctx = Arc::clone(&self.ctx);
+        let charged = blocking(move || {
+            ctx.commit(|s, _| {
+                let Some(payer) = s.project().and_then(|p| p.team.payer(agent)) else {
+                    return (Vec::new(), ());
+                };
+                let charge = Charge {
+                    payer,
+                    source: ChargeSource::Turn { driver, agent },
+                    usage: spent.usage,
+                    cost: spent.cost,
+                    basis: spent.basis,
+                };
+                (vec![(Actor::Daemon, ProjectEvent::Charged(charge))], ())
+            })
         })
-        .await
-        else {
-            return;
-        };
-        let charge = Charge {
-            payer,
-            source: ChargeSource::Turn {
-                driver: self.driver,
-                agent: self.agent,
-            },
-            usage: spent.usage,
-            cost: spent.cost,
-            basis: spent.basis,
-        };
-        if let Err(e) = append(&self.store, Actor::Daemon, ProjectEvent::Charged(charge)).await {
+        .await;
+        if let Err(e) = charged {
             eprintln!("x100: charge for {}: {e}", self.driver);
         }
     }
 
-    /// The turn completed: checkpoint the work, answer the builder if the CEO was asked, and count
-    /// the items handled, all in one append. A crash before it gives the items to the next driver,
-    /// so a reply can be repeated and is never lost, and none is ever half recorded.
+    /// The turn completed: checkpoint the work, answer the builder if the CEO was asked, count the
+    /// items handled, and decide what follows, all in one append. A crash before it gives the
+    /// items to the next driver, so a reply can be repeated and is never lost, and none is ever
+    /// half recorded.
     async fn finish_turn(&mut self, msgs: &mpsc::UnboundedSender<Msg>) -> Result<(), String> {
         let Some(turn) = self.turn.take() else {
             return Ok(());
         };
-        let (agent, store) = (self.agent, self.store.clone());
         self.transcript(Item::TurnEnded {
             how: Ended::Completed,
         })
         .await;
-        let checkpoint = blocking(move || {
-            let dir = store.git.worktree_path(agent);
-            store.git.checkpoint(&dir, &agent.to_string())
-        })
-        .await;
-        // One append, so a crash cannot leave a reply without the turn's end, or the end without
-        // the handled items it implies: the next driver either repeats the turn or does not.
-        let mut events = Vec::new();
-        match checkpoint {
-            Ok(commit) => {
-                events.push((Actor::Daemon, ProjectEvent::Checkpointed { agent, commit }))
-            }
-            Err(e) => eprintln!("x100: could not checkpoint {agent}: {e}"),
-        }
-        let reply = turn.text.join("\n\n");
-        let is_ceo = read(&self.store, move |s| {
-            s.project().is_some_and(|p| p.team.ceo() == agent)
-        })
-        .await;
-        if is_ceo && !reply.trim().is_empty() {
-            let message = Message {
-                id: new_id(&*self.shared.clock, MessageId::new),
-                route: Route::CeoToBuilder,
-                body: reply,
-                attachments: Vec::new(),
-                in_reply_to: turn.reply_to,
+        let (ctx, agent, driver) = (Arc::clone(&self.ctx), self.agent, self.driver);
+        let warm = self
+            .offer
+            .as_ref()
+            .map_or(DEFAULT_WARM, |o| o.cache_lifetime);
+        let limit = (self.shared.settings)().turns_without_progress;
+        blocking(move || {
+            let dir = ctx.store.git.worktree_path(agent);
+            let checkpoint = match ctx.store.git.checkpoint(&dir, &agent.to_string()) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!("x100: could not checkpoint {agent}: {e}");
+                    None
+                }
             };
-            events.push((Actor::Agent(agent), ProjectEvent::MessageSent(message)));
-        }
-        events.push((
-            Actor::Daemon,
-            ProjectEvent::Driver {
-                driver: self.driver,
-                event: DriverEvent::TurnEnded,
-            },
-        ));
-        append_all(&self.store, events)
-            .await
-            .map_err(|e| format!("the log refused the end of a turn: {e}"))?;
-        // Nothing to do and nothing to wait for: the agent rests until something reaches it.
-        let resting = read(&self.store, move |s| {
-            s.agent(agent).is_some_and(|a| {
-                a.state == AgentState::Working
-                    && a.open_tasks.is_empty()
-                    && a.waits.is_empty()
-                    && a.inbox.is_empty()
+            ctx.commit(|s, clock| {
+                let body = turn.text.join("\n\n");
+                let is_ceo = s.project().is_some_and(|p| p.team.ceo() == agent);
+                let reply = (is_ceo && !body.trim().is_empty()).then(|| Message {
+                    id: new_id(clock, MessageId::new),
+                    route: Route::CeoToBuilder,
+                    body,
+                    attachments: Vec::new(),
+                    in_reply_to: turn.reply_to,
+                });
+                let ending = Ending {
+                    agent,
+                    driver,
+                    given: turn.given,
+                    checkpoint,
+                    reply,
+                    warm_until: clock.now() + warm,
+                    limit,
+                };
+                (turns::ended(s, clock, ending), ())
             })
         })
-        .await;
-        if resting {
-            let event = ProjectEvent::Agent {
-                agent,
-                event: AgentEvent::WentIdle,
-            };
-            let _ = append(&self.store, Actor::Daemon, event).await;
-        }
+        .await
+        .map_err(|e| format!("the log refused the end of a turn: {e}"))?;
         let _ = msgs.send(Msg::TurnEnded { agent });
         Ok(())
     }
 
     /// The driver failed: the turn it was in is lost and its items wait for the next driver.
-    async fn fail(&mut self, failure: Failure) -> bool {
+    async fn fail(&mut self, failure: Failure) -> Option<Failure> {
         if self.turn.take().is_some() {
             let detail = format!("{failure:?}");
             self.transcript(Item::TurnEnded {
@@ -451,10 +482,8 @@ impl Actor_ {
             })
             .await;
         }
-        if let Err(e) = self.event(DriverEvent::Failed(failure)).await {
-            eprintln!("x100: {e}");
-        }
-        true
+        self.end(DriverEvent::Failed(failure.clone())).await;
+        Some(failure)
     }
 
     async fn stopped(&mut self, how: How) {
@@ -470,18 +499,61 @@ impl Actor_ {
             How::Shutdown if mid_turn => DriverEvent::Failed(Failure::DaemonRestarted),
             How::Shutdown => DriverEvent::Stopped(StopReason::DaemonRestarted),
         };
-        if let Err(e) = self.event(event).await {
-            eprintln!("x100: {e}");
+        self.end(event).await;
+    }
+
+    /// Records the driver's end, and calls off the end of its warm period, which has no driver
+    /// left to end.
+    async fn end(&self, event: DriverEvent) {
+        let (ctx, driver) = (Arc::clone(&self.ctx), self.driver);
+        let ended = blocking(move || {
+            ctx.commit(|s, _| {
+                let mut events = vec![(Actor::Daemon, ProjectEvent::Driver { driver, event })];
+                if let Some(job) = turns::warm_period_job(s, driver) {
+                    let cancel = JobEvent::Cancelled { by: Actor::Daemon };
+                    events.push((Actor::Daemon, ProjectEvent::Job { job, event: cancel }));
+                }
+                (events, ())
+            })
+        })
+        .await;
+        if let Err(e) = ended {
+            eprintln!(
+                "x100: the end of driver {} is not in the log: {e}",
+                self.driver
+            );
         }
+    }
+}
+
+/// Who delegated the tasks among `items` that are in progress with `agent`.
+fn delegators(state: &ProjectState, agent: AgentId, items: &[InboxItemId]) -> Vec<Party> {
+    let Some(a) = state.agent(agent) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items {
+        if let Some(InboxItem::Task { task }) = a.items.get(item)
+            && let Some(TaskState::InProgress(asg)) = state.task(*task).map(|t| &t.state)
+            && asg.assignee == agent
+            && !out.contains(&asg.delegator)
+        {
+            out.push(asg.delegator);
+        }
+    }
+    out
+}
+
+fn error(detail: String) -> Failure {
+    Failure::Error {
+        detail,
+        provider: None,
     }
 }
 
 fn start_failure(e: StartError) -> Failure {
     match e {
         StartError::Failed { failure, .. } => failure,
-        other => Failure::Error {
-            detail: other.to_string(),
-            provider: None,
-        },
+        other => error(other.to_string()),
     }
 }

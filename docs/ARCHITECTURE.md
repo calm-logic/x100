@@ -245,7 +245,7 @@ logins, and this follows from that choice, so it is built this way unless the ow
 
 **proposed** Several drivers at once on one subscription is what the providers' terms leave unclear, and
 their limits assume one person's use. So the builder sets how many terminal drivers may run at once on each
-login, and the router counts it like a machine's cap.
+login, 4 by default (the owner's choice, 2026-11-12), and the router counts it like a machine's cap.
 
 ## What lives outside a driver
 

@@ -1,37 +1,41 @@
-use x100_core::job::JobState;
-use x100_core::party::Actor;
 use x100_orch::StopError;
-use x100_proto::{CancelJob, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, RpcError, StopDriver};
+use x100_proto::{
+    CancelJob, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack, ReadWaits, RpcError,
+    StartPack, StopDriver, Waits,
+};
 
-use super::{blocking, project};
+use super::{project, refused};
 use crate::hub::Hub;
 
 pub async fn cancel_job(hub: &Hub, p: CancelJob) -> Result<Done, RpcError> {
-    let store = project(hub, p.project)?;
-    let state = store.log.with_state(|s| s.job(p.job).map(|j| j.state));
-    match state {
-        None => {
-            return Err(RpcError::new(
-                ErrorCode::NotFound,
-                format!("no job {}", p.job),
-            ));
-        }
-        Some(JobState::Scheduled { .. }) => {}
-        Some(other) => {
-            return Err(RpcError::new(
-                ErrorCode::WrongState,
-                format!("job {} is {}, not scheduled", p.job, other.name()),
-            ));
-        }
-    }
-    let scheduler = hub
-        .scheduler(p.project)
-        .ok_or_else(|| RpcError::new(ErrorCode::NotFound, "no such project"))?;
-    // A job that fires between the check and the cancel is refused by the log as a rejected event.
-    blocking(move || scheduler.cancel(Actor::Builder, p.job))
+    project(hub, p.project)?;
+    // Through the orchestrator, so a wait on the job ends with it.
+    hub.orch
+        .cancel_job(p.project, p.job)
         .await
-        .map_err(|e| RpcError::new(ErrorCode::WrongState, e.to_string()))?;
+        .map_err(refused)?;
     Ok(Done {})
+}
+
+pub fn waits(hub: &Hub, p: ReadWaits) -> Result<Waits, RpcError> {
+    project(hub, p.project)?;
+    hub.orch
+        .waits(p.project, p.agent)
+        .map(|waits| Waits { waits })
+        .ok_or_else(|| RpcError::new(ErrorCode::NotFound, format!("no agent {}", p.agent)))
+}
+
+pub fn start_pack(hub: &Hub, p: ReadStartPack) -> Result<StartPack, RpcError> {
+    project(hub, p.project)?;
+    hub.orch
+        .start_pack(p.project, p.driver)
+        .map(|text| StartPack { text })
+        .ok_or_else(|| {
+            RpcError::new(
+                ErrorCode::NotFound,
+                format!("no start pack for driver {}", p.driver),
+            )
+        })
 }
 
 pub fn inbox(hub: &Hub, p: ReadInbox) -> Result<Inbox, RpcError> {

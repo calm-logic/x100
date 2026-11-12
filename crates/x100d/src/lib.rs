@@ -23,7 +23,7 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use x100_core::time::Clock;
-use x100_orch::{Orchestrator, ProcessRegistry, tools::NoTools};
+use x100_orch::{AllowAll, Desk, NoSandbox, Orchestrator, ProcessRegistry};
 use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
@@ -91,19 +91,26 @@ impl Daemon {
             );
         }
 
-        let found = discover::discover(&config, &log, Arc::new(NoTools))?;
+        let settings_log = log.clone();
+        let settings: x100_orch::Settings =
+            Arc::new(move || settings_log.with_state(|s| *s.settings()));
+        // The harnesses reach the tools through the desk, so it exists before them.
+        let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
+        let found = discover::discover(&config, &log, desk.clone())?;
         let chooser = FirstAllowed {
             log: log.clone(),
             machine: found.machine,
             available: found.harnesses.keys().copied().collect(),
         };
-        let settings_log = log.clone();
         let orch = Orchestrator::new(x100_orch::Config {
             clock: Arc::clone(&clock),
             harnesses: found.harnesses,
             chooser: Arc::new(chooser),
-            settings: Arc::new(move || settings_log.with_state(|s| *s.settings())),
+            settings,
             processes: Arc::new(processes),
+            desk,
+            sandbox: Arc::new(NoSandbox),
+            serial: false,
         });
         let hub = Arc::new(Hub::new(config.clone(), log, orch));
 

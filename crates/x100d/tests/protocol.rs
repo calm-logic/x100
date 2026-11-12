@@ -331,29 +331,12 @@ async fn a_project_created_later_is_followed_from_its_first_event() {
 async fn methods_that_later_milestones_make_real_say_which() {
     let d = Local::start(|_| {}).await;
     let client = d.client().await;
-    let (p, a, dr) = (
+    let (p, a) = (
         ProjectId::from_u128(1),
         x100_core::id::AgentId::from_u128(1),
-        x100_core::id::DriverId::from_u128(1),
     );
     let rep = x100_core::effort::EffortRange::FULL;
     let later: Vec<(Call, &str)> = vec![
-        (
-            ReadWaits {
-                project: p,
-                agent: a,
-            }
-            .into(),
-            "M6",
-        ),
-        (
-            ReadStartPack {
-                project: p,
-                driver: dr,
-            }
-            .into(),
-            "M6",
-        ),
         (
             SetMachineCap {
                 machine: x100_core::id::MachineId::from_u128(1),
@@ -495,6 +478,8 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "files.remove",
         "jobs.cancel",
         "agents.inbox",
+        "agents.waits",
+        "drivers.start_pack",
         "drivers.stop",
     ];
     let mut named: Vec<&str> = real.to_vec();
@@ -545,6 +530,13 @@ async fn projects_files_tasks_and_settings_work_through_the_protocol() {
         ("plants", 1, false)
     );
     let got = c.request(GetProject { project }).await.unwrap();
+    // The client follows the log on its own, so compare once it has applied what the daemon
+    // answered from.
+    c.wait_for(WAIT, |s| {
+        (s.projects.get(&project)?.seq() == got.seq()).then_some(())
+    })
+    .await
+    .expect("the client reaches the daemon's answer");
     assert_eq!(got, c.project(project).unwrap());
     let missing = c
         .request(GetProject {
@@ -736,6 +728,28 @@ async fn projects_files_tasks_and_settings_work_through_the_protocol() {
         .await
         .unwrap();
     assert!(inbox.items.len() <= 1);
+
+    // The CEO's driver started from a start pack, which reads back as it was given.
+    let driver = s.agent(ceo).unwrap().drivers[0];
+    let pack = c.request(ReadStartPack { project, driver }).await.unwrap();
+    assert!(pack.text.starts_with("ROLE: CEO\n"), "{}", pack.text);
+    assert!(pack.text.contains("A site for plants."), "{}", pack.text);
+    let waits = c
+        .request(ReadWaits {
+            project,
+            agent: ceo,
+        })
+        .await
+        .unwrap();
+    assert!(waits.waits.is_empty(), "the fake's CEO never waits");
+    let no_pack = c
+        .request(ReadStartPack {
+            project,
+            driver: x100_core::id::DriverId::from_u128(9),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(rpc_code(no_pack), ErrorCode::NotFound);
     d.finish().await;
 }
 

@@ -8,7 +8,6 @@ use tokio::task::JoinHandle;
 use x100_core::event::{DaemonEvent, ProjectEvent};
 use x100_core::fold::ProjectState;
 use x100_core::id::ProjectId;
-use x100_core::job::ProjectJob;
 use x100_core::time::Clock;
 use x100_jobs::Scheduler;
 use x100_orch::Orchestrator;
@@ -72,21 +71,17 @@ impl Hub {
             .lock()
             .expect("schedulers lock")
             .insert(id, scheduler.clone());
-        let clock = Arc::clone(&self.clock);
         let clock_task = tokio::spawn(async move {
             if let Err(e) = scheduler.run(tx).await {
                 eprintln!("x100d: the job clock of project {id} stopped: {e}");
             }
         });
+        let orch = self.orch.clone();
         let feed = tokio::spawn(async move {
             while let Some(fired) = rx.recv().await {
-                // Delegating a task and the daemon's own routines arrive with M6 and M8; the
-                // firing is in the log either way.
-                if let ProjectJob::Wake { agent, note, .. } = fired.job.does {
-                    let woken = x100_orch::deliver_job(&store, &*clock, agent, fired.job.id, note);
-                    if let Err(e) = woken.await {
-                        eprintln!("x100d: job {} could not wake {agent}: {e}", fired.job.id);
-                    }
+                let job = fired.job.id;
+                if let Err(e) = orch.job_fired(id, fired.job, fired.at).await {
+                    eprintln!("x100d: job {job} fired and could not be acted on: {e}");
                 }
             }
         });

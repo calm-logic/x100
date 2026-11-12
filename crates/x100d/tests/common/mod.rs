@@ -206,7 +206,17 @@ pub async fn gone(pids: &[u32]) {
 }
 
 /// Creates a project and waits for the client to hold it.
+///
+/// The fake harness cannot read its task's id from its input, so these scripts never report or
+/// wait. With the daemon's usual limit the CEO would be nudged for three turns before its task is
+/// given up; one turn keeps each exchange to the turn a test is about.
 pub async fn create_project(client: &Client, env: &Env, name: &str) -> ProjectId {
+    client
+        .request(x100_proto::SetDaemonSetting {
+            setting: x100_core::settings::DaemonSetting::TurnsWithoutProgress(1),
+        })
+        .await
+        .expect("the setting is taken");
     let project = client
         .request(CreateProject {
             path: env.project_dir(name),

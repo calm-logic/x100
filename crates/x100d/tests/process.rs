@@ -34,7 +34,21 @@ async fn a_message_to_the_ceo_is_answered_as_events() {
         })
         .await
         .expect("the reply arrives");
-    assert_eq!(reply.message.body, "heard: Message from the builder:\nping");
+    // The first message opens a task for the CEO, and it is told which.
+    let task = client.with_state(|s| {
+        s.projects[&project]
+            .tasks()
+            .next()
+            .map(|t| t.task.id)
+            .expect("the message opened a task")
+    });
+    assert_eq!(
+        reply.message.body,
+        format!(
+            "heard: Message {} from the builder:\nping\nYour task for the builder: {task}",
+            sent.message
+        )
+    );
     assert_eq!(reply.message.in_reply_to, Some(sent.message));
 
     // The turn is over and recorded: the driver is warm, the item handled, the cost charged.
@@ -194,7 +208,7 @@ async fn killing_the_daemon_mid_turn_fails_that_driver_and_ends_the_warm_ones() 
             s.projects[&calm]
                 .messages()
                 .find(|m| {
-                    m.message.body.ends_with("ping again") && m.message.route == Route::CeoToBuilder
+                    m.message.body.contains("ping again") && m.message.route == Route::CeoToBuilder
                 })
                 .cloned()
         })
@@ -240,6 +254,24 @@ async fn two_clients_see_the_same_events() {
             })
             .await
             .expect("both see the whole exchange");
+    }
+    // A turn's end is several events written together, and either client may be part way
+    // through them, or behind on the daemon's own log. Read where every log ends once, and
+    // compare only when both clients have applied exactly that much of each.
+    let daemon_last = one.request(x100_proto::GetDaemon {}).await.unwrap().seq();
+    let project_last = one
+        .request(x100_proto::GetProject { project })
+        .await
+        .unwrap()
+        .seq();
+    for client in [&one, &two] {
+        client
+            .wait_for(WAIT, |s| {
+                (s.daemon.seq() == daemon_last && s.projects.get(&project)?.seq() == project_last)
+                    .then_some(())
+            })
+            .await
+            .expect("both reach the end of every log");
     }
     assert_eq!(one.state(), two.state());
     daemon.terminate();
@@ -458,10 +490,25 @@ async fn a_driver_that_fails_is_recorded_with_its_reason_and_its_message_is_kept
     let client = env.client().await;
     let project = create_project(&client, &env, "crash").await;
     client.request(say(project, "CRASH")).await.unwrap();
+    // A driver that fails is replaced, and after three failures in a row the task is given up,
+    // reported failed with each failure.
     let failed = client
         .wait_for(WAIT, |s| {
-            let d = ceo_driver(&s.projects[&project])?;
-            matches!(d.state, DriverState::Failed(_)).then(|| d.clone())
+            let p = &s.projects[&project];
+            let reported = p.tasks().any(|t| {
+                matches!(
+                    &t.state,
+                    x100_core::task::TaskState::InReview(_, r)
+                        if matches!(
+                            &r.outcome,
+                            x100_core::task::Outcome::Failed(
+                                x100_core::task::TaskFailure::DriverFailures(f)
+                            ) if f.len() == 3
+                        )
+                )
+            });
+            let d = ceo_driver(p)?;
+            (reported && matches!(d.state, DriverState::Failed(_))).then(|| d.clone())
         })
         .await
         .unwrap();
@@ -482,8 +529,8 @@ async fn a_driver_that_fails_is_recorded_with_its_reason_and_its_message_is_kept
         !inbox.items[0].being_handled,
         "the message waits for the next driver"
     );
-    // A failed driver is not started again without end: nothing new reached the agent.
-    assert_eq!(drivers(&client.state(), project).len(), 1);
+    // Failed drivers are not started again without end: nothing new reached the agent.
+    assert_eq!(drivers(&client.state(), project).len(), 3);
     let page = client
         .request(x100_proto::ReadTranscript {
             project,
@@ -504,7 +551,7 @@ async fn a_driver_that_fails_is_recorded_with_its_reason_and_its_message_is_kept
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_tool_call_is_answered_that_the_tools_are_not_there_yet() {
+async fn a_tool_call_from_a_driver_is_carried_out_and_recorded() {
     use x100_core::transcript::Item;
     let env = Env::new();
     let mut daemon = env.spawn();
@@ -522,14 +569,22 @@ async fn a_tool_call_is_answered_that_the_tools_are_not_there_yet() {
             output, is_error, ..
         } = entry.item
         {
-            assert!(is_error);
-            assert!(
-                output.contains("not available yet") && output.contains("M6"),
-                "{output}"
-            );
+            assert!(!is_error, "{output}");
+            assert!(output.contains("http://localhost:1"), "{output}");
             break;
         }
     }
+    client
+        .wait_for(WAIT, |s| {
+            let p = &s.projects[&project];
+            let carried_out = p
+                .actions()
+                .any(|a| a.state == x100_core::action::ActionState::CarriedOut);
+            (p.project()?.preview.as_deref() == Some("http://localhost:1") && carried_out)
+                .then_some(())
+        })
+        .await
+        .expect("the preview is set, and the call is an action carried out");
     daemon.terminate();
 }
 

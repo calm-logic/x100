@@ -55,13 +55,26 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   replies on new drivers. Also: two clients agree, a reconnect resumes with no gap or repeat, closing every
   client stops nothing, a second message reuses the warm driver. 21 protocol methods are real. The other 16
   answer "not available yet" with their milestone, from one table a test keeps complete.
+- **M6a, the organisation's behaviour.** The orchestrator's run, three times: 246 tests pass, 0 fail, clippy
+  and fmt clean, no process left. The plan's M6 check passes on fake-harness child processes, real stores and
+  git, the orchestrator in-process, the fake clock: a BRD written, three leads formed, workers under two, a
+  worker with its own worker, a lead to lead message, a question to the builder answered while the CEO kept
+  working, tasks through every status, a final report, and the workers' files on the project's main branch.
+  No lead's driver starts before its first inbox item. A worker waits on its own job and is woken on a new
+  driver whose start pack holds its progress note. A lead resumes on its worker's report. A repeating job
+  delegates a fresh task at each firing. A wait past its deadline wakes the agent and says so. An item given
+  to a driver stopped mid-turn reaches the next. A crashed driver's task is finished by the next driver, and
+  three crashes or three turns without progress report the task failed. The run's event kinds are identical
+  over ten runs. **Limit:** scripts reach ids through a test adapter, see in progress. Real harnesses have no
+  tools until M6b.
 
 ## In progress
 
-- M6, orchestration, split in two. M6a: the organisation's behaviour in `crates/x100-orch` on the fake
-  harness and the fake clock (tools, delegation, inbox, waits, jobs, team, start pack), with the plan's M6
-  check. M6b, after it: the tools served to real harnesses over MCP, and the daemon's remaining M6 methods.
-  Opus subagents.
+- Contract fixes M6a asked for, then M6b. Opus subagent. The fake harness's scripts cannot read an id from
+  what a turn is given, so M6a's tests pass ids through an adapter in the test code. The daemon cannot run the
+  Fernleaf script until that is fixed, and M7 needs it to. Also: a commit to a branch in the store, the start
+  pack recorded in the transcript, a second wait while waiting, and a wake for the scheduler.
+- M6b after that: the tools served to real harnesses over MCP.
 
 ## Waiting on the owner
 
@@ -77,16 +90,13 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 4. **Open questions 1 and 2 in `PRODUCT.md`.** The build uses the recommended answers: the CEO may invent any
    role with a charter, and team changes need the builder's agreement.
 
-5. **Many agents on one subscription.** The providers' terms allow running their unmodified program on your
-   own login, and leave several automated sessions at once unclear. The risk is throttling of the account. The
-   build adds a cap per login on terminal drivers running at once. Say what the default should be. Proposed: 4.
-
 ## Owner's decisions during the build
 
 - **2026-11-12. Push to `origin`.** Allowed. Pushed after each accepted milestone from now on.
 - **2026-11-12. Local subscriptions.** x100 must run the builder's local agents on their own subscriptions,
   as Orca, herdr and T3 Code do, each in a dedicated terminal reachable from the Team tab by drilldown. This
   replaced "API keys only". It added milestone M3T and the two ways of running a harness in ARCHITECTURE.
+- **2026-11-12. Cap per login.** At most 4 terminal drivers at once on one login, by default.
 
 ## Toolchain, checked 2026-11-11
 
@@ -153,6 +163,16 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From M6a:
+
+- **Seams left for later milestones** in `x100-orch`: `DriverChooser` (M8), `Sandbox::wrap` (M10), `Gate::rule`
+  (M12). Tool calls and merges both pass the gate.
+- **An existing agent's branch is refreshed** just before the turn that is given the task, never mid-turn.
+- **Three failures in a row** are counted in memory and lost on a restart. M9 makes that durable.
+- **Any agent may message any other.** Only the CEO sets a new worker's range. `form_team` is refused once a
+  lead exists, since later team changes are held actions.
+- **The flaky macOS test** now waits for both clients to reach the same sequence numbers before comparing.
 
 From M5:
 
