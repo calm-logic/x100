@@ -168,6 +168,24 @@ async fn fernleaf_runs_as_an_organisation() {
     let answer = s.message(question.reply.expect("answered")).unwrap();
     assert_eq!(answer.message.route, Route::BuilderToCeo);
 
+    // The CEO's start pack holds the executive-summary skill, in a section of its own, and a
+    // lead's holds none.
+    let first_pack = |a: AgentId| {
+        let driver = s.agent(a).unwrap().drivers[0];
+        w.orch.start_pack(w.project, driver).expect("a start pack")
+    };
+    let ceo_pack = first_pack(ceo);
+    assert!(
+        ceo_pack.contains(
+            "\nSKILL (follow it where it says it applies):\n---\nname: executive-summary\n"
+        ),
+        "{ceo_pack}"
+    );
+    assert!(ceo_pack.contains("It does not apply to your own work"));
+    let lead_pack = first_pack(tech);
+    assert!(!lead_pack.contains("SKILL"), "{lead_pack}");
+    assert!(!lead_pack.contains("executive-summary"), "{lead_pack}");
+
     // Tasks move through their statuses: a raised idea delegated, each delegated task reported,
     // accepted, merged and done, and the brief ending in the CEO's report, merged into main.
     let statuses: Vec<_> = log

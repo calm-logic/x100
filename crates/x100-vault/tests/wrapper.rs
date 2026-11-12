@@ -19,8 +19,8 @@ const VAR: &str = "HOMEBOX_TOKEN";
 /// A stand-in deploy tool that is careless with its credential in every way it can be.
 const TOOL: &str = r#"#!/bin/sh
 printf 'raw:%s\n' "$HOMEBOX_TOKEN"
-printf '%s' "$HOMEBOX_TOKEN" | base64 -w0; echo
-printf '%s' "$HOMEBOX_TOKEN" | od -An -tx1 | tr -d ' \n'; echo
+printf '%s' "$HOMEBOX_TOKEN" | base64 | tr -d '\n'; echo
+printf '%s' "$HOMEBOX_TOKEN" | hexdump -ve '1/1 "%02x"'; echo
 printf 'split:%s' "$(printf '%s' "$HOMEBOX_TOKEN" | cut -c1-10)"
 sleep 0.2
 printf '%s\n' "$(printf '%s' "$HOMEBOX_TOKEN" | cut -c11-)"

@@ -29,7 +29,7 @@ use alacritty_terminal::term::{Config, Osc52, Term, TermDamage};
 use alacritty_terminal::vte::ansi::Processor;
 
 pub use palette::{BACKGROUND, FOREGROUND};
-pub use view::{FONT, MIN_FONT, Sizing, TerminalStats, TerminalView};
+pub use view::{FONT, PaneCells, SETTLE, Sizing, TerminalStats, TerminalView};
 
 /// How many lines a log keeps above the screen.
 const HISTORY: usize = 10_000;

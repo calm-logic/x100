@@ -183,6 +183,9 @@ async fn read_output(
             Some(request) = control.recv() => match request {
                 // Resized here, between reads, so the recording has the new size exactly where
                 // the program's output starts to follow it.
+                // A size it has already would make the program redraw for nothing and put a
+                // resize on record that changes nothing.
+                Control::Resize(size) if size == screen.0.lock().expect("screen").size() => {}
                 Control::Resize(size) => {
                     let _ = writer.lock().await.resize(pty_size(size));
                     screen.0.lock().expect("screen").resize(size);

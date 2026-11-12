@@ -11,10 +11,9 @@ use x100_core::driver::{Driver, DriverEvent};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::git::CommitId;
-use x100_core::id::{AgentId, DriverId, InboxItemId, JobId, MessageId, TaskId};
+use x100_core::id::{AgentId, DriverId, InboxItemId, JobId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::{Job, JobEvent, JobState, ProjectJob, ProjectRoutine, Schedule};
-use x100_core::message::{Message, Route};
 use x100_core::party::Actor;
 use x100_core::task::TaskFailure;
 use x100_core::time::{Clock, Timestamp};
@@ -76,9 +75,6 @@ pub(crate) struct Close {
     /// Every task the driver has had a turn on.
     pub carried: BTreeSet<TaskId>,
     pub given: Vec<InboxItemId>,
-    /// What the driver said, which for the CEO is its reply in the chat.
-    pub text: Vec<String>,
-    pub reply_to: Option<MessageId>,
     pub checkpoint: Option<CommitId>,
     pub limit: u32,
     /// The driver works in the scratch directory, from before the project had code.
@@ -93,15 +89,6 @@ pub(crate) fn close(
     clock: &dyn Clock,
     c: Close,
 ) -> (Events, bool) {
-    let body = c.text.join("\n\n");
-    let is_ceo = state.project().is_some_and(|p| p.team.ceo() == c.agent);
-    let reply = (is_ceo && !body.trim().is_empty()).then(|| Message {
-        id: new_id(clock, MessageId::new),
-        route: Route::CeoToBuilder,
-        body,
-        attachments: Vec::new(),
-        in_reply_to: c.reply_to,
-    });
     let warm = Warm {
         driver: c.driver,
         carried: c.carried,
@@ -128,7 +115,6 @@ pub(crate) fn close(
         driver: c.driver,
         given: c.given,
         checkpoint: c.checkpoint,
-        reply,
         warm_until,
         limit: c.limit,
     };
@@ -147,8 +133,6 @@ pub(crate) struct Ending {
     pub driver: DriverId,
     pub given: Vec<InboxItemId>,
     pub checkpoint: Option<CommitId>,
-    /// The CEO's text, as its reply in the chat.
-    pub reply: Option<Message>,
     /// When the driver's warm period ends: its model's cache lifetime from now. `None` when it
     /// ends with this turn.
     pub warm_until: Option<Timestamp>,
@@ -166,9 +150,6 @@ pub(crate) fn ended(state: &ProjectState, clock: &dyn Clock, e: Ending) -> Event
                 commit,
             },
         ));
-    }
-    if let Some(reply) = e.reply {
-        out.push((Actor::Agent(e.agent), ProjectEvent::MessageSent(reply)));
     }
     out.push((
         Actor::Daemon,

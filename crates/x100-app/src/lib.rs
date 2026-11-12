@@ -53,6 +53,7 @@ use crate::shell::Shell;
 /// What the app sets up once, before any window.
 pub fn init(cx: &mut App) {
     input::bind_keys(cx);
+    cx.set_global(platform::FileChooser::here());
 }
 
 /// Opens the main window on a connected client.

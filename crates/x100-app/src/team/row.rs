@@ -204,7 +204,8 @@ fn driver(m: &AgentModel) -> impl IntoElement {
         .child(widgets::pips(m.range, m.driver_effort))
 }
 
-/// The agent a view is opened on, large and centred: the CEO until another is opened.
+/// The agent a view is opened on. Drawn large and centred at the Team tab's top level, which is
+/// always the CEO's; a drilldown shows its head and name small in the corner from what this reads.
 pub struct AgentHeader {
     session: Entity<Session>,
     project: ProjectId,
@@ -259,15 +260,6 @@ impl Render for AgentHeader {
             .gap(px(3.))
             .text_size(px(theme::ROW_TEXT))
             .child(widgets::orb(size, if m.ceo { Orb::Ceo } else { Orb::Agent }).mb(px(6.)))
-            // The CEO's orb says who it is; another agent's name says which one is open.
-            .when(!m.ceo, |d| {
-                d.child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text())
-                        .child(m.name.clone()),
-                )
-            })
             .child(
                 div()
                     .text_size(px(theme::SMALL))

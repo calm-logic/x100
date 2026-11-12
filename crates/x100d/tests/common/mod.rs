@@ -56,12 +56,30 @@ steps = [
 [[turn]]
 when = { input_contains = "SLOW" }
 repeat = true
-steps = [{ text = "thinking" }, { sleep_ms = 700 }, { text = "done thinking" }]
+steps = [
+  { text = "thinking" },
+  { sleep_ms = 700 },
+  { call = { message = { to = "builder", body = "done thinking", attachments = [] } } },
+]
 
+# The CEO answers with `message`, as a model must: the text it writes is not a reply.
+[[turn]]
+when = { input_contains = "A message from the builder." }
+repeat = true
+steps = [
+  { text = "reading the message" },
+  { call = { message = { to = "builder", body = "heard: {{input}}", attachments = [], in_reply_to = "{{input:Message}}" } } },
+  { write = "notes/seen.md", content = "seen" },
+  { usage = { input = 100, output = 20, cost_micros = 1234 } },
+  { context = 5000 },
+]
+
+# Anything else, such as a job waking it, is told to the builder too, as a reply to nothing.
 [[turn]]
 repeat = true
 steps = [
-  { text = "heard: {{input}}" },
+  { text = "reading the input" },
+  { call = { message = { to = "builder", body = "heard: {{input}}", attachments = [] } } },
   { write = "notes/seen.md", content = "seen" },
   { usage = { input = 100, output = 20, cost_micros = 1234 } },
   { context = 5000 },

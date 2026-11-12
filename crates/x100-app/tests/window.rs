@@ -1,6 +1,6 @@
 //! The app's window against a real daemon running the Fernleaf script, without a display: with no
 //! project, the CEO and the box for the first message, which creates the project as it is sent;
-//! a new project shown as "New project" until its CEO names it; "+ New project" and the
+//! a new project shown as "Untitled" until its CEO names it; "+ New project" and the
 //! existing-folder control; the Team tab following the state, opening agents, the drivers list, the
 //! tabs' dots, rows redrawn only when their own agent changes, and a new client seeing the same.
 
@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::*;
 use gpui::{Entity, VisualTestContext, WindowHandle};
+use x100_app::platform::FileChooser;
 use x100_app::shell::Shell;
 use x100_app::tabs::{MainPanel, Tab};
 use x100_app::team::{AgentModel, DriverModel, Listing, TeamView};
@@ -118,13 +119,19 @@ fn the_first_message_creates_the_project_and_the_team_tab_follows_the_organisati
     );
     assert!(bounds(&mut vcx, "new-project-path").is_none(), "no form");
 
-    // Two files chosen through the platform's file chooser, kept until the project exists.
+    // Two files chosen through the platform's file chooser, which "+" opens on a desktop that has
+    // one, kept until the project exists.
     let files = run.daemon.dir.path().join("attach");
     std::fs::create_dir_all(&files).unwrap();
     std::fs::write(files.join("sketch.png"), PNG).unwrap();
     std::fs::write(files.join("notes.md"), "# Notes\nForest greens, maybe.\n").unwrap();
-    click(&mut vcx, "attach");
+    run.cx.update(|cx| cx.set_global(FileChooser(true)));
+    click(&mut vcx, "add-files");
     assert!(run.cx.did_prompt_for_paths(), "the file chooser opened");
+    assert!(
+        bounds(&mut vcx, "attach-path").is_none(),
+        "and no path field"
+    );
     let chosen = vec![files.join("sketch.png"), files.join("notes.md")];
     run.cx
         .simulate_path_prompt_response(move |_| Some(chosen.clone()));
@@ -322,8 +329,13 @@ fn the_first_message_creates_the_project_and_the_team_tab_follows_the_organisati
         "Product's row was redrawn"
     );
 
+    // The top level: the CEO large over its leads, no head in the corner.
+    assert!(!vcx.read(|cx| team.read(cx).drilled()));
+    assert!(bounds(&mut vcx, "drill-head").is_none());
+
     // Opening agents: Tech runs Backend and Frontend; Backend runs Migrations; Migrations runs
-    // none, so its live output takes the place of rows. The trail leads back to the CEO.
+    // none, so its live output takes the place of rows. Each is a drilldown: its head and name in
+    // the top row's corner, with the agents above it back to the CEO beside them.
     let p = state(&client, project);
     click(&mut vcx, "agent-Tech");
     assert_eq!(vcx.read(|cx| team.read(cx).focus()), Some(role(&p, "Tech")));
@@ -331,7 +343,17 @@ fn the_first_message_creates_the_project_and_the_team_tab_follows_the_organisati
         names(&rows(&vcx, &team)),
         ["Backend", "Frontend"].map(String::from).into()
     );
-    assert!(bounds(&mut vcx, "crumb-1").is_some() && bounds(&mut vcx, "crumb-2").is_none());
+    assert_eq!(corner_name(&vcx, &team), "Tech");
+    assert!(bounds(&mut vcx, "crumb-0").is_some() && bounds(&mut vcx, "crumb-1").is_none());
+    // Its switch between its agents and its own output is in the top row, beside the listing's.
+    let row_of = |vcx: &mut VisualTestContext, selector| bounds(vcx, selector).unwrap().center().y;
+    let top = row_of(&mut vcx, "drill-head");
+    for selector in ["drill-name", "crumb-0", "shown-Output", "listing-Drivers"] {
+        assert!(
+            (row_of(&mut vcx, selector) - top).abs() < gpui::px(4.),
+            "{selector} is not in the top row"
+        );
+    }
     click(&mut vcx, "agent-Backend");
     assert_eq!(
         names(&rows(&vcx, &team)),
@@ -341,14 +363,17 @@ fn the_first_message_creates_the_project_and_the_team_tab_follows_the_organisati
         p.trail(role(&p, "Backend")),
         [role(&p, "CEO"), role(&p, "Tech"), role(&p, "Backend")]
     );
-    assert!(bounds(&mut vcx, "crumb-2").is_some());
+    assert!(bounds(&mut vcx, "crumb-1").is_some() && bounds(&mut vcx, "crumb-2").is_none());
     click(&mut vcx, "agent-Migrations");
     let (rows_now, output) = vcx.read(|cx| {
         let t = team.read(cx);
         (t.rows().len(), t.output().map(|o| o.read(cx).agent()))
     });
     assert_eq!((rows_now, output), (0, Some(role(&p, "Migrations"))));
-    assert!(bounds(&mut vcx, "crumb-3").is_some());
+    assert_eq!(corner_name(&vcx, &team), "Migrations");
+    assert!(bounds(&mut vcx, "crumb-2").is_some());
+    // Everything under the top row is its output: no big head, task line or driver pill.
+    assert_drilldown_fills_the_view(&mut vcx);
     // Back along the trail to Tech, then to the CEO.
     click(&mut vcx, "crumb-1");
     assert_eq!(vcx.read(|cx| team.read(cx).focus()), Some(role(&p, "Tech")));
@@ -358,6 +383,43 @@ fn the_first_message_creates_the_project_and_the_team_tab_follows_the_organisati
         names(&rows(&vcx, &team)),
         ["Marketing", "Product", "Tech"].map(String::from).into()
     );
+}
+
+/// The name in a drilldown's corner.
+fn corner_name(vcx: &VisualTestContext, team: &Entity<TeamView>) -> String {
+    vcx.read(|cx| {
+        let header = team.read(cx).header().expect("the agent opened");
+        header.read(cx).shown().expect("its model").name.clone()
+    })
+}
+
+/// The head and name sit in the top row's left corner, and the output fills everything below
+/// that row, to the bottom of the window.
+fn assert_drilldown_fills_the_view(vcx: &mut VisualTestContext) {
+    let head = bounds(vcx, "drill-head").expect("the head in the corner");
+    let name = bounds(vcx, "drill-name").expect("the name beside it");
+    let output = bounds(vcx, "drill-output").expect("the output");
+    let team = bounds(vcx, "listing-Agents").expect("the top row's switch");
+    assert!(
+        head.size.width <= gpui::px(24.),
+        "the head is small: {head:?}"
+    );
+    assert!(name.left() > head.right(), "{name:?} {head:?}");
+    assert!(
+        head.left() < output.left() + gpui::px(24.),
+        "{head:?} {output:?}"
+    );
+    assert!(head.bottom() <= output.top() && team.bottom() <= output.top());
+    assert!(
+        output.top() - head.top() < gpui::px(56.),
+        "{head:?} {output:?}"
+    );
+    let window = vcx.update(|window, _| window.viewport_size());
+    assert!(
+        window.height - output.bottom() < gpui::px(2.),
+        "{output:?} in {window:?}"
+    );
+    assert!(output.size.height > gpui::px(400.), "{output:?}");
 }
 
 #[test]
@@ -443,7 +505,44 @@ fn a_new_project_is_named_when_its_ceo_sets_it_up_and_another_waits_for_its_mess
         bounds(vcx, "composer-input").is_some()
     });
 
-    // "hi" creates a project, shown as "New project" while the CEO only answers.
+    // Under WSL there is no file chooser, so "+" opens a field for a file's path in its place,
+    // and Enter adds the file.
+    run.cx.update(|cx| cx.set_global(FileChooser(false)));
+    let note = run.daemon.dir.path().join("note.md");
+    std::fs::write(&note, "# A note\n").unwrap();
+    let composer = vcx.read(|cx| {
+        window
+            .read(cx)
+            .unwrap()
+            .start()
+            .expect("the start of a new project")
+            .read(cx)
+            .composer()
+            .clone()
+    });
+    assert!(bounds(&mut vcx, "attach-path").is_none());
+    click(&mut vcx, "add-files");
+    assert!(
+        bounds(&mut vcx, "attach-path").is_some(),
+        "the path field opened"
+    );
+    assert!(
+        !run.cx.did_prompt_for_paths(),
+        "no file chooser was asked for"
+    );
+    vcx.simulate_input(&note.display().to_string());
+    vcx.simulate_keystrokes("enter");
+    pump_until(&mut vcx, "the file is added", |vcx| {
+        vcx.read(|cx| composer.read(cx).pending() == [note.clone()])
+    });
+    assert!(
+        bounds(&mut vcx, "attach-path").is_none(),
+        "and the field closed"
+    );
+    assert!(!vcx.read(|cx| composer.read(cx).typing_path()));
+
+    // "hi" creates a project, shown as "Untitled" while the CEO only answers: not "New project",
+    // which is what the control under the list says.
     send(&mut vcx, "hi there");
     let project = pump_for(&mut vcx, &client, ("the CEO answers", WAIT), |s| {
         s.projects.iter().find_map(|(id, p)| {
@@ -455,9 +554,34 @@ fn a_new_project_is_named_when_its_ceo_sets_it_up_and_another_waits_for_its_mess
     pump_until(&mut vcx, "the new project is listed and selected", |vcx| {
         let selected = vcx.read(|cx| window.read(cx).unwrap().session().read(cx).selected());
         selected == Some(project)
-            && listed(window, vcx) == (vec!["New project".into()], "x100 \u{b7} New project".into())
+            && listed(window, vcx) == (vec!["Untitled".into()], "x100 \u{b7} Untitled".into())
     });
     assert!(!state(&client, project).project().unwrap().is_set_up());
+
+    // A CEO with no leads has nothing else to show: the Team tab opens straight to its drilldown.
+    pump_until(&mut vcx, "the main panel opens", |vcx| {
+        bounds(vcx, "tab-Team").is_some()
+    });
+    let team = team(window, &vcx, project);
+    let ceo = state(&client, project).project().unwrap().ceo;
+    pump_until(&mut vcx, "the CEO's drilldown is drawn", |vcx| {
+        bounds(vcx, "drill-head").is_some()
+    });
+    let (focus, drilled, output) = vcx.read(|cx| {
+        let t = team.read(cx);
+        (
+            t.focus(),
+            t.drilled(),
+            t.output().map(|o| o.read(cx).agent()),
+        )
+    });
+    assert_eq!((focus, drilled, output), (None, true, Some(ceo)));
+    assert_eq!(corner_name(&vcx, &team), "CEO");
+    assert!(
+        bounds(&mut vcx, "crumb-0").is_none(),
+        "nothing above the CEO"
+    );
+    assert_drilldown_fills_the_view(&mut vcx);
 
     // The brief: the CEO sets the project up, and the name follows everywhere.
     send(
@@ -506,5 +630,5 @@ fn a_new_project_is_named_when_its_ceo_sets_it_up_and_another_waits_for_its_mess
         let selected = vcx.read(|cx| window.read(cx).unwrap().session().read(cx).selected());
         selected == Some(started.0) && listed(window, vcx).0.len() == 2
     });
-    assert!(listed(window, &vcx).0.contains(&"New project".to_owned()));
+    assert!(listed(window, &vcx).0.contains(&"Untitled".to_owned()));
 }

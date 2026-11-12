@@ -6,7 +6,9 @@
 //! `X100_RECORDINGS` to a directory of such runs (`*/term.raw` with `term.raw.timing`) to replay
 //! more of them too.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
 use alacritty_terminal::event::{Event, EventListener};
@@ -18,7 +20,7 @@ use gpui::{
     Entity, Modifiers, MouseButton, ScrollDelta, ScrollEvent, StyleRefinement, TestAppContext,
     VisualTestContext, Window, div, point, prelude::*, px, size,
 };
-use x100_app::term::{FONT, MIN_FONT, Size, Sizing, TerminalView, screen_text};
+use x100_app::term::{FONT, PaneCells, SETTLE, Size, Sizing, TerminalView, screen_text};
 
 const DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data");
 
@@ -235,19 +237,99 @@ fn output_in_one_terminal_leaves_another_alone(cx: &mut TestAppContext) {
     assert!(vcx.read(|cx| a.read(cx).stats().renders) > 20);
 }
 
+/// Each pane size the view announces, in order.
+fn announced(
+    view: &Entity<TerminalView>,
+    vcx: &mut VisualTestContext,
+) -> (Rc<RefCell<Vec<PaneCells>>>, gpui::Subscription) {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let keep = Rc::clone(&seen);
+    let subscription = vcx.update(|_, cx| {
+        cx.subscribe(view, move |_, cells: &PaneCells, _| {
+            keep.borrow_mut().push(*cells)
+        })
+    });
+    (seen, subscription)
+}
+
+/// Lets a pane size settle: past [`SETTLE`] on the test clock.
+fn settle(vcx: &mut VisualTestContext) {
+    vcx.run_until_parked();
+    vcx.executor()
+        .advance_clock(SETTLE + Duration::from_millis(10));
+    vcx.run_until_parked();
+}
+
 #[gpui::test]
-fn a_small_pane_scales_the_recorded_screen_down(cx: &mut TestAppContext) {
+fn the_view_asks_for_its_panes_size_in_cells_once_and_again_only_when_it_changes(
+    cx: &mut TestAppContext,
+) {
+    let (view, mut vcx) = window(cx, Sizing::Recorded);
+    let (seen, _keep) = announced(&view, &mut vcx);
+    vcx.simulate_resize(size(px(1000.), px(600.)));
+    vcx.run_until_parked();
+    assert!(seen.borrow().is_empty(), "announced before the size held");
+    settle(&mut vcx);
+    let first = vcx.read(|cx| view.read(cx).pane()).unwrap();
+    assert_eq!(*seen.borrow(), [first]);
+    // The cells the pane holds at the normal font: as many as fit, inside the padding.
+    let cell = vcx
+        .read(|cx| {
+            view.read(cx)
+                .cell_center(0, 1)
+                .zip(view.read(cx).cell_center(1, 0))
+        })
+        .map(|(right, below)| {
+            let origin = vcx.read(|cx| view.read(cx).cell_center(0, 0)).unwrap();
+            (right.x - origin.x, below.y - origin.y)
+        })
+        .unwrap();
+    let fits = |room: f32, cell: gpui::Pixels| (px(room - 16.) / cell).floor() as u16;
+    assert_eq!(first.cols, fits(1000., cell.0), "{first:?}");
+    assert_eq!(first.rows, fits(600., cell.1), "{first:?}");
+    assert_eq!(vcx.read(|cx| view.read(cx).font_size()), Some(FONT));
+
+    // Frames and time without a change announce nothing more.
+    for _ in 0..3 {
+        vcx.update(|window, _| window.refresh());
+        settle(&mut vcx);
+    }
+    assert_eq!(seen.borrow().len(), 1);
+
+    // A window edge dragged through several sizes announces only where it stops.
+    for width in [950., 900., 850., 800.] {
+        vcx.simulate_resize(size(px(width), px(500.)));
+        vcx.run_until_parked();
+    }
+    settle(&mut vcx);
+    let stopped = vcx.read(|cx| view.read(cx).pane()).unwrap();
+    assert_eq!(*seen.borrow(), [first, stopped]);
+    assert!(stopped.cols < first.cols && stopped.rows < first.rows);
+
+    // A pixel less that is not a cell less announces nothing.
+    vcx.simulate_resize(size(px(799.), px(499.)));
+    settle(&mut vcx);
+    assert_eq!(vcx.read(|cx| view.read(cx).pane()), Some(stopped));
+    assert_eq!(seen.borrow().len(), 2, "{:?} cell {cell:?}", seen.borrow());
+    // Changed and changed back before it held: nothing either.
+    vcx.simulate_resize(size(px(600.), px(400.)));
+    vcx.run_until_parked();
+    vcx.simulate_resize(size(px(800.), px(500.)));
+    settle(&mut vcx);
+    assert_eq!(seen.borrow().len(), 2);
+}
+
+#[gpui::test]
+fn a_recorded_screen_bigger_than_its_pane_is_shown_unshrunk_from_its_bottom(
+    cx: &mut TestAppContext,
+) {
+    // A driver that has ended cannot redraw at the pane's size: its screen stays as recorded.
     let (view, mut vcx) = window(cx, Sizing::Recorded);
     let rec = recordings().remove(0);
     replay(&view, &mut vcx, &rec.bytes, &rec.reads);
-    vcx.simulate_resize(size(px(2000.), px(1200.)));
+    vcx.simulate_resize(size(px(500.), px(300.)));
     vcx.run_until_parked();
     assert_eq!(vcx.read(|cx| view.read(cx).font_size()), Some(FONT));
-    vcx.simulate_resize(size(px(500.), px(400.)));
-    vcx.run_until_parked();
-    let small = vcx.read(|cx| view.read(cx).font_size()).unwrap();
-    assert!(small < FONT && small > MIN_FONT, "{small}");
-    // The grid keeps the size the program drew at.
     assert_eq!(
         vcx.read(|cx| view.read(cx).grid().size()),
         Size {
@@ -255,9 +337,43 @@ fn a_small_pane_scales_the_recorded_screen_down(cx: &mut TestAppContext) {
             rows: 40
         }
     );
-    vcx.simulate_resize(size(px(120.), px(80.)));
+    // Its bottom row is in view, at the normal size; its top is above the pane.
+    let pane = vcx.update(|window, _| window.viewport_size());
+    let last = vcx.read(|cx| view.read(cx).cell_center(39, 0)).unwrap();
+    let first = vcx.read(|cx| view.read(cx).cell_center(0, 0)).unwrap();
+    assert!(
+        last.y < pane.height && last.y > pane.height - px(40.),
+        "{last:?}"
+    );
+    assert!(first.y < px(0.), "{first:?}");
+    let bottom = vcx.read(|cx| view.read(cx).panned()).unwrap();
+    assert!(bottom.y > px(0.) && bottom.x == px(0.), "{bottom:?}");
+
+    // The wheel moves the pane over the screen, up and to the right, and no further than its edges.
+    vcx.simulate_event(ScrollEvent {
+        position: last,
+        delta: ScrollDelta::Lines(point(0., 5.)),
+        ..Default::default()
+    });
     vcx.run_until_parked();
-    assert_eq!(vcx.read(|cx| view.read(cx).font_size()), Some(MIN_FONT));
+    let up = vcx.read(|cx| view.read(cx).panned()).unwrap();
+    assert!(up.y < bottom.y, "{up:?} {bottom:?}");
+    vcx.simulate_event(ScrollEvent {
+        position: last,
+        delta: ScrollDelta::Pixels(point(px(-10_000.), px(10_000.))),
+        ..Default::default()
+    });
+    vcx.run_until_parked();
+    let corner = vcx.read(|cx| view.read(cx).panned()).unwrap();
+    assert_eq!(corner.y, px(0.));
+    assert!(corner.x > px(0.));
+    let right = vcx.read(|cx| view.read(cx).cell_center(0, 119)).unwrap();
+    assert!(
+        right.x < pane.width,
+        "the last column is in view: {right:?}"
+    );
+    // Nothing of the screen's own scrollback moved: the screen is all there is.
+    assert_eq!(vcx.read(|cx| view.read(cx).grid().display_offset()), 0);
 }
 
 #[gpui::test]

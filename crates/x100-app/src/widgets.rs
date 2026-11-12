@@ -1,5 +1,5 @@
-//! The small pieces the mock repeats: an agent's orb, the effort pips, a progress meter, a pill and
-//! a segmented switch.
+//! The small pieces the mock repeats: an agent's orb, the effort pips, a progress meter, a pill, a
+//! segmented switch and buttons.
 
 use gpui::{
     AnyElement, BoxShadow, Div, ElementId, Rgba, SharedString, Stateful, div, hsla, point,
@@ -155,4 +155,24 @@ pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> State
         .cursor_pointer()
         .hover(|s| s.bg(theme::hover()))
         .child(label.into())
+}
+
+/// A round button holding one symbol, such as "+".
+pub fn round_button(id: impl Into<ElementId>, symbol: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(28.))
+        .rounded_full()
+        .border_1()
+        .border_color(gpui::rgba(0xffffff99))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(16.))
+        .line_height(px(16.))
+        .text_color(theme::text())
+        .cursor_pointer()
+        .hover(|s| s.bg(theme::hover()))
+        .child(symbol)
 }

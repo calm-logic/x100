@@ -439,6 +439,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "transcript.subscribe",
         "terminal.read",
         "terminal.subscribe",
+        "terminal.resize",
         "daemon.get",
         "daemon.set_setting",
         "projects.list",

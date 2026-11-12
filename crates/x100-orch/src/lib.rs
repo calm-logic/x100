@@ -56,6 +56,7 @@ use x100_core::settings::DaemonSettings;
 use x100_core::time::{Clock, Timestamp};
 use x100_core::wait::Wait;
 use x100_drivers::Harness;
+use x100_drivers::terminal::Size;
 use x100_jobs::Scheduler;
 use x100_router::Installed;
 use x100_store::{DaemonLog, ProjectStore};
@@ -139,9 +140,9 @@ impl Shared {
     }
 }
 
-/// Why a driver could not be stopped by [`Orchestrator::stop_driver`].
+/// Why a request for one driver, to stop it or to resize its terminal, was not carried out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum StopError {
+pub enum DriverError {
     #[error("no such driver")]
     NotFound,
     #[error("the driver has already ended")]
@@ -282,14 +283,36 @@ impl Orchestrator {
 
     /// Stops a driver the builder chose, and records it. Whatever turn it was in is lost and its
     /// inbox items go to the next driver. Returns once the driver's process is gone.
-    pub async fn stop_driver(&self, project: ProjectId, driver: DriverId) -> Result<(), StopError> {
-        let ctl = self.ctl(project).ok_or(StopError::NotFound)?;
+    pub async fn stop_driver(
+        &self,
+        project: ProjectId,
+        driver: DriverId,
+    ) -> Result<(), DriverError> {
+        let ctl = self.ctl(project).ok_or(DriverError::NotFound)?;
         let (ack, done) = oneshot::channel();
         ctl.send(project::Ctl::Stop { driver, ack })
-            .map_err(|_| StopError::NotLive)?;
+            .map_err(|_| DriverError::NotLive)?;
         match done.await {
             Ok(true) => Ok(()),
-            _ => Err(StopError::NotLive),
+            _ => Err(DriverError::NotLive),
+        }
+    }
+
+    /// A viewer's pane, in cells, for a live driver's terminal: its program redraws at that size,
+    /// and the resize is recorded among its chunks. Returns once the terminal has been told.
+    pub async fn resize_terminal(
+        &self,
+        project: ProjectId,
+        driver: DriverId,
+        size: Size,
+    ) -> Result<(), DriverError> {
+        let ctl = self.ctl(project).ok_or(DriverError::NotFound)?;
+        let (ack, done) = oneshot::channel();
+        ctl.send(project::Ctl::Resize { driver, size, ack })
+            .map_err(|_| DriverError::NotLive)?;
+        match done.await {
+            Ok(true) => Ok(()),
+            _ => Err(DriverError::NotLive),
         }
     }
 

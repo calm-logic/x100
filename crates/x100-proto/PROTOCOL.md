@@ -116,6 +116,21 @@ the size they drew at. It resizes its emulator where a `resize` chunk says so, a
 program's terminal queries (cursor position, device attributes and the like) while replaying or following:
 the daemon's own emulator answered them live, and a second answer would reach no one or confuse the program.
 
+A client **draws a terminal at its own font size and never scales it**. A viewer of a live driver tells
+the daemon how many cells its pane holds with `terminal.resize`, and the program redraws itself at that
+size, which reaches every follower as a `resize` chunk and the output after it. The rules:
+
+- A terminal driver starts at 100 by 40, which the app's terminal pane holds whole in its usual window,
+  before any viewer has said anything.
+- A viewer sends a size only when its pane's size in cells changes, and only once that size has held for
+  a moment, so dragging a window's edge sends one request, not one per frame.
+- With two viewers of different sizes, the last to send wins. The other draws the terminal at that size,
+  unscaled: with room to spare, or cut off and scrolled when its pane is smaller. It sends again only when
+  its own pane changes.
+- A driver that has ended cannot redraw. A viewer shows its terminal at the last recorded size, unscaled,
+  scrolled to its bottom, and sends nothing.
+- Resizing is the only thing a viewer sends a terminal. No key, click or focus change reaches the program.
+
 ## Worked example
 
 The client says hello. The daemon answers with the version both will use.
@@ -586,6 +601,27 @@ Errors: not_found
 {
   "subscription": 3
 }
+```
+
+### `terminal.resize`
+
+Sets a live terminal driver's terminal to `cols` by `rows`, the cells a viewer's pane holds, and its program redraws itself at that size. The resize is recorded among the driver's chunks where the program's output starts to follow it, and a size the terminal has already records nothing. It is the only thing a viewer sends a terminal. A driver with no terminal is `not_found`, one that has ended `wrong_state`, and a size outside 20 by 5 to 1000 by 500 `rejected`.
+
+Params type `ResizeTerminal`, result type `Done`.
+
+Errors: not_found, wrong_state, rejected
+
+```json params
+{
+  "cols": 104,
+  "driver": "drv_01M74XBRM00000000000000004",
+  "project": "prj_01M74XBRM00000000000000001",
+  "rows": 48
+}
+```
+
+```json result
+{}
 ```
 
 ### `daemon.get`

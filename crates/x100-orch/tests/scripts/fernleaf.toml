@@ -33,7 +33,8 @@ price = { input = 1.0, output = 5.0, cache_read = 0.1 }
 [[turn]]
 when = { start_pack_contains = "PROJECT: not set up yet", input_contains = "Launch Fernleaf" }
 steps = [
-  { text = "Fernleaf it is: a waitlist page for a plant shop. Setting it up now." },
+  { text = "The builder wants a waitlist page for a plant shop." },
+  { call = { message = { to = "builder", body = "Fernleaf it is: a waitlist page for a plant shop. Setting it up now.", attachments = [], in_reply_to = "{{input:Message}}" } } },
   { call = { set_up_project = { name = "Fernleaf", intent = "A waitlist page for Fernleaf, a plant shop.", brief = "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist." } } },
   { usage = { input = 900, output = 120, cost_micros = 9000 } },
 ]
@@ -42,13 +43,13 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "PROJECT: not set up yet" }
 repeat = true
-steps = [{ text = "Hello! What would you like to build?" }]
+steps = [{ call = { message = { to = "builder", body = "Hello! What would you like to build?", attachments = [], in_reply_to = "{{input:Message}}" } } }]
 
 # The CEO answers, writes the BRD, forms the team, delegates to two leads and asks the builder.
 [[turn]]
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Launch Fernleaf" }
 steps = [
-  { text = "On it: the BRD first, then a team." },
+  { text = "Reading the brief: the BRD first, then a team." },
   { call = { write_spec = { spec = "brd", status = "draft", body = "# BRD\nA waitlist page for Fernleaf, a plant shop." } } },
   { call = { form_team = { leads = [
       { role = "Tech", charter = "Tech for Fernleaf.", effort = { min = "medium", max = "max" }, budget = 15000000 },

@@ -1,22 +1,24 @@
 //! The terminal as a GPUI view: fed bytes and sizes, drawn when they change, scrolled with the
-//! wheel, selected with the mouse and copied with the platform's copy keys. It sends nothing
-//! anywhere: no key, click or focus change reaches the program.
+//! wheel, selected with the mouse and copied with the platform's copy keys. It sends nothing to
+//! the program: no key, click or focus change reaches it.
 //!
-//! **A pane smaller than the recorded size.** A program on a terminal of its own drew at absolute
-//! positions for the size it had, and the builder cannot resize it, since the terminal belongs
-//! to the daemon. So the cell is scaled down until the whole recorded screen fits, rather than
-//! scrolled: the parts that matter most, the input box and the status line, sit at the bottom
-//! and the right, where a scrolled view would hide them first. Below [`MIN_FONT`] the text would
-//! be unreadable anyway, so the cell stops shrinking there and the right and bottom are clipped.
-//! A log the app writes itself is never scaled: its grid takes the pane's size and rewraps.
+//! **Always at [`FONT`], never scaled.** A program's screen shrunk to fit a pane is unreadable, so
+//! a recorded terminal is drawn cell for cell at the normal size, and the program is asked to draw
+//! at the pane's size instead: the view announces how many cells its pane holds
+//! ([`PaneCells`]) once that has held for [`SETTLE`], and whoever owns the view asks the daemon to
+//! resize the program's terminal. Until the program redraws, or for good once its driver has
+//! ended, a screen bigger than the pane is cut off and moved with the wheel, starting at its
+//! bottom, where both programs keep their input box and status line. A log the app writes itself
+//! takes the pane's size and rewraps.
 
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::index::Side;
 use gpui::{
-    Bounds, ClipboardItem, Context, FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, Point, Render, ScrollEvent, Task, Window, canvas, div, prelude::*, px,
+    Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, Render, ScrollEvent, Task, Window, canvas, div,
+    prelude::*, px,
 };
 
 use super::paint::{self, Fonts, Frame, Metrics, RowPaint, Shapes};
@@ -24,10 +26,11 @@ use super::palette;
 use super::{Dirty, Size, TermGrid};
 use crate::theme;
 
-/// The terminal's font size when nothing is scaled.
+/// The terminal's font size, the app's normal monospace size.
 pub const FONT: f32 = 12.;
-/// The smallest a recorded screen is scaled to before it is clipped instead.
-pub const MIN_FONT: f32 = 6.;
+/// How long a pane's size in cells must hold before it is announced: long enough that dragging a
+/// window's edge announces only where it stops.
+pub const SETTLE: Duration = Duration::from_millis(250);
 const PAD: f32 = 8.;
 /// How much of a log is kept to write again at a new width: about the scrollback's worth.
 const KEPT: usize = 2 << 20;
@@ -36,8 +39,17 @@ const KEPT: usize = 2 << 20;
 pub enum Sizing {
     /// The grid takes the pane's size: a log the app writes, rewrapped when the pane changes.
     Fit,
-    /// The grid keeps the size the program drew at, scaled down to fit the pane.
+    /// The grid keeps the size the program drew at, at [`FONT`], and the pane's size in cells is
+    /// announced so the program can be asked to draw at it.
     Recorded,
+}
+
+/// How many cells the pane of a [`Sizing::Recorded`] view holds, announced when that changes and
+/// has held for [`SETTLE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaneCells {
+    pub cols: u16,
+    pub rows: u16,
 }
 
 /// What the view has done, to show that it draws only what changed.
@@ -57,6 +69,8 @@ pub struct TerminalStats {
 struct Placed {
     origin: Point<Pixels>,
     metrics: Metrics,
+    /// How far the grid can be moved within the pane, when it is bigger than the pane.
+    overflow: Point<Pixels>,
 }
 
 pub struct TerminalView {
@@ -68,8 +82,13 @@ pub struct TerminalView {
     placed: Option<Placed>,
     /// The cell at [`FONT`], measured once.
     base: Option<Metrics>,
-    /// The cell a recorded grid was last scaled to, for the room and grid size it was for.
-    scaled: Option<((gpui::Size<Pixels>, Size), Metrics)>,
+    /// How far a grid bigger than its pane is moved, from its top left. It starts past the bottom
+    /// and is held inside the grid when drawn, so the bottom shows until the wheel moves it.
+    pan: Point<Pixels>,
+    /// What the pane holds now, and what was last announced.
+    pane: Option<PaneCells>,
+    announced: Option<PaneCells>,
+    announce: Option<Task<()>>,
     stats: TerminalStats,
     scroll_lines: f32,
     selecting: bool,
@@ -89,7 +108,10 @@ impl TerminalView {
             rows: Vec::new(),
             placed: None,
             base: None,
-            scaled: None,
+            pan: gpui::point(px(0.), px(f32::MAX)),
+            pane: None,
+            announced: None,
+            announce: None,
             stats: TerminalStats::default(),
             scroll_lines: 0.,
             selecting: false,
@@ -111,7 +133,7 @@ impl TerminalView {
         self.stats
     }
 
-    /// The font size the last frame drew at: below [`FONT`] when a recorded screen was scaled.
+    /// The font size the last frame drew at.
     pub fn font_size(&self) -> Option<f32> {
         self.placed.map(|p| f32::from(p.metrics.font_size))
     }
@@ -169,8 +191,48 @@ impl TerminalView {
         }));
     }
 
+    /// What the pane held when the last frame was drawn, in cells, for a recorded grid.
+    pub fn pane(&self) -> Option<PaneCells> {
+        self.pane
+    }
+
+    /// Where the grid's top left is drawn, from the pane's: zero unless it is moved within a pane
+    /// smaller than it.
+    pub fn panned(&self) -> Option<Point<Pixels>> {
+        Some(held(self.pan, self.placed?.overflow))
+    }
+
+    /// Notes the cells `room` holds, and announces them once they have held for [`SETTLE`]. A size
+    /// that changes and changes back before then is not announced at all.
+    fn measure_pane(&mut self, room: gpui::Size<Pixels>, cell: Metrics, cx: &mut Context<Self>) {
+        let fit = |room: Pixels, cell: Pixels| (room / cell).floor().clamp(0., f32::from(u16::MAX));
+        let cells = PaneCells {
+            cols: fit(room.width, cell.cell_width) as u16,
+            rows: fit(room.height, cell.line_height) as u16,
+        };
+        if self.pane == Some(cells) {
+            return;
+        }
+        self.pane = Some(cells);
+        self.announce = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SETTLE).await;
+            let _ = this.update(cx, |v, cx| {
+                v.announce = None;
+                if v.pane != v.announced {
+                    v.announced = v.pane;
+                    cx.emit(cells);
+                }
+            });
+        }));
+    }
+
     /// Lays the grid out in `bounds` and builds the lines that changed since the last frame.
-    fn prepare(&mut self, bounds: Bounds<Pixels>, window: &mut Window) -> Frame {
+    fn prepare(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Frame {
         self.stats.frames += 1;
         let inner = Bounds {
             origin: bounds.origin + gpui::point(px(PAD), px(PAD)),
@@ -196,17 +258,16 @@ impl TerminalView {
                 base
             }
             Sizing::Recorded => {
-                let key = (inner.size, self.grid.size());
-                match self.scaled {
-                    Some((k, m)) if k == key => m,
-                    _ => {
-                        let m = self.scale(base, inner.size, window);
-                        self.scaled = Some((key, m));
-                        m
-                    }
-                }
+                self.measure_pane(inner.size, base, cx);
+                base
             }
         };
+        let size = self.grid.size();
+        let overflow = gpui::point(
+            (metrics.cell_width * size.cols as f32 - inner.size.width).max(px(0.)),
+            (metrics.line_height * size.rows as f32 - inner.size.height).max(px(0.)),
+        );
+        let origin = inner.origin - held(self.pan, overflow);
         let mut dirty = self.grid.take_dirty();
         if self.placed.is_none_or(|p| p.metrics != metrics) {
             self.shapes.clear();
@@ -234,41 +295,19 @@ impl TerminalView {
             self.stats.rows_built += 1;
         }
         self.placed = Some(Placed {
-            origin: inner.origin,
+            origin,
             metrics,
+            overflow,
         });
         Frame {
-            origin: inner.origin,
+            origin,
             clip: bounds,
+            content: inner,
             metrics,
             rows: self.rows.clone(),
             background: palette::hex(palette::BACKGROUND),
             cursor: paint::cursor(term),
             selected: paint::selection(term, term.renderable_content().selection),
-        }
-    }
-
-    /// The largest cell, up to the unscaled one and down to [`MIN_FONT`], at which the recorded
-    /// grid fits `room`. Measured at each size tried, since a font's cell does not shrink exactly
-    /// in proportion once it is rounded to whole pixels.
-    fn scale(&self, base: Metrics, room: gpui::Size<Pixels>, window: &Window) -> Metrics {
-        let size = self.grid.size();
-        let fits = |m: &Metrics| {
-            m.cell_width * size.cols as f32 <= room.width
-                && m.line_height * size.rows as f32 <= room.height
-        };
-        if fits(&base) {
-            return base;
-        }
-        let wide = room.width / (base.cell_width * size.cols as f32);
-        let tall = room.height / (base.line_height * size.rows as f32);
-        let mut font = (FONT * wide.min(tall)).clamp(MIN_FONT, FONT);
-        loop {
-            let m = Metrics::measure(&self.fonts, px(font), window);
-            if fits(&m) || font <= MIN_FONT {
-                return m;
-            }
-            font = (font - 0.25).max(MIN_FONT);
         }
     }
 
@@ -315,6 +354,21 @@ impl TerminalView {
             return;
         };
         let line = p.metrics.line_height;
+        // A screen bigger than its pane is moved over first: the program drew it whole.
+        if p.overflow != Point::default() {
+            let delta = e.delta.pixel_delta(line);
+            let now = self.panned().unwrap_or_default();
+            let to = gpui::point(
+                (now.x - delta.x).clamp(px(0.), p.overflow.x),
+                (now.y - delta.y).clamp(px(0.), p.overflow.y),
+            );
+            if to != now {
+                self.pan = to;
+                cx.stop_propagation();
+                cx.notify();
+            }
+            return;
+        }
         self.scroll_lines += e.delta.pixel_delta(line).y / line;
         let lines = self.scroll_lines.trunc() as i32;
         if lines == 0 {
@@ -361,6 +415,13 @@ impl TerminalView {
     }
 }
 
+/// `pan` held inside how far the grid can move.
+fn held(pan: Point<Pixels>, overflow: Point<Pixels>) -> Point<Pixels> {
+    gpui::point(pan.x.min(overflow.x), pan.y.min(overflow.y))
+}
+
+impl EventEmitter<PaneCells> for TerminalView {}
+
 impl Render for TerminalView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.stats.renders += 1;
@@ -381,7 +442,9 @@ impl Render for TerminalView {
             .on_key_down(cx.listener(Self::on_key))
             .child(
                 canvas(
-                    move |bounds, window, cx| this.update(cx, |v, _| v.prepare(bounds, window)),
+                    move |bounds, window, cx| {
+                        this.update(cx, |v, cx| v.prepare(bounds, window, cx))
+                    },
                     |_, frame, window, _| paint::paint(&frame, window),
                 )
                 .size_full(),

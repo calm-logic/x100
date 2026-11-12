@@ -27,10 +27,13 @@ pub struct Size {
     pub rows: u16,
 }
 
+/// The size a terminal starts at, before any viewer has said what its pane holds: what the app's
+/// terminal pane holds whole at its usual 1400 by 900 window, so a driver nobody watched while it
+/// ran is still readable at the app's normal font.
 impl Default for Size {
     fn default() -> Self {
         Self {
-            cols: 120,
+            cols: 100,
             rows: 40,
         }
     }

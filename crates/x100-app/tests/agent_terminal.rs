@@ -16,9 +16,9 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use x100_app::session::Session;
 use x100_app::team::AgentOutput;
-use x100_app::term::{Size, screen_text};
+use x100_app::term::{FONT, SETTLE, Size, screen_text};
 use x100_client::{Client, Options};
-use x100_core::driver::View;
+use x100_core::driver::{Purpose, View};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::{AgentId, DriverId};
@@ -37,15 +37,24 @@ const WAIT: Duration = Duration::from_secs(20);
 
 struct World {
     snapshot: Snapshot,
+    /// Both of its drivers have ended.
     research: AgentId,
     drivers: [DriverId; 2],
+    /// An agent whose driver is still live, and that driver.
+    live: (AgentId, DriverId),
 }
 
 fn world() -> World {
     let mut f = fernleaf();
+    let folded = ProjectState::fold(&f.log).expect("the log folds");
+    let live = folded
+        .live_drivers()
+        .find(|d| d.driver.purpose == Purpose::Work)
+        .map(|d| (d.driver.agent, d.driver.id))
+        .expect("a live driver at the end of the run");
     for e in &mut f.log {
         if let ProjectEvent::DriverStarted(d) = &mut e.event
-            && d.agent == f.research
+            && (d.agent == f.research || d.id == live.1)
         {
             d.view = View::Terminal;
         }
@@ -54,6 +63,10 @@ fn world() -> World {
     let daemon = DaemonState::fold(&daemon_log(START)).expect("the daemon's log folds");
     let had = project.agent(f.research).unwrap().drivers.clone();
     assert!(had.len() >= 2, "{had:?}");
+    assert!(
+        had.iter()
+            .all(|d| !project.driver(*d).unwrap().state.is_live())
+    );
     World {
         snapshot: Snapshot {
             daemon,
@@ -61,6 +74,7 @@ fn world() -> World {
         },
         research: f.research,
         drivers: [had[0], had[1]],
+        live,
     }
 }
 
@@ -151,8 +165,25 @@ fn transcript_notice(position: u64, entry: Entry) -> String {
     .to_line()
 }
 
+/// Every method the view asked for, and each terminal size with its driver.
+#[derive(Clone, Default)]
+struct Asked {
+    methods: Arc<Mutex<Vec<String>>>,
+    resized: Arc<Mutex<Vec<(DriverId, u16, u16)>>>,
+}
+
+impl Asked {
+    fn methods(&self) -> Vec<String> {
+        self.methods.lock().unwrap().clone()
+    }
+
+    fn resized(&self) -> Vec<(DriverId, u16, u16)> {
+        self.resized.lock().unwrap().clone()
+    }
+}
+
 /// The daemon's side. Every method asked for is recorded.
-async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<String>>>, more: More) {
+async fn serve(listener: UnixListener, w: Arc<World>, asked: Asked, more: More) {
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             return;
@@ -170,7 +201,11 @@ async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<Strin
             let Ok(Message::Request(request)) = Message::parse(&line) else {
                 panic!("not a request: {line}");
             };
-            asked.lock().unwrap().push(request.call.method().to_owned());
+            asked
+                .methods
+                .lock()
+                .unwrap()
+                .push(request.call.method().to_owned());
             let id = request.id.clone();
             let send = |line: String| out.send(line).unwrap();
             match request.call {
@@ -198,7 +233,32 @@ async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<Strin
                         });
                     }
                 }
-                Call::SubscribeTerminal(s) if s.driver == w.drivers[0] => {
+                Call::SubscribeTranscript(s) if s.agent == w.live.0 => {
+                    send(ok(id, serde_json::json!({"subscription": 6})));
+                    let started = [
+                        Item::StartPack {
+                            text: "ROLE: Live\n".into(),
+                        },
+                        Item::DriverChanged { from: None },
+                    ];
+                    for (i, item) in started.into_iter().enumerate() {
+                        let notice = TranscriptNotice {
+                            subscription: SubscriptionId(6),
+                            position: Pos(i as u64 + 1),
+                            entry: entry(w.live.1, item),
+                        };
+                        send(Message::Notice(Notice::TranscriptEntry(notice)).to_line());
+                    }
+                }
+                Call::ResizeTerminal(r) => {
+                    asked
+                        .resized
+                        .lock()
+                        .unwrap()
+                        .push((r.driver, r.cols, r.rows));
+                    send(ok(id, serde_json::json!({})));
+                }
+                Call::SubscribeTerminal(s) if s.driver == w.drivers[0] || s.driver == w.live.1 => {
                     send(ok(id, serde_json::json!({"subscription": 7})));
                     for (i, chunk) in chunks().into_iter().enumerate() {
                         send(
@@ -223,24 +283,34 @@ async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<Strin
     }
 }
 
+fn connect(
+    rt: &tokio::runtime::Runtime,
+    dir: &tempfile::TempDir,
+    w: &Arc<World>,
+    asked: &Asked,
+    more: More,
+) -> Client {
+    let socket = dir.path().join("x100d.sock");
+    rt.block_on(async {
+        let listener = UnixListener::bind(&socket).unwrap();
+        tokio::spawn(serve(listener, Arc::clone(w), asked.clone(), more));
+        Client::connect(Options::new(&socket, "test"))
+            .await
+            .unwrap()
+    })
+}
+
 #[test]
 fn terminal_drivers_replay_and_a_refused_one_says_so() {
     // As the window tests: a plain test, since the client wakes GPUI's tasks from Tokio's threads.
     let mut cx = TestAppContext::single();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let w = Arc::new(world());
-    let asked = Arc::new(Mutex::new(Vec::new()));
+    let asked = Asked::default();
     let (later, rx) = mpsc::unbounded_channel();
     let more: More = Arc::new(Mutex::new(Some(rx)));
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("x100d.sock");
-    let client = rt.block_on(async {
-        let listener = UnixListener::bind(&socket).unwrap();
-        tokio::spawn(serve(listener, Arc::clone(&w), Arc::clone(&asked), more));
-        Client::connect(Options::new(&socket, "test"))
-            .await
-            .unwrap()
-    });
+    let client = connect(&rt, &dir, &w, &asked, more);
     let research = w.research;
     let (output, vcx) = cx.add_window_view(move |_, cx| {
         let session = cx.new(|cx| Session::new(client, cx));
@@ -336,8 +406,18 @@ fn terminal_drivers_replay_and_a_refused_one_says_so() {
     assert_eq!(after.1, before.1, "{before:?} {after:?}");
     assert!(after.2 > before.2, "{before:?} {after:?}");
 
-    // Watching only: the view asked to follow things and asked for nothing else.
-    let asked = asked.lock().unwrap().clone();
+    // Watching only: both drivers have ended, so however long their panes have held a size,
+    // the view asked to follow things and asked for nothing else.
+    vcx.executor().advance_clock(SETTLE * 4);
+    vcx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(50));
+    vcx.run_until_parked();
+    assert!(
+        vcx.read(|cx| views[0].read(cx).pane()).is_some(),
+        "its pane was measured"
+    );
+    assert_eq!(asked.resized(), []);
+    let asked = asked.methods();
     for method in &asked {
         assert!(
             [
@@ -354,5 +434,78 @@ fn terminal_drivers_replay_and_a_refused_one_says_so() {
         asked.iter().filter(|m| *m == "terminal.subscribe").count(),
         2
     );
+    drop(rt);
+}
+
+#[test]
+fn a_live_drivers_terminal_is_asked_to_take_the_panes_size_once_and_again_when_it_changes() {
+    let mut cx = TestAppContext::single();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let w = Arc::new(world());
+    let asked = Asked::default();
+    let more: More = Arc::new(Mutex::new(None));
+    let dir = tempfile::tempdir().unwrap();
+    let client = connect(&rt, &dir, &w, &asked, more);
+    let (agent, driver) = w.live;
+    let (output, vcx) = cx.add_window_view(move |_, cx| {
+        let session = cx.new(|cx| Session::new(client, cx));
+        AgentOutput::new(session, FERNLEAF, agent, cx)
+    });
+    let mut vcx = vcx.clone();
+    vcx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(700.)));
+
+    // Until its screen is drawn and its pane has held a size, nothing is asked.
+    let until = Instant::now() + WAIT;
+    let screen = loop {
+        vcx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(5));
+        let shown = vcx.read(|cx| output.read(cx).shown(cx));
+        if shown.len() == 1 && shown[0].screen.iter().any(|l| !l.trim().is_empty()) {
+            break vcx.read(|cx| output.read(cx).terminals()[0].clone());
+        }
+        assert!(
+            Instant::now() < until,
+            "the screen was never drawn: {shown:#?}"
+        );
+    };
+    assert_eq!(vcx.read(|cx| screen.read(cx).font_size()), Some(FONT));
+    assert_eq!(asked.resized(), []);
+
+    // Once the pane's size holds, the daemon is asked once for it.
+    let resized = |vcx: &mut VisualTestContext, n: usize| {
+        let until = Instant::now() + WAIT;
+        loop {
+            vcx.executor().advance_clock(SETTLE);
+            vcx.run_until_parked();
+            std::thread::sleep(Duration::from_millis(5));
+            let got = asked.resized();
+            if got.len() >= n {
+                return got;
+            }
+            assert!(Instant::now() < until, "asked {got:?}");
+        }
+    };
+    let first = resized(&mut vcx, 1);
+    let pane = vcx.read(|cx| screen.read(cx).pane()).unwrap();
+    assert_eq!(first, [(driver, pane.cols, pane.rows)]);
+    // More frames and time ask nothing more.
+    for _ in 0..3 {
+        vcx.update(|window, _| window.refresh());
+        vcx.executor().advance_clock(SETTLE * 2);
+        vcx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(asked.resized().len(), 1);
+
+    // A smaller window: asked again, once, for the new size.
+    vcx.simulate_resize(gpui::size(gpui::px(700.), gpui::px(500.)));
+    let second = resized(&mut vcx, 2);
+    let smaller = vcx.read(|cx| screen.read(cx).pane()).unwrap();
+    assert_eq!(second[1], (driver, smaller.cols, smaller.rows));
+    assert!(smaller.cols < pane.cols && smaller.rows < pane.rows);
+    vcx.executor().advance_clock(SETTLE * 4);
+    vcx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(asked.resized().len(), 2);
     drop(rt);
 }

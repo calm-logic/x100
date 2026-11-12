@@ -90,10 +90,10 @@ async fn a_message_to_the_ceo_is_answered_as_events() {
         [
             "started",
             "TurnStarted",
+            "reply",
             "charged",
             "ContextReported",
             "checkpointed",
-            "reply",
             "TurnEnded"
         ]
     );
@@ -373,7 +373,8 @@ async fn closing_every_client_does_not_stop_a_running_turn() {
         })
         .await
         .expect("the turn went on without a client");
-    assert_eq!(finished.0, "thinking\n\ndone thinking");
+    // What it wrote as it worked stays in its transcript: only its message is a reply.
+    assert_eq!(finished.0, "done thinking");
     assert_eq!(finished.1.driver.id, driver, "the same driver finished it");
     daemon.terminate();
 }
@@ -398,7 +399,7 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
         got.push(next);
     }
     let positions: Vec<u64> = got.iter().map(|(p, _)| p.0).collect();
-    assert_eq!(positions, [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(positions, (1..=10).collect::<Vec<u64>>());
     let kinds: Vec<&str> = got
         .iter()
         .map(|(_, e)| match &e.item {
@@ -418,7 +419,8 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
             other => panic!("unexpected {other:?}"),
         })
         .collect();
-    // The script writes a file between its text and its usage, which shows as a call and its result.
+    // The script answers with `message` after its text, then writes a file before its usage: each
+    // shows as a call and its result.
     assert_eq!(
         kinds,
         [
@@ -426,6 +428,8 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
             "driver_changed",
             "turn_started",
             "text",
+            "tool_call",
+            "tool_result",
             "tool_call",
             "tool_result",
             "usage",
@@ -442,7 +446,7 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
         })
         .await
         .unwrap();
-    assert_eq!(page.entries.len(), 8);
+    assert_eq!(page.entries.len(), 10);
     daemon.terminate();
 }
 

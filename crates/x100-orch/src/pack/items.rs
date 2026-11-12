@@ -4,7 +4,7 @@
 //! text someone else wrote, so a model reads it as prose and a script can look it up.
 
 use x100_core::fold::ProjectState;
-use x100_core::id::{AgentId, FileId, InboxItemId, MessageId};
+use x100_core::id::{AgentId, FileId, InboxItemId};
 use x100_core::inbox::InboxItem;
 use x100_core::message::Route;
 use x100_core::party::Party;
@@ -14,31 +14,21 @@ use x100_core::wait::WaitEnd;
 use crate::tools::who;
 
 /// The text of one turn: what the given items say, then anything the daemon must add, then the
-/// agent's current task; and the builder's message it answers, if any, so the CEO's reply can be
-/// recorded as one.
+/// agent's current task.
 pub fn turn_input(
     state: &ProjectState,
     agent: AgentId,
     items: &[InboxItemId],
     notes: &[String],
-) -> (String, Option<MessageId>) {
+) -> String {
     let Some(a) = state.agent(agent) else {
-        return (String::new(), None);
+        return String::new();
     };
     let mut parts = Vec::new();
-    let mut reply_to = None;
     for id in items {
-        let Some(item) = a.items.get(id) else {
-            continue;
-        };
-        if let InboxItem::Message { message } = item
-            && state
-                .message(*message)
-                .is_some_and(|m| m.message.route == Route::BuilderToCeo)
-        {
-            reply_to = Some(*message);
+        if let Some(item) = a.items.get(id) {
+            parts.push(describe(state, item));
         }
-        parts.push(describe(state, item));
     }
     parts.extend(notes.iter().cloned());
     // A warm driver's start pack may name a task that is over, so each turn says which is current.
@@ -46,7 +36,7 @@ pub fn turn_input(
     if let Some(t) = state.current_task(agent) {
         parts.push(format!("Current task: {}", t.task.id));
     }
-    (parts.join("\n\n---\n\n"), reply_to)
+    parts.join("\n\n---\n\n")
 }
 
 /// One inbox item in words.

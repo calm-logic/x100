@@ -1,7 +1,9 @@
-//! The Team tab: the agent it is opened on (the CEO to begin with), a trail back to the CEO, and
-//! either the agents it runs or what it is working in. An agent that runs agents is opened on
-//! them, with a switch to its own output, since it works in a terminal of its own too. Another
-//! switch lists the project's live drivers instead.
+//! The Team tab. Its top level is the CEO, large, over the leads' rows. Opening an agent, or the
+//! CEO's own output, is its drilldown: the agent's head, small, and its name in the top row's
+//! left corner with the trail back to the CEO, and everything below that row its live output. An
+//! agent that runs agents is opened on their rows, with a switch in the top row to its own output,
+//! since it works in a terminal of its own too. A CEO with no leads has nothing else to show, so
+//! the top level is its drilldown. Another switch lists the project's live drivers instead.
 //!
 //! The view itself is not cached and redraws cheaply whenever anything under it does. Each agent
 //! and each driver is a cached view of its own. When an event changes the Team part (core's
@@ -33,6 +35,7 @@ use crate::reflection::Reflection;
 /// M14 build them, and until then the agent view leaves them out rather than say so three times.
 const REFLECTION_SERVED: bool = false;
 use crate::session::{Session, SessionEvent};
+use crate::widgets::Orb;
 use crate::{theme, widgets, words};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +116,12 @@ impl TeamView {
     /// The agent the view is opened on, as its header shows it.
     pub fn header(&self) -> Option<Entity<AgentHeader>> {
         self.header.clone()
+    }
+
+    /// Whether the view is an agent's drilldown, its head small in the top row: any agent opened,
+    /// or the CEO's own output. Otherwise it is the top level, the CEO large over its leads.
+    pub fn drilled(&self) -> bool {
+        self.focus.is_some() || self.output.is_some()
     }
 
     /// The rows listed now, in order.
@@ -266,50 +275,81 @@ impl TeamView {
         }
     }
 
-    fn trail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(focus) = self.focus else {
+    /// The drilldown's corner: the agent's head, small, its name beside it, and the agents above
+    /// it back to the CEO, each of which opens it.
+    fn corner(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(m) = self
+            .header
+            .as_ref()
+            .and_then(|h| h.read(cx).shown().cloned())
+        else {
             return div().into_any_element();
         };
-        let trail = self
-            .state(cx, |p| {
-                p.trail(focus)
-                    .into_iter()
-                    .filter_map(|a| Some((a, p.agent(a)?.role.clone())))
-                    .collect::<Vec<_>>()
+        let above = self
+            .focus
+            .and_then(|focus| {
+                self.state(cx, |p| {
+                    let mut trail = p.trail(focus);
+                    trail.pop();
+                    trail
+                        .into_iter()
+                        .filter_map(|a| Some((a, p.agent(a)?.role.clone())))
+                        .collect::<Vec<_>>()
+                })
             })
             .unwrap_or_default();
-        let last = trail.len().saturating_sub(1);
-        let mut crumbs = div()
+        let mut corner = div()
             .flex()
             .items_center()
-            .gap(px(6.))
-            .text_size(px(theme::TEXT))
-            .text_color(theme::dim());
-        for (i, (agent, role)) in trail.into_iter().enumerate() {
-            if i > 0 {
-                crumbs = crumbs.child("›");
-            }
-            // Opening the CEO is opening the view's start.
-            let target = (i > 0).then_some(agent);
-            crumbs = crumbs.child(
+            .gap(px(8.))
+            .min_w_0()
+            .child(
+                widgets::orb(22., if m.ceo { Orb::Ceo } else { Orb::Agent })
+                    .debug_selector(|| "drill-head".into()),
+            )
+            .child(
                 div()
-                    .id(("crumb", i))
-                    .debug_selector(move || format!("crumb-{i}"))
-                    .px(px(8.))
-                    .py(px(3.))
-                    .rounded(px(7.))
-                    .cursor_pointer()
-                    .text_color(if i == last {
-                        theme::text()
-                    } else {
-                        theme::muted()
-                    })
-                    .hover(|s| s.bg(theme::hover()).text_color(theme::text()))
-                    .on_click(cx.listener(move |this, _, _, cx| this.open(target, cx)))
-                    .child(role),
+                    .debug_selector(|| "drill-name".into())
+                    .text_size(px(theme::ROW_TEXT))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text())
+                    .whitespace_nowrap()
+                    .child(m.name.clone()),
             );
+        if !above.is_empty() {
+            let mut crumbs = div()
+                .ml(px(4.))
+                .pl(px(10.))
+                .border_l_1()
+                .border_color(theme::line())
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .text_size(px(theme::SMALL))
+                .text_color(theme::dim());
+            for (i, (agent, role)) in above.into_iter().enumerate() {
+                if i > 0 {
+                    crumbs = crumbs.child("›");
+                }
+                // Opening the CEO is opening the view's start.
+                let target = (i > 0).then_some(agent);
+                crumbs = crumbs.child(
+                    div()
+                        .id(("crumb", i))
+                        .debug_selector(move || format!("crumb-{i}"))
+                        .px(px(6.))
+                        .py(px(2.))
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .text_color(theme::muted())
+                        .hover(|s| s.bg(theme::hover()).text_color(theme::text()))
+                        .on_click(cx.listener(move |this, _, _, cx| this.open(target, cx)))
+                        .child(role),
+                );
+            }
+            corner = corner.child(crumbs);
         }
-        crumbs.into_any_element()
+        corner.into_any_element()
     }
 
     fn switch(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -327,7 +367,7 @@ impl TeamView {
         .into_any_element()
     }
 
-    /// Between an agent's header and what is under it, when it runs agents.
+    /// Between an agent's agents and its own output, when it runs agents.
     fn shown_switch(&self, cx: &mut Context<Self>) -> AnyElement {
         let on = self.shown;
         let agents = words::agents(self.listed.len());
@@ -351,7 +391,31 @@ impl TeamView {
         .into_any_element()
     }
 
-    fn agents(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The leads' rows under the CEO, large: the top level when the CEO runs agents.
+    fn top_level(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(18.))
+            .px(px(16.))
+            .py(px(14.))
+            .children(self.header.clone().map(|h| {
+                h.cached(
+                    StyleRefinement::default()
+                        .w_full()
+                        .h(px(row::HEADER_HEIGHT)),
+                )
+            }))
+            .child(self.shown_switch(cx))
+            .child(self.rows_list(cx))
+            .into_any_element()
+    }
+
+    /// The rows of the agents listed now, each opening its agent.
+    fn rows_list(&self, cx: &mut Context<Self>) -> AnyElement {
         let names: Vec<String> = self
             .state(cx, |p| {
                 self.listed
@@ -361,58 +425,53 @@ impl TeamView {
             })
             .unwrap_or_default();
         div()
-            .flex_1()
-            .min_h_0()
             .w_full()
+            .max_w(px(460.))
             .flex()
             .flex_col()
-            .items_center()
-            .when(self.focus.is_none() && self.output.is_none(), |d| {
-                d.justify_center()
-            })
-            .gap(px(18.))
-            .children(self.header.clone().map(|h| {
-                h.cached(
-                    StyleRefinement::default()
-                        .w_full()
-                        .h(px(row::HEADER_HEIGHT)),
-                )
-            }))
-            .when(!self.listed.is_empty(), |d| d.child(self.shown_switch(cx)))
-            .when(
-                !self.listed.is_empty() && self.shown == Shown::Agents,
-                |d| {
-                    d.child(
-                        div()
-                            .w_full()
-                            .max_w(px(460.))
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.))
-                            .children(self.listed.iter().zip(names).map(|(agent, name)| {
-                                // The wrapper is part of this view, so tests find a row by name even
-                                // while the row itself is reused from its cache.
-                                div()
-                                    .w_full()
-                                    .debug_selector(move || format!("agent-{name}"))
-                                    .child(self.rows[agent].clone().cached(
-                                        StyleRefinement::default().w_full().h(px(row::ROW_HEIGHT)),
-                                    ))
-                            })),
+            .gap(px(8.))
+            .children(self.listed.iter().zip(names).map(|(agent, name)| {
+                // The wrapper is part of this view, so tests find a row by name even while the
+                // row itself is reused from its cache.
+                div()
+                    .w_full()
+                    .debug_selector(move || format!("agent-{name}"))
+                    .child(
+                        self.rows[agent]
+                            .clone()
+                            .cached(StyleRefinement::default().w_full().h(px(row::ROW_HEIGHT))),
                     )
-                },
-            )
-            .children(
-                self.output
-                    .clone()
-                    .map(|o| div().flex_1().min_h_0().w_full().child(o)),
-            )
-            .children(
-                self.reflection
-                    .clone()
-                    .map(|r| div().flex_none().w_full().child(r)),
-            )
+            }))
             .into_any_element()
+    }
+
+    /// Under a drilldown's top row: its live output, edge to edge, or the rows of its agents.
+    fn drilldown(&self, cx: &mut Context<Self>) -> AnyElement {
+        match &self.output {
+            Some(output) => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .debug_selector(|| "drill-output".into())
+                .child(div().flex_1().min_h_0().w_full().child(output.clone()))
+                .children(
+                    self.reflection
+                        .clone()
+                        .map(|r| div().flex_none().w_full().child(r)),
+                )
+                .into_any_element(),
+            None => div()
+                .id("drill-agents")
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .px(px(16.))
+                .py(px(18.))
+                .overflow_y_scroll()
+                .child(self.rows_list(cx))
+                .into_any_element(),
+        }
     }
 
     fn drivers(&self) -> AnyElement {
@@ -444,32 +503,53 @@ impl TeamView {
 
 impl Render for TeamView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let agents = self.listing == Listing::Agents;
+        let drilled = agents && self.drilled();
         let body = match self.listing {
-            Listing::Agents => self.agents(cx),
-            Listing::Drivers => self.drivers(),
+            Listing::Agents if drilled => self.drilldown(cx),
+            Listing::Agents => self.top_level(cx),
+            Listing::Drivers => div()
+                .id("drivers")
+                .size_full()
+                .px(px(16.))
+                .py(px(14.))
+                .overflow_y_scroll()
+                .child(self.drivers())
+                .into_any_element(),
+        };
+        let left = if drilled {
+            self.corner(cx)
+        } else {
+            div().into_any_element()
         };
         div()
             .id("team")
             .size_full()
             .flex()
             .flex_col()
-            .gap(px(14.))
-            .py(px(14.))
-            .px(px(16.))
-            .overflow_y_scroll()
             .child(
                 div()
+                    .flex_none()
                     .flex()
                     .items_center()
                     .justify_between()
+                    .gap(px(12.))
+                    .px(px(16.))
+                    .py(px(10.))
+                    .when(drilled, |d| d.border_b_1().border_color(theme::line()))
                     .font_weight(FontWeight::NORMAL)
-                    .child(if self.listing == Listing::Agents {
-                        self.trail(cx)
-                    } else {
-                        div().into_any_element()
-                    })
-                    .child(self.switch(cx)),
+                    .child(left)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .when(drilled && !self.listed.is_empty(), |d| {
+                                d.child(self.shown_switch(cx))
+                            })
+                            .child(self.switch(cx)),
+                    ),
             )
-            .child(body)
+            .child(div().flex_1().min_h_0().w_full().child(body))
     }
 }

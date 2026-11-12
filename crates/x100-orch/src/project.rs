@@ -24,6 +24,7 @@ use x100_core::job::{Job, ProjectJob, ProjectRoutine};
 use x100_core::party::Actor;
 use x100_core::task::{TaskEvent, TaskFailure, Verdict};
 use x100_core::time::Timestamp;
+use x100_drivers::terminal::Size;
 use x100_router::{Upkeep, Warm};
 
 use crate::Shared;
@@ -36,6 +37,11 @@ use crate::{jobs, settle, tools};
 pub(crate) enum Ctl {
     Stop {
         driver: DriverId,
+        ack: oneshot::Sender<bool>,
+    },
+    Resize {
+        driver: DriverId,
+        size: Size,
         ack: oneshot::Sender<bool>,
     },
     /// A job the clock fired, whose `Fired` event is in the log. Acknowledged once the reaction is.
@@ -223,6 +229,7 @@ impl Loop {
                 Some(_) = self.drivers.join_next(), if !self.drivers.is_empty() => {}
                 Some(c) = ctl.recv() => match c {
                     Ctl::Stop { driver, ack } => self.stop(driver, ack),
+                    Ctl::Resize { driver, size, ack } => self.resize(driver, size, ack),
                     Ctl::Fired { job, at, ack } => {
                         self.fired(job, at).await;
                         let _ = ack.send(());
@@ -345,6 +352,19 @@ impl Loop {
         tokio::spawn(async move {
             let _ = ack.send(stopped.await.is_ok());
         });
+    }
+
+    /// Told to the driver's task, which owns its terminal. A driver that is not live answers no.
+    fn resize(&self, driver: DriverId, size: Size, ack: oneshot::Sender<bool>) {
+        match self.live.values().find(|l| l.driver == driver) {
+            Some(live) => {
+                // If the task is gone, the ack is dropped with the command, which reads as no.
+                let _ = live.cmds.send(Cmd::Resize(size, ack));
+            }
+            None => {
+                let _ = ack.send(false);
+            }
+        }
     }
 
     /// Ends `agent`'s warm driver and waits until its end is recorded and its process is gone.

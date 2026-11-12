@@ -158,6 +158,24 @@ pub struct TerminalSubscribed {
     pub subscription: SubscriptionId,
 }
 
+/// A viewer's pane, in character cells, for a live terminal driver's program to redraw at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResizeTerminal {
+    pub project: ProjectId,
+    pub driver: DriverId,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+impl ResizeTerminal {
+    /// The smallest size taken, columns then rows: below it neither program can draw its input
+    /// box.
+    pub const MIN: (u16, u16) = (20, 5);
+    /// The largest size taken, far beyond any screen, so a mistaken size cannot make the daemon's
+    /// emulator hold a huge grid.
+    pub const MAX: (u16, u16) = (1000, 500);
+}
+
 /// Why a daemon ended a subscription on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

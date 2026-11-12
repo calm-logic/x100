@@ -83,7 +83,7 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 
 - **v1** A native desktop window with three areas: a projects sidebar, a chat with the CEO, and a main panel.
 - **v1** With no project open, the window shows the CEO and a box to write in. There is no form: sending the
-  first message creates the project, and the main panel opens. The project shows as "New project" until the
+  first message creates the project, and the main panel opens. The project shows as "Untitled" until the
   CEO names it. A small control starts a project on a folder that already exists.
 - **v1** A message accepts attached files, added with one "+" button. Attachments show as previews in the
   chat.

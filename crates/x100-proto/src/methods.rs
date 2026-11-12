@@ -137,6 +137,14 @@ methods! {
     /// `not_found`.
     SubscribeTerminal, "terminal.subscribe", SubscribeTerminal => TerminalSubscribed, [NotFound];
 
+    /// Sets a live terminal driver's terminal to `cols` by `rows`, the cells a viewer's pane
+    /// holds, and its program redraws itself at that size. The resize is recorded among the
+    /// driver's chunks where the program's output starts to follow it, and a size the terminal
+    /// has already records nothing. It is the only thing a viewer sends a terminal. A driver with
+    /// no terminal is `not_found`, one that has ended `wrong_state`, and a size outside 20 by 5 to
+    /// 1000 by 500 `rejected`.
+    ResizeTerminal, "terminal.resize", ResizeTerminal => Done, [NotFound, WrongState, Rejected];
+
     /// The daemon's state as a one-off read, for a command that does not subscribe.
     GetDaemon, "daemon.get", GetDaemon => x100_core::fold::DaemonState, [];
 

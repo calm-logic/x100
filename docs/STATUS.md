@@ -155,25 +155,34 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   mounted until built (`REFLECTION_SERVED` in `crates/x100-app/src/team/mod.rs`). **Not run:** the gated
   real-login test and `capture-e2e.sh`, both updated to the new beginning. **Flake seen once by the subagent:**
   a Codex test in `x100d/tests/terminal.rs` reported no chunk during a turn.
+- **App follow-ups from the owner's review.** The orchestrator's run: 498 tests pass, 0 fail, 9 ignored, clippy
+  and fmt clean. The orchestrator looked at `drilldown.png` and `composer.png`.
+  - The terminal is drawn at the normal font size and never shrunk. A viewer tells the daemon its pane's size
+    in cells (`terminal.resize`) and the program redraws itself. Through the real daemon a resize reaches the
+    real `claude` and `codex` (fake provider) and is recorded among the chunks. A driver starts at 100 by 40.
+    With two viewers the last to send wins. A resize is sent once the pane's size has held for 250 ms. An ended
+    driver's screen keeps its recorded size and scrolls.
+  - Opening an agent fills the view with its output. Its head and name are small in the top-left of the row
+    that holds the Agents and Drivers switch, with the trail back. A CEO with no leads opens straight to it.
+  - One "+" button for files. Under WSL it opens a path field in place.
+  - The `executive-summary` skill, at `crates/x100-memory/skills/executive-summary/SKILL.md`, is in the CEO's
+    start pack only and governs only its messages to the builder and the summary of its report.
+  - The chat shows only what the CEO sends with `message` and its report on a builder's task. A turn's text is
+    no longer a chat message. A turn that ends with no message shows nothing in the chat.
+  - A project not yet named shows as "Untitled".
+  - **Not seen on screen:** a live terminal driver in the drilldown and a resize driven from the real window,
+    since the scripted harness is headless. Covered by tests only until the next real run.
 
 ## In progress
 
-Nothing is running at this moment. Next is the first item queued.
+Wiring the sandbox, vault and gate into the orchestrator and daemon. Opus subagent.
 
 Queued, in this order:
 
-1. **App follow-ups from the owner's review of the recording.** The terminal at the pane's size: the app
-   tells the daemon the pane's size and the program redraws itself, so text shows at the normal font size
-   (today the whole screen is shrunk to fit). One "+" icon button for adding files, replacing Attach and By
-   path (under WSL it opens a path field, since there is no file chooser). An agent's drilldown is the
-   terminal filling the view, with the agent's head and label small in the top-left of the row that holds the
-   Agents and Drivers switch. An `executive-summary` skill the CEO respects in its messages to the builder
-   only, never in its own work or the driver's output. The chat shows only what the CEO sends with `message`
-   and its report, not every text of its turn.
-2. **Wiring M10, M11 and M12** into the orchestrator and daemon, one after another, each with its
+1. **Wiring M10, M11 and M12** into the orchestrator and daemon, one after another, each with its
    end-to-end check. With the sandbox in, Claude Code drivers can run commands.
-3. **M12I, integrations with Homebox first**, then the two-part end-to-end run.
-4. M7, M9, M13, M14, M17.
+2. **M12I, integrations with Homebox and GitHub**, then the two-part end-to-end run.
+3. M7, M9, M13, M14, M17.
 
 ## Waiting on the owner
 
@@ -320,6 +329,9 @@ From how a project begins:
   projects root.
 - **`xtest.py` sends keys with `XSendEvent`**: under WSLg, keys sent through XTEST went to whatever Windows
   had in the foreground.
+- **CI after the project-start push** failed in two tests that assumed this machine: one sandbox test
+  panicked where `claude` and `codex` are not installed, and one vault test used `base64 -w0` and `od`, which
+  differ on macOS. Both fixed.
 - **CI after the three crates' push** failed on both systems for two reasons, both fixed here: the gate crate
   was committed ahead of the core change it was built against, and the sandbox's helper used a Linux-only call
   that does not build on macOS. The sandbox's tests now pass over a backend the machine lacks, and Linux CI

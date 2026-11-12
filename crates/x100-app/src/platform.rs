@@ -3,12 +3,30 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use gpui::App;
+use gpui::{App, Global};
 
 pub fn under_wsl() -> bool {
     std::env::var_os("WSL_DISTRO_NAME").is_some()
         || std::fs::read_to_string("/proc/sys/kernel/osrelease")
             .is_ok_and(|r| r.to_ascii_lowercase().contains("microsoft"))
+}
+
+/// Whether the desktop has a file chooser the app can open. Under WSL it has none: GPUI's call to
+/// open one never returns, so files are added by typing their path instead. Set once by
+/// [`crate::init`], and by a test for the desktop it stands for.
+pub struct FileChooser(pub bool);
+
+impl Global for FileChooser {}
+
+impl FileChooser {
+    /// This desktop's.
+    pub fn here() -> Self {
+        Self(!under_wsl())
+    }
+}
+
+pub fn has_file_chooser(cx: &App) -> bool {
+    cx.try_global::<FileChooser>().is_none_or(|c| c.0)
 }
 
 /// A path with a leading `~` made the home directory.

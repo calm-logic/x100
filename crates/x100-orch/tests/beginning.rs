@@ -11,12 +11,13 @@ use x100_core::agent::AgentState;
 use x100_core::driver::{DriverState, EndReason, RetireReason, StartReason};
 use x100_core::event::ProjectEvent;
 use x100_core::file::{ContentHash, FileRef};
-use x100_core::fold::ProjectState;
+use x100_core::fold::{ChatItem, ProjectState};
 use x100_core::id::FileId;
 use x100_core::inbox::InboxItem;
 use x100_core::message::Route;
 use x100_core::party::{Actor, Party};
 use x100_core::task::TaskState;
+use x100_core::transcript::Item;
 
 const SCRIPT: &str = r#"
 [harness]
@@ -29,21 +30,27 @@ cache_lifetime_secs = 604800
 efforts = ["low", "medium", "high", "max"]
 price = { input = 1.0, output = 5.0 }
 
-# A greeting tells the CEO nothing about the project, so it only answers.
+# A greeting tells the CEO nothing about the project, so it only answers. Each turn also writes
+# text of its own, as a program narrates its work: none of it reaches the chat.
 [[turn]]
 when = { start_pack_contains = "PROJECT: not set up yet", input_contains = "hi there" }
-steps = [{ text = "Hello! What would you like to build?" }]
+steps = [
+  { text = "The builder said hello. Nothing to set up yet." },
+  { call = { message = { to = "builder", body = "Hello! What would you like to build?", attachments = [], in_reply_to = "{{input:Message}}" } } },
+]
 
 [[turn]]
 when = { start_pack_contains = "PROJECT: not set up yet", input_contains = "todo app" }
 steps = [
-  { text = "A todo app: setting it up." },
+  { text = "Reading the brief and the sketch." },
+  { call = { message = { to = "builder", body = "A todo app: setting it up.", attachments = [], in_reply_to = "{{input:Message}}" } } },
   { call = { set_up_project = { name = "Todo app", intent = "A todo list in one page.", brief = "Build a todo app\nOne index.html with a list that survives a reload." } } },
 ]
 
 [[turn]]
 when = { start_pack_contains = "PROJECT: Todo app", input_contains = "A task for you" }
 steps = [
+  { text = "Writing index.html, then reporting." },
   { write = "index.html", content = "<ul id=todos></ul>\n" },
   { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "index.html is on main." } } },
 ]
@@ -190,6 +197,55 @@ async fn hello_gets_an_answer_and_no_task_then_a_brief_sets_the_project_up() {
     w.say_with(BRIEF, vec![sketch]).await;
     w.settle().await;
     assert_set_up_and_done(&w, sketch);
+
+    // The chat holds what the builder said, what the CEO sent with `message`, and its report:
+    // never the text its driver wrote along the way, which is in its transcript at full length.
+    let s = w.state();
+    let chat: Vec<String> = s
+        .chat()
+        .iter()
+        .map(|c| match &c.item {
+            ChatItem::Message(m) => {
+                let m = &s.message(*m).unwrap().message;
+                let who = if m.route == Route::BuilderToCeo {
+                    "builder"
+                } else {
+                    "CEO"
+                };
+                format!("{who}: {}", m.body)
+            }
+            ChatItem::Report { report, .. } => format!("report: {}", report.summary),
+        })
+        .collect();
+    assert_eq!(
+        chat,
+        [
+            "builder: hi there".to_owned(),
+            "CEO: Hello! What would you like to build?".to_owned(),
+            format!("builder: {BRIEF}"),
+            "CEO: A todo app: setting it up.".to_owned(),
+            "report: index.html is on main.".to_owned(),
+        ]
+    );
+    let narrated: Vec<String> = w
+        .store
+        .transcripts
+        .read(ceo, None, 1_000)
+        .unwrap()
+        .into_iter()
+        .filter_map(|(_, e)| match e.item {
+            Item::Text { text } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        narrated,
+        [
+            "The builder said hello. Nothing to set up yet.",
+            "Reading the brief and the sketch.",
+            "Writing index.html, then reporting.",
+        ]
+    );
 
     // The new driver starts from a pack with the conversation so far, its task and the project.
     let s = w.state();

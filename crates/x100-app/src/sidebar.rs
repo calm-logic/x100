@@ -1,5 +1,5 @@
 //! The projects sidebar: every project with its live indicator and agent count, a project not set
-//! up yet as "New project", and "+ New project", which opens the start of another one. That
+//! up yet as "Untitled", and "+ New project", which opens the start of another one. That
 //! project is created only when its first message is sent.
 
 use gpui::{Context, Entity, FontWeight, SharedString, Subscription, Window, div, prelude::*, px};

@@ -10,6 +10,12 @@
 //! it. Each change says which driver took over (harness, model, effort), why, and why the last
 //! one ended, so it waits until the client's state holds the new driver.
 //!
+//! A terminal driver's screen is drawn at the app's font size and never scaled. While its driver
+//! is live, the screen's pane size in cells goes to the daemon (`terminal.resize`) whenever it
+//! changes and settles, and the program redraws at that size; that is the only thing the view
+//! sends. A driver that has ended cannot redraw, so its screen stays at its recorded size, moved
+//! with the wheel where it is bigger than its pane.
+//!
 //! Output arriving redraws only the screen it lands in: each segment's terminal is a cached view
 //! of its own. GPUI runs this view's render again too, as it does for every
 //! ancestor of a changed view, but that rebuilds only the frame and reuses the cached children.
@@ -26,15 +32,15 @@ use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, DriverId, ProjectId};
 use x100_core::terminal::{Chunk, ChunkKind};
 use x100_core::transcript::{Entry, Item};
-use x100_proto::ErrorCode;
+use x100_proto::{ErrorCode, ResizeTerminal};
 
 use super::log::{self, LogWriter};
 use crate::session::{Session, SessionEvent};
-use crate::term::{Sizing, TerminalView};
+use crate::term::{PaneCells, Sizing, TerminalView};
 use crate::theme;
 
-/// Until a terminal's first chunk gives its size.
-const DEFAULT_SIZE: (usize, usize) = (120, 40);
+/// Until a terminal's first chunk gives its size: the size the daemon starts terminals at.
+const DEFAULT_SIZE: (usize, usize) = (100, 40);
 /// An earlier segment keeps this much room; the newest takes the rest.
 const EARLIER_HEIGHT: f32 = 220.;
 const NEWEST_MIN_HEIGHT: f32 = 300.;
@@ -54,6 +60,7 @@ enum Kind {
         driver: DriverId,
         state: Screen,
         _follow: Task<()>,
+        _pane: Subscription,
     },
 }
 
@@ -279,6 +286,9 @@ impl AgentOutput {
                 let (cols, rows) = DEFAULT_SIZE;
                 let view = cx.new(|cx| TerminalView::new(Sizing::Recorded, cols, rows, cx));
                 let follow = self.follow(driver, cx);
+                let pane = cx.subscribe(&view, move |this, _, cells: &PaneCells, cx| {
+                    this.pane(driver, *cells, cx)
+                });
                 self.segments.push(Segment {
                     view,
                     marker: Some(change.text().into()),
@@ -286,6 +296,7 @@ impl AgentOutput {
                         driver,
                         state: Screen::Opening(Vec::new()),
                         _follow: follow,
+                        _pane: pane,
                     },
                 });
                 self.scroll.scroll_to_bottom();
@@ -363,6 +374,27 @@ impl AgentOutput {
         })
     }
 
+    /// A screen's pane settled at a new size: a live driver's program is asked to draw at it. One
+    /// that has ended is left at the size it last drew at.
+    fn pane(&mut self, driver: DriverId, cells: PaneCells, cx: &mut Context<Self>) {
+        let live = self
+            .state(cx, |p| p.driver(driver).is_some_and(|d| d.state.is_live()))
+            .unwrap_or(false);
+        if !live {
+            return;
+        }
+        let (min, max) = (ResizeTerminal::MIN, ResizeTerminal::MAX);
+        let cols = cells.cols.clamp(min.0, max.0);
+        let rows = cells.rows.clamp(min.1, max.1);
+        let client = self.session.read(cx).client().clone();
+        let project = self.project;
+        // A refusal, the driver having ended meanwhile, leaves the screen as it last drew.
+        cx.background_spawn(async move {
+            let _ = client.resize_terminal(project, driver, cols, rows).await;
+        })
+        .detach();
+    }
+
     fn screen_mut(&mut self, driver: DriverId) -> Option<(&Entity<TerminalView>, &mut Screen)> {
         self.segments.iter_mut().find_map(|s| match &mut s.kind {
             Kind::Screen {
@@ -427,29 +459,6 @@ impl AgentOutput {
         self.log_segment(cx)
             .update(cx, |v, cx| v.feed(line.as_bytes(), cx));
     }
-
-    fn bar(&self, cx: &Context<Self>) -> impl IntoElement {
-        let agent = self.agent;
-        let role = self
-            .state(cx, |p| p.agent(agent).map(|a| a.role.clone()))
-            .flatten()
-            .unwrap_or_default();
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .px(px(10.))
-            .py(px(8.))
-            .border_b_1()
-            .border_color(theme::line())
-            .bg(gpui::rgb(0x161617))
-            .font_family(theme::MONO)
-            .text_size(px(theme::TINY))
-            .text_color(theme::muted())
-            .children((0..3).map(|_| crate::widgets::dot(9., gpui::rgb(0x3a3a3d))))
-            .child(div().ml(px(6.)).child(format!("{role} · live output")))
-    }
 }
 
 /// A terminal for a log the app writes. It has no cursor: nothing is typed there.
@@ -468,7 +477,7 @@ fn words(bytes: usize) -> String {
 }
 
 impl Render for AgentOutput {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.renders += 1;
         let last = self.segments.len().saturating_sub(1);
         let segments = self.segments.iter().enumerate().map(|(i, s)| {
@@ -506,12 +515,8 @@ impl Render for AgentOutput {
             .min_h(px(NEWEST_MIN_HEIGHT))
             .flex()
             .flex_col()
-            .rounded(px(12.))
-            .border_1()
-            .border_color(theme::line())
             .bg(gpui::rgb(crate::term::BACKGROUND))
             .overflow_hidden()
-            .child(self.bar(cx))
             .child(
                 div()
                     .id("agent-output")

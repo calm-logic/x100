@@ -12,12 +12,13 @@ use x100_core::driver::{
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessModel, ModelOffer};
-use x100_core::id::{AgentId, DriverId, InboxItemId, MessageId, TaskId};
+use x100_core::id::{AgentId, DriverId, InboxItemId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::JobEvent;
 use x100_core::party::{Actor, Party};
 use x100_core::terminal::Chunk;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
+use x100_drivers::terminal::Size;
 use x100_drivers::{Decision, DriverControl, DriverOutput, Spent, StartError, TurnEnd};
 use x100_router::Choice;
 
@@ -43,6 +44,8 @@ pub(crate) enum Cmd {
     End(RetireReason, oneshot::Sender<()>),
     /// A task it carried was accepted and its harness can compact.
     Compact,
+    /// A viewer's pane for its terminal. Answered with whether the terminal took it.
+    Resize(Size, oneshot::Sender<bool>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,8 +67,6 @@ pub(crate) struct Start {
 /// The turn in progress.
 struct Turn {
     given: Vec<InboxItemId>,
-    text: Vec<String>,
-    reply_to: Option<MessageId>,
 }
 
 struct Actor_ {
@@ -238,6 +239,9 @@ impl Actor_ {
                             return self.abort(&control, detail).await;
                         }
                     }
+                    Some(Cmd::Resize(size, ack)) => {
+                        let _ = ack.send(control.resize(size).await.is_ok());
+                    }
                     // The loop that owns this driver is gone, so nothing can use it.
                     None => {
                         self.stopped(How::Shutdown).await;
@@ -352,13 +356,11 @@ impl Actor_ {
         ready: Ready,
     ) -> Result<(), String> {
         let (agent, given, notes) = (self.agent, items.clone(), ready.notes);
-        let (text, reply_to) = self
+        let text = self
             .read(move |s| pack::turn_input(s, agent, &given, &notes))
             .await;
         self.turn = Some(Turn {
             given: items.clone(),
-            text: Vec::new(),
-            reply_to,
         });
         self.transcript(Item::TurnStarted).await;
         let (ctx, driver, refreshed) = (Arc::clone(&self.ctx), self.driver, ready.events);
@@ -377,12 +379,9 @@ impl Actor_ {
         msgs: &mpsc::UnboundedSender<Msg>,
     ) -> Result<(), String> {
         match out {
-            DriverOutput::Text(text) => {
-                if let Some(t) = &mut self.turn {
-                    t.text.push(text.clone());
-                }
-                self.transcript(Item::Text { text }).await;
-            }
+            // Recorded for its transcript and nothing else: what the CEO tells the builder it
+            // sends with `message`, so a program's running narration never reaches the chat.
+            DriverOutput::Text(text) => self.transcript(Item::Text { text }).await,
             DriverOutput::ToolCall { id, name, input } => {
                 self.transcript(Item::ToolCall {
                     call: id,
@@ -466,9 +465,8 @@ impl Actor_ {
             .map_err(|e| format!("the driver would not compact: {e}"))
     }
 
-    /// The turn completed: checkpoint the work, answer the builder if the CEO was asked, count the
-    /// items handled, and decide what follows, all in one append. A crash before it gives the
-    /// items to the next driver, so a reply can be repeated and is never lost, and none is ever
+    /// The turn completed: checkpoint the work, count the items handled, and decide what follows,
+    /// all in one append. A crash before it gives the items to the next driver, so none is ever
     /// half recorded.
     async fn finish_turn(&mut self, msgs: &mpsc::UnboundedSender<Msg>) -> Result<(), String> {
         let Some(turn) = self.turn.take() else {
@@ -486,8 +484,6 @@ impl Actor_ {
             record: self.record.clone(),
             carried: self.carried.clone(),
             given: turn.given,
-            text: turn.text,
-            reply_to: turn.reply_to,
             checkpoint: None,
             limit: (self.shared.settings)().turns_without_progress,
             scratch: self.scratch,

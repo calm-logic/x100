@@ -47,7 +47,7 @@ pub struct Composer {
     reply: Reply,
     sending: bool,
     error: Option<String>,
-    /// A field for a file's path, for desktops without a file chooser (WSL has none).
+    /// A field for a file's path, in place of the file chooser on a desktop without one.
     by_path: Option<(Entity<TextInput>, Subscription)>,
     _subscription: Subscription,
 }
@@ -99,6 +99,20 @@ impl Composer {
         }
     }
 
+    /// Whether the field for a file's path is open.
+    pub fn typing_path(&self) -> bool {
+        self.by_path.is_some()
+    }
+
+    /// "+": the platform's file chooser where there is one, or the field for a file's path.
+    pub fn add_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if crate::platform::has_file_chooser(cx) {
+            self.choose_files(cx);
+        } else {
+            self.toggle_by_path(window, cx);
+        }
+    }
+
     /// Shows or hides the field for a file's path.
     fn toggle_by_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.by_path.take().is_some() {
@@ -147,7 +161,7 @@ impl Composer {
     }
 
     /// Opens the platform's file chooser.
-    pub fn choose_files(&mut self, cx: &mut Context<Self>) {
+    fn choose_files(&mut self, cx: &mut Context<Self>) {
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -408,18 +422,6 @@ impl Render for Composer {
                     .child(self.input.clone()),
             )
             .child(attachments)
-            .when_some(self.by_path.as_ref(), |d, (field, _)| {
-                d.child(
-                    div()
-                        .debug_selector(|| "attach-path".into())
-                        .px(px(8.))
-                        .py(px(5.))
-                        .rounded(px(6.))
-                        .border_1()
-                        .border_color(theme::line())
-                        .child(field.clone()),
-                )
-            })
             .when_some(self.error.clone(), |d, e| {
                 d.child(
                     div()
@@ -432,24 +434,30 @@ impl Render for Composer {
                 div()
                     .flex()
                     .items_center()
-                    .justify_between()
+                    .gap(px(8.))
                     .child(
-                        div()
-                            .flex()
-                            .gap(px(6.))
-                            .child(
-                                widgets::button("attach", "Attach")
-                                    .debug_selector(|| "attach".into())
-                                    .on_click(cx.listener(|this, _, _, cx| this.choose_files(cx))),
-                            )
-                            .child(
-                                widgets::button("by-path", "By path")
-                                    .debug_selector(|| "attach-by-path".into())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.toggle_by_path(window, cx)
-                                    })),
+                        widgets::round_button("add-files", "+")
+                            .debug_selector(|| "add-files".into())
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.add_files(window, cx)),
                             ),
                     )
+                    // The path field opens in place, beside the button that opened it.
+                    .child(div().flex_1().min_w_0().when_some(
+                        self.by_path.as_ref(),
+                        |d, (field, _)| {
+                            d.child(
+                                div()
+                                    .debug_selector(|| "attach-path".into())
+                                    .px(px(8.))
+                                    .py(px(5.))
+                                    .rounded(px(6.))
+                                    .border_1()
+                                    .border_color(theme::line())
+                                    .child(field.clone()),
+                            )
+                        },
+                    ))
                     .child(
                         widgets::button("send", if self.sending { "Sending…" } else { "Send" })
                             .debug_selector(|| "send".into())

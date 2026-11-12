@@ -123,12 +123,12 @@ pub fn media_type(name: &str) -> &'static str {
     }
 }
 
-/// What a project is called where it is listed: its name, or "New project" until its CEO sets it
-/// up.
+/// What a project is called wherever it shows: its name, or "Untitled" until its CEO sets it up.
+/// Not "New project", which is what the control under the list says.
 pub fn project_name(p: Option<&x100_core::fold::ProjectState>) -> String {
     p.and_then(|p| p.project())
         .and_then(|p| p.name())
-        .unwrap_or("New project")
+        .unwrap_or("Untitled")
         .to_owned()
 }
 

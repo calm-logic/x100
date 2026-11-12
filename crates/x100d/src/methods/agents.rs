@@ -1,10 +1,11 @@
-use x100_orch::StopError;
+use x100_drivers::terminal::Size;
+use x100_orch::DriverError;
 use x100_proto::{
-    CancelJob, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack, ReadWaits, RpcError,
-    SetEffortRange, SetLeadBudget, StartPack, StopDriver, Waits,
+    CancelJob, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack, ReadWaits,
+    ResizeTerminal, RpcError, SetEffortRange, SetLeadBudget, StartPack, StopDriver, Waits,
 };
 
-use super::{project, refused};
+use super::{project, refused, terminal_of};
 use crate::hub::Hub;
 
 pub async fn cancel_job(hub: &Hub, p: CancelJob) -> Result<Done, RpcError> {
@@ -69,19 +70,55 @@ pub async fn stop_driver(hub: &Hub, p: StopDriver) -> Result<Done, RpcError> {
         .with_state(|s| s.driver(p.driver).map(|d| d.state.is_live()))
         .ok_or_else(|| RpcError::new(ErrorCode::NotFound, format!("no driver {}", p.driver)))?;
     if !live {
-        return Err(RpcError::new(
-            ErrorCode::WrongState,
-            "the driver has ended already",
-        ));
+        return Err(ended());
     }
     hub.orch
         .stop_driver(p.project, p.driver)
         .await
-        .map_err(|e| match e {
-            StopError::NotFound => RpcError::new(ErrorCode::NotFound, e.to_string()),
-            StopError::NotLive => RpcError::new(ErrorCode::WrongState, e.to_string()),
-        })?;
+        .map_err(driver_error)?;
     Ok(Done {})
+}
+
+/// Through the orchestrator to the driver's own task, which owns its terminal, so the resize lands
+/// in the recording between two reads of the program's output.
+pub async fn resize_terminal(hub: &Hub, p: ResizeTerminal) -> Result<Done, RpcError> {
+    let store = terminal_of(hub, p.project, p.driver)?;
+    let (min, max) = (ResizeTerminal::MIN, ResizeTerminal::MAX);
+    if !(min.0..=max.0).contains(&p.cols) || !(min.1..=max.1).contains(&p.rows) {
+        return Err(RpcError::new(
+            ErrorCode::Rejected,
+            format!(
+                "a terminal is {} by {} to {} by {} cells, not {} by {}",
+                min.0, min.1, max.0, max.1, p.cols, p.rows
+            ),
+        ));
+    }
+    let live = store
+        .log
+        .with_state(|s| s.driver(p.driver).is_some_and(|d| d.state.is_live()));
+    if !live {
+        return Err(ended());
+    }
+    let size = Size {
+        cols: p.cols,
+        rows: p.rows,
+    };
+    hub.orch
+        .resize_terminal(p.project, p.driver, size)
+        .await
+        .map_err(driver_error)?;
+    Ok(Done {})
+}
+
+fn ended() -> RpcError {
+    RpcError::new(ErrorCode::WrongState, "the driver has ended already")
+}
+
+fn driver_error(e: DriverError) -> RpcError {
+    match e {
+        DriverError::NotFound => RpcError::new(ErrorCode::NotFound, e.to_string()),
+        DriverError::NotLive => RpcError::new(ErrorCode::WrongState, e.to_string()),
+    }
 }
 
 /// Through the orchestrator, so the change is checked and appended under the project's lock, and

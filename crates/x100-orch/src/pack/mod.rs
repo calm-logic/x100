@@ -4,8 +4,9 @@
 //! own memory of the work, so a fresh task, a wake after a long wait and a new driver after a
 //! failure all start the same way and differ only in what the records hold. A guide to the agent's
 //! position and to what its driver may do comes first, since nothing else tells a model how x100
-//! works; the sections after it follow ARCHITECTURE "What lives outside a driver". Memories, skills
-//! and running processes arrive with later milestones and have no section yet.
+//! works; the sections after it follow ARCHITECTURE "What lives outside a driver". Skills have a
+//! section, which until M13 holds only the CEO's one built-in skill. Memories and running processes
+//! arrive with later milestones and have no section yet.
 //!
 //! The pack takes at most the daemon's set share of the model's context window. The transcript's
 //! older part is what gets cut, which is why the progress note matters.
@@ -96,6 +97,19 @@ pub(crate) fn build(
     pack
 }
 
+/// The skills an agent holds, each its whole `SKILL.md`. Until M13 serves skills from their
+/// repositories, the CEO holds one, built in, and nobody else holds any.
+fn skills(position: guide::Position) -> &'static [&'static str] {
+    match position {
+        guide::Position::Ceo => &[EXECUTIVE_SUMMARY],
+        guide::Position::Lead | guide::Position::Worker => &[],
+    }
+}
+
+/// How the CEO writes to the builder.
+const EXECUTIVE_SUMMARY: &str =
+    include_str!("../../../x100-memory/skills/executive-summary/SKILL.md");
+
 /// Everything but the calls, the diff and the transcript.
 fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
     let Some(a) = state.agent(agent) else {
@@ -151,6 +165,9 @@ fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
             );
         }
         let _ = write!(p, "\nCHARTER:\n{}\n", a.charter);
+        for skill in skills(position) {
+            let _ = write!(p, "\nSKILL (follow it where it says it applies):\n{skill}");
+        }
         let children = state.children(agent);
         if !children.is_empty() {
             p.push_str("\nYOUR AGENTS (delegate to them, or start new workers):\n");

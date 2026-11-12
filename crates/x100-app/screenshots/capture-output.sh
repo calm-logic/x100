@@ -6,7 +6,9 @@
 #
 # Captures Research's view, then the same view after an hour on the fake clock (a new driver
 # carries on), Migrations' view three levels down, and real `claude` and `codex` recordings
-# replayed into the widget at full size and in a small window.
+# replayed into the widget: in a window that holds the recorded screen, and in a small one, where
+# it is drawn at the same size, never shrunk, cut off and showing its bottom, as an ended
+# driver's screen is.
 #
 # Usage: capture-output.sh [OUT_DIR]   (default: this directory)
 set -euo pipefail
@@ -66,16 +68,17 @@ PY
 drive click 785 470 sleep 0.5 type "Launch Fernleaf" key shift+Return \
   type "A landing page for Fernleaf, a plant shop, with a waitlist." sleep 0.5 key Return sleep 6
 
-# Leads are listed Marketing, Product, Tech. Product runs Research.
-drive click 999 592 sleep 1 click 999 331 sleep 2
+# Leads are listed Marketing, Product, Tech. Product runs Research, listed under the top row of
+# Product's drilldown.
+drive click 999 622 sleep 1 click 999 156 sleep 2
 shot "$id" research
 # An hour on, Research's job wakes it on a new driver.
 clock_to $((1794387600000 + 3600000))
 sleep 4
 shot "$id" research-handoff
 
-# Back to the CEO, then Tech, Backend and Migrations.
-drive click 635 79 sleep 1 click 999 664 sleep 1 click 999 331 sleep 1 click 999 331 sleep 2
+# Back to the CEO, in Research's trail, then Tech, Backend and Migrations.
+drive click 750 76 sleep 1 click 999 694 sleep 1 click 999 156 sleep 1 click 999 156 sleep 2
 shot "$id" migrations
 
 grep -m1 "Selected GPU adapter" "$work/app.log" || true
@@ -98,4 +101,4 @@ replay_shot() {
 head -26 "$data/claude.timing" >"$work/claude.timing"
 replay_shot claude "$work/claude.timing" replay-claude 1000 700
 replay_shot codex "$data/codex.timing" replay-codex 1000 700
-replay_shot claude "$work/claude.timing" replay-scaled 560 340
+replay_shot claude "$work/claude.timing" replay-small 560 340

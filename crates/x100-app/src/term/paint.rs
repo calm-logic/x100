@@ -281,7 +281,10 @@ pub fn build_row<T>(
 /// Everything a frame paints, worked out before painting.
 pub struct Frame {
     pub origin: gpui::Point<Pixels>,
+    /// The whole pane, filled with the background.
     pub clip: Bounds<Pixels>,
+    /// The part of it inside the padding, which cells are drawn in.
+    pub content: Bounds<Pixels>,
     pub metrics: Metrics,
     pub rows: Vec<Rc<RowPaint>>,
     pub background: Hsla,
@@ -376,92 +379,100 @@ pub fn paint(frame: &Frame, window: &mut Window) {
     };
     window.with_content_mask(Some(gpui::ContentMask { bounds: frame.clip }), |window| {
         window.paint_quad(fill(frame.clip, frame.background));
-        for (i, row) in frame.rows.iter().enumerate() {
-            for (span, color) in &row.backgrounds {
-                window.paint_quad(fill(
-                    cell(i, usize::from(span.col), usize::from(span.len)),
-                    *color,
-                ));
-            }
-        }
-        for (row, span) in &frame.selected {
-            window.paint_quad(fill(
-                cell(*row, span.from, span.to - span.from + 1),
-                SELECTION,
-            ));
-        }
-        let block = frame
-            .cursor
-            .filter(|c| c.shape == CursorShape::Block)
-            .map(|c| (c.row, c.col));
-        if let Some(c) = frame.cursor.filter(|c| c.shape == CursorShape::Block) {
-            window.paint_quad(fill(
-                cell(c.row, c.col, if c.wide { 2 } else { 1 }),
-                c.color,
-            ));
-        }
-        for (i, row) in frame.rows.iter().enumerate() {
-            let top = frame.origin.y + m.line_height * i as f32;
-            for g in &row.glyphs {
-                let col = usize::from(g.col);
-                // A glyph under the block cursor is drawn in the background's colour.
-                let color = if block == Some((i, col)) {
-                    frame.background
-                } else {
-                    g.color
-                };
-                let at = point(
-                    frame.origin.x + m.cell_width * col as f32 + g.dx,
-                    top + m.baseline,
-                );
-                let _ = if g.glyph.emoji {
-                    window.paint_emoji(at, g.glyph.font, g.glyph.id, m.font_size)
-                } else {
-                    window.paint_glyph(at, g.glyph.font, g.glyph.id, m.font_size, color)
-                };
-            }
-            let thin = px(1.).max((m.font_size / 14.).round());
-            for (span, color, stroke) in &row.strokes {
-                let b = cell(i, usize::from(span.col), usize::from(span.len));
-                let ys: &[Pixels] = match stroke {
-                    Stroke::Under => &[m.baseline + thin],
-                    Stroke::DoubleUnder => &[m.baseline + thin, m.baseline + thin * 3.],
-                    Stroke::Strike => &[(m.line_height / 2.).round()],
-                };
-                for y in ys {
+    });
+    // A grid moved within a pane smaller than it shows only inside the padding.
+    window.with_content_mask(
+        Some(gpui::ContentMask {
+            bounds: frame.content,
+        }),
+        |window| {
+            for (i, row) in frame.rows.iter().enumerate() {
+                for (span, color) in &row.backgrounds {
                     window.paint_quad(fill(
-                        Bounds {
-                            origin: point(b.origin.x, b.origin.y + *y),
-                            size: size(b.size.width, thin),
-                        },
+                        cell(i, usize::from(span.col), usize::from(span.len)),
                         *color,
                     ));
                 }
             }
-        }
-        if let Some(c) = frame.cursor {
-            let b = cell(c.row, c.col, if c.wide { 2 } else { 1 });
-            let thin = px(1.).max((m.font_size / 8.).round());
-            match c.shape {
-                CursorShape::Beam => window.paint_quad(fill(
-                    Bounds {
-                        origin: b.origin,
-                        size: size(thin, b.size.height),
-                    },
-                    c.color,
-                )),
-                CursorShape::Underline => window.paint_quad(fill(
-                    Bounds {
-                        origin: point(b.origin.x, b.origin.y + b.size.height - thin),
-                        size: size(b.size.width, thin),
-                    },
-                    c.color,
-                )),
-                CursorShape::HollowBlock => {
-                    window.paint_quad(gpui::outline(b, c.color, gpui::BorderStyle::Solid))
-                }
-                CursorShape::Block | CursorShape::Hidden => {}
+            for (row, span) in &frame.selected {
+                window.paint_quad(fill(
+                    cell(*row, span.from, span.to - span.from + 1),
+                    SELECTION,
+                ));
             }
-        }
-    });
+            let block = frame
+                .cursor
+                .filter(|c| c.shape == CursorShape::Block)
+                .map(|c| (c.row, c.col));
+            if let Some(c) = frame.cursor.filter(|c| c.shape == CursorShape::Block) {
+                window.paint_quad(fill(
+                    cell(c.row, c.col, if c.wide { 2 } else { 1 }),
+                    c.color,
+                ));
+            }
+            for (i, row) in frame.rows.iter().enumerate() {
+                let top = frame.origin.y + m.line_height * i as f32;
+                for g in &row.glyphs {
+                    let col = usize::from(g.col);
+                    // A glyph under the block cursor is drawn in the background's colour.
+                    let color = if block == Some((i, col)) {
+                        frame.background
+                    } else {
+                        g.color
+                    };
+                    let at = point(
+                        frame.origin.x + m.cell_width * col as f32 + g.dx,
+                        top + m.baseline,
+                    );
+                    let _ = if g.glyph.emoji {
+                        window.paint_emoji(at, g.glyph.font, g.glyph.id, m.font_size)
+                    } else {
+                        window.paint_glyph(at, g.glyph.font, g.glyph.id, m.font_size, color)
+                    };
+                }
+                let thin = px(1.).max((m.font_size / 14.).round());
+                for (span, color, stroke) in &row.strokes {
+                    let b = cell(i, usize::from(span.col), usize::from(span.len));
+                    let ys: &[Pixels] = match stroke {
+                        Stroke::Under => &[m.baseline + thin],
+                        Stroke::DoubleUnder => &[m.baseline + thin, m.baseline + thin * 3.],
+                        Stroke::Strike => &[(m.line_height / 2.).round()],
+                    };
+                    for y in ys {
+                        window.paint_quad(fill(
+                            Bounds {
+                                origin: point(b.origin.x, b.origin.y + *y),
+                                size: size(b.size.width, thin),
+                            },
+                            *color,
+                        ));
+                    }
+                }
+            }
+            if let Some(c) = frame.cursor {
+                let b = cell(c.row, c.col, if c.wide { 2 } else { 1 });
+                let thin = px(1.).max((m.font_size / 8.).round());
+                match c.shape {
+                    CursorShape::Beam => window.paint_quad(fill(
+                        Bounds {
+                            origin: b.origin,
+                            size: size(thin, b.size.height),
+                        },
+                        c.color,
+                    )),
+                    CursorShape::Underline => window.paint_quad(fill(
+                        Bounds {
+                            origin: point(b.origin.x, b.origin.y + b.size.height - thin),
+                            size: size(b.size.width, thin),
+                        },
+                        c.color,
+                    )),
+                    CursorShape::HollowBlock => {
+                        window.paint_quad(gpui::outline(b, c.color, gpui::BorderStyle::Solid))
+                    }
+                    CursorShape::Block | CursorShape::Hidden => {}
+                }
+            }
+        },
+    );
 }

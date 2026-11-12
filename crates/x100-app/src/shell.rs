@@ -93,7 +93,7 @@ impl Shell {
             .unwrap_or(false)
     }
 
-    /// "x100" with the selected project's name, or "New project" until its CEO names it.
+    /// "x100" with the selected project's name, or "Untitled" until its CEO names it.
     fn title_of(&self, cx: &Context<Self>) -> String {
         let session = self.session.read(cx);
         match session.selected() {

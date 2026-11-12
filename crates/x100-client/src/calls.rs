@@ -5,13 +5,14 @@ use x100_core::action::Decision;
 use x100_core::credential::CredentialScope;
 use x100_core::effort::EffortRange;
 use x100_core::event::{Envelope, ProjectEvent, Seq};
-use x100_core::id::{ActionId, AgentId, CredentialRef, FileId, ProjectId, TaskId};
+use x100_core::id::{ActionId, AgentId, CredentialRef, DriverId, FileId, ProjectId, TaskId};
 use x100_core::money::Money;
 use x100_core::project::SettingChange;
 use x100_proto::{
     AddCredential, ChangeProjectSetting, DecideAction, ListMemories, ListSkills, ListTrials, LogId,
     LogPage, Memories, Page, RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject,
-    ReplaceCredential, ScopeCredential, Secret, SetEffortRange, SetLeadBudget, Skills, Trials,
+    ReplaceCredential, ResizeTerminal, ScopeCredential, Secret, SetEffortRange, SetLeadBudget,
+    Skills, Trials,
 };
 
 use crate::{Client, ClientError};
@@ -26,6 +27,25 @@ impl Client {
         self.request(RenameProject {
             project,
             name: name.into(),
+        })
+        .await
+        .map(drop)
+    }
+
+    /// Tells a live terminal driver how many cells the viewer's pane holds, so its program redraws
+    /// at that size.
+    pub async fn resize_terminal(
+        &self,
+        project: ProjectId,
+        driver: DriverId,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), ClientError> {
+        self.request(ResizeTerminal {
+            project,
+            driver,
+            cols,
+            rows,
         })
         .await
         .map(drop)

@@ -21,9 +21,10 @@ use x100_core::id::{AgentId, DriverId, ProjectId, TaskId};
 use x100_core::message::Route;
 use x100_core::spec::SpecKind;
 use x100_core::task::{Outcome, TaskState};
-use x100_core::terminal::ChunkKind;
-use x100_drivers::terminal::Emulator;
+use x100_core::terminal::{Chunk, ChunkKind, TermPos};
+use x100_drivers::terminal::{Emulator, Size};
 use x100_drivers::testing::Reply;
+use x100_proto::ErrorCode;
 
 const BRD: &str = "# A todo app\n\nAdd, tick off and remove todos in the browser.\n";
 
@@ -45,30 +46,47 @@ fn set_up_arguments() -> serde_json::Value {
     })
 }
 
-/// "hi" to a new project, answered by the CEO on a driver in the scratch directory. Then the
-/// brief: on the same driver the model calls `set_up_project` with `set_up`, the turn ends and
-/// that driver retires, and the task's replies are queued once its id is known, which is seconds
-/// before a new driver starts in the worktree. That driver is followed by one client from its
-/// start. Once the task is done a second client subscribes, late, and a message from the builder
-/// gives the driver a second turn, which the late client follows live. Checks what every terminal
-/// driver must show.
-async fn run_brief(r: &Real, set_up: Reply, replies: impl FnOnce(TaskId) -> Vec<Reply>) -> Ran {
+/// What the CEO's model answers "hi" with: the greeting sent with `message`, since the text of a
+/// turn does not reach the builder, then a closing line of text that does not either.
+const HELLO: &str = "Hello! What would you like to build?";
+
+/// "hi" to a new project, answered by the CEO on a driver in the scratch directory with the
+/// replies of `greet`. Then the brief: on the same driver the model calls `set_up_project` with
+/// `set_up`, the turn ends and that driver retires, and the task's replies are queued once its id
+/// is known, which is seconds before a new driver starts in the worktree. That driver is followed
+/// by one client from its start. Once the task is done a second client subscribes, late, and a
+/// message from the builder gives the driver a second turn, which the late client follows live.
+/// Last, a viewer's pane sets the terminal's size. Checks what every terminal driver must show.
+async fn run_brief(
+    r: &Real,
+    greet: Vec<Reply>,
+    set_up: Reply,
+    replies: impl FnOnce(TaskId) -> Vec<Reply>,
+) -> Ran {
     let project = r.project().await;
     r.client
         .send_chat(project, "hi", vec![], None)
         .await
         .unwrap();
     let ceo = r.ceo_waits_for_a_driver().await;
-    r.provider
-        .reply(Reply::Text("Hello! What would you like to build?".into()));
+    for reply in greet {
+        r.provider.reply(reply);
+    }
     r.allow(project).await;
     r.until("the CEO says hello and goes idle", |p| {
         let replied = p
             .messages()
-            .any(|m| m.message.route == Route::CeoToBuilder && m.message.body.contains("Hello!"));
+            .any(|m| m.message.route == Route::CeoToBuilder && m.message.body == HELLO);
         (replied && p.agent(ceo)?.state == AgentState::Idle).then_some(())
     })
     .await;
+    let s = r.client.project(project).unwrap();
+    let said: Vec<_> = s
+        .messages()
+        .filter(|m| m.message.route == Route::CeoToBuilder)
+        .map(|m| m.message.body.clone())
+        .collect();
+    assert_eq!(said, [HELLO], "only the message reached the builder");
     let s = r.client.project(project).unwrap();
     assert_eq!(s.tasks().count(), 0, "a greeting opens no task");
     assert_eq!(s.project().unwrap().name(), None);
@@ -223,11 +241,90 @@ async fn run_brief(r: &Real, set_up: Reply, replies: impl FnOnce(TaskId) -> Vec<
             .any(|(p, _, got)| p.0 > 1 && turns.iter().any(|(from, to)| got >= from && got < to))
     };
     assert!(during(&first), "no chunk arrived during a turn");
+
+    resize_from_a_viewer(r, project, driver, scratch).await;
     Ran {
         project,
         ceo,
         driver,
     }
+}
+
+/// A viewer's pane, 90 by 30 cells, set on the live driver: the size is recorded among its chunks
+/// and the program redraws itself after it. The same size again records nothing; a size out of
+/// range and an ended driver are refused.
+async fn resize_from_a_viewer(r: &Real, project: ProjectId, driver: DriverId, ended: DriverId) {
+    let resizes = |chunks: &[(TermPos, Chunk)]| -> Vec<(u16, u16)> {
+        chunks
+            .iter()
+            .filter_map(|(_, c)| match c.what {
+                ChunkKind::Resize { cols, rows } => Some((cols, rows)),
+                ChunkKind::Output { .. } => None,
+            })
+            .collect()
+    };
+    let before = read_all(&r.client, project, driver).await;
+    assert_eq!(
+        resizes(&before),
+        [(100, 40)],
+        "it started at the default size"
+    );
+    r.client
+        .resize_terminal(project, driver, 90, 30)
+        .await
+        .expect("a live driver takes a viewer's size");
+    let until = std::time::Instant::now() + PATIENCE;
+    let after = loop {
+        let chunks = read_all(&r.client, project, driver).await;
+        let at = chunks
+            .iter()
+            .position(|(_, c)| c.what == ChunkKind::Resize { cols: 90, rows: 30 });
+        let redrawn = at.is_some_and(|at| {
+            chunks[at + 1..]
+                .iter()
+                .any(|(_, c)| matches!(c.what, ChunkKind::Output { .. }))
+        });
+        if redrawn {
+            break chunks;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "the program did not redraw after the resize: {:?}",
+            resizes(&chunks)
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    };
+    assert_eq!(resizes(&after), [(100, 40), (90, 30)]);
+    let screen = Emulator::replay(after.iter().map(|(_, c)| c)).unwrap();
+    assert_eq!(screen.size(), Size { cols: 90, rows: 30 });
+    assert!(
+        !screen.text().trim().is_empty(),
+        "it redrew at the new size"
+    );
+    for line in screen.text().lines() {
+        assert!(line.chars().count() <= 90, "{line:?}");
+    }
+
+    r.client
+        .resize_terminal(project, driver, 90, 30)
+        .await
+        .expect("the same size again is taken");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let again = read_all(&r.client, project, driver).await;
+    assert_eq!(
+        resizes(&again),
+        [(100, 40), (90, 30)],
+        "and records nothing"
+    );
+
+    let refused = |e: x100_client::ClientError| match e {
+        x100_client::ClientError::Rpc(e) => e.code,
+        other => panic!("{other}"),
+    };
+    let tiny = r.client.resize_terminal(project, driver, 4, 2).await;
+    assert_eq!(tiny.map_err(refused), Err(ErrorCode::Rejected));
+    let gone = r.client.resize_terminal(project, ended, 90, 30).await;
+    assert_eq!(gone.map_err(refused), Err(ErrorCode::WrongState));
 }
 
 /// The driver's processes, as the daemon wrote them down.
@@ -270,7 +367,14 @@ async fn a_brief_runs_on_claude_codes_terminal_and_is_followed_live() {
             name: "mcp__x100__set_up_project".into(),
             input: set_up_arguments(),
         };
-        run_brief(&r, set_up, move |task| {
+        let greet = vec![
+            Reply::Tool {
+                name: "mcp__x100__message".into(),
+                input: json!({ "to": "builder", "body": HELLO, "attachments": [] }),
+            },
+            Reply::Text("Said hello.".into()),
+        ];
+        run_brief(&r, greet, set_up, move |task| {
             vec![
                 // A command is put to the daemon, which refuses it: nothing runs.
                 Reply::Tool {
@@ -331,6 +435,16 @@ fn exec(code: String) -> Reply {
     }
 }
 
+fn codex_greet() -> Vec<Reply> {
+    let message = json!({ "to": "builder", "body": HELLO, "attachments": [] });
+    vec![
+        exec(format!(
+            "const r = await tools.mcp__x100__message({message}); text(JSON.stringify(r));"
+        )),
+        Reply::Text("Said hello.".into()),
+    ]
+}
+
 fn codex_set_up() -> Reply {
     let arguments = set_up_arguments();
     exec(format!(
@@ -361,7 +475,7 @@ async fn a_brief_runs_on_codexs_terminal_and_is_followed_live() {
     let Some(r) = Real::start(Program::Codex).await else {
         return;
     };
-    let ran = run_brief(&r, codex_set_up(), codex_replies).await;
+    let ran = run_brief(&r, codex_greet(), codex_set_up(), codex_replies).await;
     let worktree = x100_store::Git::new(r.projects_root().join(NAME.1)).worktree_path(ran.ceo);
     assert_eq!(
         std::fs::read_to_string(worktree.join("todo.md")).unwrap(),
@@ -391,7 +505,7 @@ async fn a_codex_terminal_driver_left_by_a_killed_daemon_is_gone_after_a_restart
     let Some(mut r) = Real::start(Program::Codex).await else {
         return;
     };
-    let ran = run_brief(&r, codex_set_up(), codex_replies).await;
+    let ran = run_brief(&r, codex_greet(), codex_set_up(), codex_replies).await;
     let pids = pids_of(&r, ran.driver);
     assert_eq!(pids.len(), 2, "{pids:?}");
     r.daemon.kill9();

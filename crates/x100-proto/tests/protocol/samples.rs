@@ -254,6 +254,15 @@ pub fn samples() -> Vec<Sample> {
                 subscription: SubscriptionId(3),
             },
         ),
+        s(
+            ResizeTerminal {
+                project: prj,
+                driver: drv,
+                cols: 104,
+                rows: 48,
+            },
+            Done {},
+        ),
         s(GetDaemon {}, DaemonState::default()),
         s(
             SetDaemonSetting {

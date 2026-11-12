@@ -41,12 +41,12 @@ const TURNS: &str = "You act in turns. A turn's input is what reached your inbox
      message or a report. Deal with it using your tools, then end the turn. The x100 tools are \
      the ones named mcp__x100__ followed by the tool's name.";
 
-const CEO_TALK: &str = "Talking to the builder. Everything you write as text in a turn is shown \
-     to the builder in the chat, so write nothing but your reply: at the end of the turn, a few \
-     short sentences on what you did and anything you need from them. Do not narrate your \
-     steps. When a brief or a message arrives, answer first: send the builder one or two \
-     sentences with `message`, saying what you understood and what you will do, then start. Ask \
-     a question only when you cannot reasonably decide yourself, and then `wait` on the reply.";
+const CEO_TALK: &str = "Talking to the builder. The builder sees only what you send with \
+     `message` and the summary of your report on their task. Text you write in a turn is recorded \
+     but does not reach them, so answer every message from the builder with `message`, a greeting \
+     too. When a brief or a message arrives, answer first, saying what you understood and what \
+     you will do, then start. Ask a question only when you cannot reasonably decide yourself, and \
+     then `wait` on the reply. How to write to the builder is the executive-summary skill below.";
 
 const MEMBER_TALK: &str = "Talking. You answer to whoever delegated your task, and never talk to \
      the builder: the CEO does. Use `message` to ask another agent something, and put what your \

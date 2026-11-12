@@ -47,14 +47,18 @@ printf '# Notes\nForest greens, maybe.\n' >"$work/notes.md"
 
 # No project: the window opens on the CEO and the box for the first message, with no form.
 shot new-project
-# "hi" creates the project, listed as "New project" until its CEO names it; the CEO only answers.
+# "hi" creates the project, listed as "Untitled" until its CEO names it; the CEO only answers,
+# and with no leads the Team tab is its drilldown.
 drive click 785 470 sleep 0.5 type "hi" key Return sleep 5
 shot new-project-hi
 
-# The brief, in the chat's box, with both files attached by path (WSL has no file chooser portal).
-drive click 300 858 sleep 0.5 type "$work/sketch.png" key Return sleep 1.5
-drive click 300 858 sleep 0.5 type "$work/notes.md" key Return sleep 1.5
-drive click 380 759 type "Launch Fernleaf" key shift+Return \
+# The brief, in the chat's box, with both files added through "+". WSL has no file chooser portal,
+# so "+" opens a field for a path in its place, and Enter adds the file and closes it.
+drive click 211 858 sleep 0.5 type "$work/sketch.png" key Return sleep 1.5
+drive click 211 858 sleep 0.5 type "$work/notes.md" key Return sleep 1.5
+drive click 211 858 sleep 0.7
+shot composer
+drive click 211 858 sleep 0.5 click 380 759 type "Launch Fernleaf" key shift+Return \
   type "A landing page for Fernleaf, a plant shop, with a waitlist." sleep 0.5
 shot brief
 # The CEO sets the project up as Fernleaf, and its team forms.
@@ -62,17 +66,21 @@ drive key Return sleep 6
 shot named
 shot team
 
-# Opening agents, down to one that runs none. Leads are listed Marketing, Product, Tech, under the
-# switch between an agent's agents and its own output.
-drive click 999 692 sleep 1
+# Opening agents, down to one that runs none. Leads are listed Marketing, Product, Tech. An opened
+# agent is a drilldown: its head and name in the top row's corner, with the switch between its
+# agents and its own output beside the listing's.
+drive click 999 694 sleep 1
 shot agent
-drive click 999 383 sleep 0.7 click 999 383 sleep 1
+drive click 1205 76 sleep 1.5
+shot drilldown
+drive click 1132 76 sleep 1 click 999 156 sleep 1 click 999 156 sleep 1.5
 shot output
-drive click 635 79 sleep 0.7 click 1349 80 sleep 1
+# The CEO in Migrations' trail, then the drivers.
+drive click 752 76 sleep 0.7 click 1349 76 sleep 1
 shot drivers
 
 # The builder answers the CEO's question; Marketing gets its first task.
-drive click 1287 80 sleep 0.5 click 380 815 type "Forest greens." key Return sleep 6
+drive click 1287 76 sleep 0.5 click 380 815 type "Forest greens." key Return sleep 6
 shot answered
 
 # The other tabs, left to right. A tab's centre is where its label is on the 1400x900 window.

@@ -138,10 +138,19 @@ impl Models {
         }
     }
 
-    /// What the fake model says to "hi" in a project that is not set up: hello, and nothing else.
+    /// What the fake model says to "hi" in a project that is not set up: hello, sent with
+    /// `message` as the guide tells it, since the text of its turn does not reach the builder.
     fn greet(&self) {
         if let Models::Fake { provider, .. } = self {
-            provider.reply(Reply::Text("Hello! What would you like to build?".into()));
+            provider.reply(Reply::Tool {
+                name: "mcp__x100__message".into(),
+                input: json!({
+                    "to": "builder",
+                    "body": "Hello! What would you like to build?",
+                    "attachments": [],
+                }),
+            });
+            provider.reply(Reply::Text("Said hello.".into()));
         }
     }
 
