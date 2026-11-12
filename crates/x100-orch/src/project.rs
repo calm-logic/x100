@@ -2,27 +2,34 @@
 //! its waiting inbox items go to its warm driver or need a new one. It is the only place that
 //! decides, so a driver is never given two turns at once and an agent never has two drivers.
 //!
+//! Every turn is put to the router first, a further turn on a warm driver included, so a budget
+//! that is reached stops the next turn and a warm driver that no longer fits gives way. Between
+//! turns the router also says whether a warm driver is kept, compacted or ended. An agent no
+//! driver fits waits for one until something that could help happens: a setting, a range, a
+//! budget, a cool-off ending, room freeing on the machine.
+//!
 //! It also takes what the job clock fires, ends a warm driver when its warm period is over, and
 //! gives a task up for its agent when its drivers fail three times in a row.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use x100_core::agent::{AgentEvent, AgentState};
-use x100_core::driver::{FAILURES_BEFORE_GIVING_UP, Failure, Incompatible};
+use x100_core::driver::{FAILURES_BEFORE_GIVING_UP, Failure, RetireReason};
 use x100_core::event::ProjectEvent;
-use x100_core::id::{AgentId, DriverId, InboxItemId};
+use x100_core::id::{AgentId, DriverId, InboxItemId, TaskId};
 use x100_core::job::{Job, ProjectJob, ProjectRoutine};
 use x100_core::party::Actor;
-use x100_core::task::TaskFailure;
+use x100_core::task::{TaskEvent, TaskFailure, Verdict};
 use x100_core::time::Timestamp;
+use x100_router::{EndWhy, Upkeep, Warm};
 
 use crate::Shared;
 use crate::ctx::ProjectCtx;
 use crate::driver::{self, Cmd, How, Start};
-use crate::ids::new_id;
+use crate::route::{self, Planned};
 use crate::store::blocking;
 use crate::{jobs, settle, tools};
 
@@ -44,9 +51,15 @@ pub(crate) enum Ctl {
 pub(crate) enum Msg {
     TurnEnded {
         agent: AgentId,
+        driver: DriverId,
+        /// The router ended the driver with this turn.
+        last: bool,
     },
+    /// A compaction finished and the driver is warm again.
+    Compacted { agent: AgentId, driver: DriverId },
     Exited {
         agent: AgentId,
+        driver: DriverId,
         failure: Option<Failure>,
     },
 }
@@ -54,26 +67,52 @@ pub(crate) enum Msg {
 struct Live {
     driver: DriverId,
     cmds: mpsc::UnboundedSender<Cmd>,
-    /// A turn is running or about to start.
+    /// A turn or a compaction is running or about to start.
     busy: bool,
+    /// Every task it has had a turn on.
+    carried: BTreeSet<TaskId>,
+    /// A task it carried was accepted since it last compacted.
+    accepted: bool,
+}
+
+impl Live {
+    fn warm(&self) -> Warm {
+        Warm {
+            driver: self.driver,
+            carried: self.carried.clone(),
+            accepted: self.accepted,
+        }
+    }
 }
 
 struct Loop {
     shared: Arc<Shared>,
     ctx: Arc<ProjectCtx>,
     live: HashMap<AgentId, Live>,
-    /// Agents that no driver fits, or whose task was given up after its drivers failed, until
-    /// something new reaches them. It keeps a driver that fails at once from being started again
-    /// without end.
-    blocked: HashSet<AgentId>,
+    /// Agents no driver fits, until something that could help happens or something new reaches
+    /// them.
+    no_driver: HashSet<AgentId>,
+    /// Agents whose task was given up, after its drivers failed or its wait for a driver ran out,
+    /// until something new reaches them. It keeps a driver that fails at once from being started
+    /// again without end.
+    gave_up: HashSet<AgentId>,
     /// Each agent's driver failures since its last completed turn.
     failures: HashMap<AgentId, Vec<Failure>>,
     /// Where in the log each inbox item arrived, so items go out in the order they came.
     arrived: HashMap<InboxItemId, u64>,
+    /// A change to the project's settings or team since warm drivers were last put to the router.
+    /// A driver is put to it as its turn ends, in the same append, and otherwise only after such
+    /// a change, so what the orchestrator does stays tied to what the log shows.
+    tidy: bool,
+    /// Tasks an agent accepted whose merge has not finished. The builder's tasks are accepted as
+    /// the CEO reports them, so the CEO's driver is not compacted for those.
+    reviewed: HashSet<TaskId>,
     msgs: mpsc::UnboundedSender<Msg>,
     /// Every driver's task, the ended ones until they are reaped. A task still runs its last
     /// lines after its driver has ended, so shutdown waits on these, not on the drivers.
     drivers: JoinSet<()>,
+    /// Room freed on the machine, or a change in the daemon's log that could help.
+    changes: watch::Receiver<u64>,
 }
 
 pub(crate) fn spawn(
@@ -83,17 +122,41 @@ pub(crate) fn spawn(
     let (_, events) = ctx.store.log.snapshot_and_follow();
     let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
     let (msgs, msgs_rx) = mpsc::unbounded_channel();
+    let changes = shared.fleet.watch();
     let lp = Loop {
         shared,
         ctx,
         live: HashMap::new(),
-        blocked: HashSet::new(),
+        no_driver: HashSet::new(),
+        gave_up: HashSet::new(),
         failures: HashMap::new(),
         arrived: HashMap::new(),
+        reviewed: HashSet::new(),
+        tidy: false,
         msgs,
         drivers: JoinSet::new(),
+        changes,
     };
     (ctl_tx, tokio::spawn(lp.run(events, ctl_rx, msgs_rx)))
+}
+
+/// Whether `event` could let an agent waiting for a driver find one.
+fn could_help(event: &ProjectEvent) -> bool {
+    match event {
+        ProjectEvent::SettingChanged(_) => true,
+        ProjectEvent::Agent { event, .. } => matches!(
+            event,
+            AgentEvent::EffortSet(_)
+                | AgentEvent::BudgetSet(_)
+                | AgentEvent::Promoted { .. }
+                | AgentEvent::Moved { .. }
+        ),
+        ProjectEvent::Task {
+            event: TaskEvent::EffortChanged(_),
+            ..
+        } => true,
+        _ => false,
+    }
 }
 
 impl Loop {
@@ -110,20 +173,48 @@ impl Loop {
             tokio::select! {
                 event = events.recv() => {
                     let Some(event) = event else { return };
-                    if let ProjectEvent::Agent { agent, event: AgentEvent::Delivered { item, .. } } = event.event {
-                        self.arrived.insert(item, event.seq.0);
-                        self.blocked.remove(&agent);
+                    match &event.event {
+                        ProjectEvent::Agent { agent, event: AgentEvent::Delivered { item, .. } } => {
+                            self.arrived.insert(*item, event.seq.0);
+                            self.no_driver.remove(agent);
+                            self.gave_up.remove(agent);
+                        }
+                        ProjectEvent::Task { task, event: TaskEvent::Reviewed(Verdict::Accept) }
+                            if matches!(event.by, Actor::Agent(_)) =>
+                        {
+                            self.reviewed.insert(*task);
+                        }
+                        ProjectEvent::Task { task, event: TaskEvent::Merged { .. } } => {
+                            if self.reviewed.remove(task) {
+                                self.accepted(*task);
+                            }
+                        }
+                        other if could_help(other) => {
+                            self.no_driver.clear();
+                            self.tidy = true;
+                        }
+                        _ => {}
                     }
                 }
+                Ok(()) = self.changes.changed() => self.no_driver.clear(),
                 Some(msg) = msgs.recv() => match msg {
-                    Msg::TurnEnded { agent } => {
+                    Msg::TurnEnded { agent, driver, last } => {
                         self.failures.remove(&agent);
-                        if let Some(l) = self.live.get_mut(&agent) {
-                            l.busy = false;
+                        if last && self.live.get(&agent).is_some_and(|l| l.driver == driver) {
+                            self.live.remove(&agent);
                         }
+                        self.idle(agent, driver);
                     }
-                    Msg::Exited { agent, failure } => {
-                        self.live.remove(&agent);
+                    Msg::Compacted { agent, driver } => {
+                        if let Some(l) = self.live.get_mut(&agent).filter(|l| l.driver == driver) {
+                            l.accepted = false;
+                        }
+                        self.idle(agent, driver);
+                    }
+                    Msg::Exited { agent, driver, failure } => {
+                        if self.live.get(&agent).is_some_and(|l| l.driver == driver) {
+                            self.live.remove(&agent);
+                        }
                         if let Some(f) = failure {
                             self.failed(agent, f).await;
                         }
@@ -143,7 +234,24 @@ impl Loop {
                     }
                 },
             }
+            self.tidy().await;
             self.evaluate().await;
+        }
+    }
+
+    fn idle(&mut self, agent: AgentId, driver: DriverId) {
+        if let Some(l) = self.live.get_mut(&agent).filter(|l| l.driver == driver) {
+            l.busy = false;
+        }
+    }
+
+    /// A task was accepted: the driver that carried it is compacted, or retired, before its next
+    /// turn.
+    fn accepted(&mut self, task: TaskId) {
+        for l in self.live.values_mut() {
+            if l.carried.contains(&task) {
+                l.accepted = true;
+            }
         }
     }
 
@@ -174,7 +282,7 @@ impl Loop {
             return;
         }
         let failures = self.failures.remove(&agent).unwrap_or_default();
-        self.blocked.insert(agent);
+        self.gave_up.insert(agent);
         self.commit(move |s, clock| {
             let Some(task) = s.current_task(agent).map(|t| t.task.id) else {
                 return Vec::new();
@@ -195,13 +303,33 @@ impl Loop {
         let done = job.clone();
         self.commit(move |s, clock| jobs::fired(s, clock, &done, at))
             .await;
-        if let ProjectJob::Routine(ProjectRoutine::EndWarmPeriod { driver }) = job.does
-            && let Some(live) = self.live.values().find(|l| l.driver == driver && !l.busy)
-        {
-            let (ack, done) = oneshot::channel();
-            if live.cmds.send(Cmd::Retire(ack)).is_ok() {
-                let _ = done.await;
+        match job.does {
+            ProjectJob::Routine(ProjectRoutine::EndWarmPeriod { driver }) => {
+                let agent = self
+                    .live
+                    .iter()
+                    .find(|(_, l)| l.driver == driver && !l.busy)
+                    .map(|(a, _)| *a);
+                if let Some(agent) = agent {
+                    self.end(agent, EndWhy::Retire(RetireReason::WarmTooLong))
+                        .await;
+                }
             }
+            // A wait for a driver that ran out leaves the agent idle with its items: it does not
+            // try again until something new reaches it.
+            ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, .. }) => {
+                let ctx = Arc::clone(&self.ctx);
+                let idle = blocking(move || {
+                    ctx.store
+                        .log
+                        .with_state(|s| s.agent(agent).map(|a| a.state == AgentState::Idle))
+                })
+                .await;
+                if idle == Some(true) {
+                    self.gave_up.insert(agent);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -220,6 +348,17 @@ impl Loop {
         });
     }
 
+    /// Ends `agent`'s warm driver and waits until its end is recorded and its process is gone.
+    async fn end(&mut self, agent: AgentId, why: EndWhy) {
+        let Some(live) = self.live.remove(&agent) else {
+            return;
+        };
+        let (ack, done) = oneshot::channel();
+        if live.cmds.send(Cmd::End(why, ack)).is_ok() {
+            let _ = done.await;
+        }
+    }
+
     async fn shutdown(&mut self) {
         let mut stopped = Vec::new();
         for live in self.live.values() {
@@ -236,19 +375,42 @@ impl Loop {
         while self.drivers.join_next().await.is_some() {}
     }
 
-    /// For every agent with items waiting: give them to its warm driver, or start one. One at a
-    /// time when the orchestrator runs serially.
+    /// After a change to the project's settings or team: every warm driver is kept or ended, as
+    /// the router says, one after another. Not while a turn runs, when the orchestrator runs
+    /// serially.
+    async fn tidy(&mut self) {
+        if self.shared.serial && self.live.values().any(|l| l.busy) {
+            return;
+        }
+        if !std::mem::take(&mut self.tidy) {
+            return;
+        }
+        let mut agents: Vec<AgentId> = self.live.keys().copied().collect();
+        agents.sort();
+        for agent in agents {
+            let Some(w) = self.live.get(&agent).filter(|l| !l.busy).map(Live::warm) else {
+                continue;
+            };
+            let (shared, ctx) = (Arc::clone(&self.shared), Arc::clone(&self.ctx));
+            if let Upkeep::End(why) = blocking(move || route::upkeep(&shared, &ctx, &w)).await {
+                self.end(agent, why).await;
+            }
+        }
+    }
+
+    /// For every agent with items waiting: give them to its warm driver, or start one, as the
+    /// router decides. One at a time when the orchestrator runs serially.
     async fn evaluate(&mut self) {
         let serial = self.shared.serial;
         if serial && self.live.values().any(|l| l.busy) {
             return;
         }
-        let blocked = self.blocked.clone();
+        let skip: HashSet<AgentId> = self.no_driver.union(&self.gave_up).copied().collect();
         let ctx = Arc::clone(&self.ctx);
         let mut waiting: Vec<(AgentId, Vec<InboxItemId>)> = blocking(move || {
             ctx.store.log.with_state(|s| {
                 s.agents()
-                    .filter(|a| a.state != AgentState::Retired && !blocked.contains(&a.id))
+                    .filter(|a| a.state != AgentState::Retired && !skip.contains(&a.id))
                     .filter_map(|a| {
                         let items: Vec<_> = a.inbox.waiting().collect();
                         (!items.is_empty()).then_some((a.id, items))
@@ -266,49 +428,72 @@ impl Loop {
             waiting.truncate(1);
         }
         for (agent, items) in waiting {
-            match self.live.get_mut(&agent) {
-                Some(live) if live.busy => {}
-                Some(live) => {
+            if self.live.get(&agent).is_some_and(|l| l.busy) {
+                continue;
+            }
+            self.turn(agent, items).await;
+        }
+    }
+
+    async fn turn(&mut self, agent: AgentId, items: Vec<InboxItemId>) {
+        let warm = self.live.get(&agent).map(Live::warm);
+        let (shared, ctx) = (Arc::clone(&self.shared), Arc::clone(&self.ctx));
+        let (planned, task) = blocking(move || route::decide(&shared, &ctx, agent, warm)).await;
+        match planned {
+            // The turn is decided again once the driver has compacted.
+            Ok(Planned::Reuse { compact: true }) => {
+                if let Some(live) = self.live.get_mut(&agent) {
                     live.busy = true;
-                    let _ = live.cmds.send(Cmd::Turn(items));
+                    let _ = live.cmds.send(Cmd::Compact);
                 }
-                None => self.start(agent, items).await,
+            }
+            Ok(Planned::Reuse { compact: false }) => {
+                self.commit(move |s, _| route::found(s, agent)).await;
+                if let Some(live) = self.live.get_mut(&agent) {
+                    live.busy = true;
+                    live.carried.extend(task);
+                    let carried = live.carried.clone();
+                    let _ = live.cmds.send(Cmd::Turn { items, carried });
+                }
+            }
+            Ok(Planned::Start {
+                driver,
+                choice,
+                ending,
+            }) => {
+                if let Some(e) = ending {
+                    self.end(agent, e.why).await;
+                }
+                self.commit(move |s, _| route::found(s, agent)).await;
+                self.start(agent, driver, choice, items, task);
+            }
+            Err(why) => {
+                self.no_driver.insert(agent);
+                let deadline = (self.shared.settings)().default_wait_deadline;
+                self.commit(move |s, clock| route::no_driver(s, clock, agent, why, deadline))
+                    .await;
             }
         }
     }
 
-    async fn start(&mut self, agent: AgentId, items: Vec<InboxItemId>) {
-        let chooser = Arc::clone(&self.shared.chooser);
-        let ctx = Arc::clone(&self.ctx);
-        let choice = blocking(move || ctx.store.log.with_state(|s| chooser.choose(s, agent))).await;
-        let choice = match choice {
-            Ok(c) if self.shared.harnesses.contains_key(&c.harness) => c,
-            other => {
-                let why = other
-                    .err()
-                    .unwrap_or_else(|| vec![Incompatible::NothingAllowed]);
-                self.blocked.insert(agent);
-                self.commit(move |_, _| {
-                    vec![(
-                        Actor::Daemon,
-                        ProjectEvent::Agent {
-                            agent,
-                            event: AgentEvent::NoDriver(why),
-                        },
-                    )]
-                })
-                .await;
-                return;
-            }
-        };
-        let driver = new_id(&*self.shared.clock, DriverId::new);
+    fn start(
+        &mut self,
+        agent: AgentId,
+        driver: DriverId,
+        choice: x100_router::Choice,
+        items: Vec<InboxItemId>,
+        task: Option<TaskId>,
+    ) {
         let (cmds, rx) = mpsc::unbounded_channel();
+        let carried: BTreeSet<TaskId> = task.into_iter().collect();
         self.live.insert(
             agent,
             Live {
                 driver,
                 cmds,
                 busy: true,
+                carried: carried.clone(),
+                accepted: false,
             },
         );
         let start = Start {
@@ -316,6 +501,7 @@ impl Loop {
             driver,
             choice,
             first: items,
+            carried,
         };
         self.drivers.spawn(driver::run(
             Arc::clone(&self.shared),

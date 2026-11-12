@@ -10,17 +10,20 @@
 //! - Every append goes through one writer per project, which closes the waits its events end
 //!   ([`settle`]), so the rule in `Wait::ended_by` has one home.
 //!
+//! - Every turn, a further turn on a warm driver included, runs on what the router in
+//!   `x100-router` decides ([`route`]), with the room drivers take on the machine and on logins
+//!   counted across every project ([`fleet`]).
+//!
 //! The seams later milestones attach to, each with today's trivial behaviour:
-//! - [`DriverChooser`] says which harness, model and effort an agent's next driver gets (M8).
 //! - [`Sandbox`] wraps a driver's command line to run it in the agent's sandbox (M10).
 //! - [`Gate`] classifies each action and allows or holds it (M12).
 
 mod branches;
 mod builder;
-mod choose;
 mod ctx;
 mod desk;
 mod driver;
+mod fleet;
 mod gate;
 mod ids;
 mod jobs;
@@ -29,28 +32,34 @@ pub mod pack;
 mod processes;
 mod project;
 mod recover;
+mod route;
 mod sandbox;
 mod settle;
 mod store;
 mod tools;
 mod turns;
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::{mpsc, oneshot};
-use x100_core::fold::ProjectState;
-use x100_core::id::{AgentId, DriverId, FileId, HarnessId, JobId, MessageId, ProjectId, TaskId};
-use x100_core::job::{Job, ProjectJob};
+use x100_core::effort::EffortRange;
+use x100_core::fold::{DaemonState, ProjectState};
+use x100_core::id::{
+    AgentId, DriverId, FileId, HarnessId, JobId, MachineId, MessageId, ProjectId, TaskId,
+};
+use x100_core::job::{DaemonJob, Job, ProjectJob};
+use x100_core::money::Money;
+use x100_core::party::Actor;
 use x100_core::settings::DaemonSettings;
 use x100_core::time::{Clock, Timestamp};
 use x100_core::wait::Wait;
 use x100_drivers::Harness;
 use x100_jobs::Scheduler;
-use x100_store::ProjectStore;
+use x100_router::{Installed, Login};
+use x100_store::{DaemonLog, ProjectStore};
 
 pub use builder::Refused;
-pub use choose::{Choice, DriverChooser};
 pub use desk::{Desk, Refusal};
 pub use gate::{AllowAll, Gate, Ruling};
 pub use ids::new_id;
@@ -69,8 +78,17 @@ pub type Settings = Arc<dyn Fn() -> DaemonSettings + Send + Sync>;
 /// Everything the orchestrator is built from.
 pub struct Config {
     pub clock: Arc<dyn Clock>,
+    /// The harnesses this run can start, by the id the daemon's log gives each.
     pub harnesses: HashMap<HarnessId, Arc<dyn Harness>>,
-    pub chooser: Arc<dyn DriverChooser>,
+    /// The machine those harnesses run on.
+    pub machine: MachineId,
+    /// The harnesses that run as a terminal program on a provider login, and which login.
+    pub logins: BTreeMap<HarnessId, Login>,
+    /// The daemon's log: harnesses, machines, cool-offs and settings, which the router reads and
+    /// a cool-off is written to.
+    pub daemon: DaemonLog,
+    /// The daemon log's job clock, told of each cool-off's end.
+    pub daemon_jobs: Scheduler<DaemonState>,
     pub settings: Settings,
     /// Where each driver's process is written down, so a killed daemon's drivers can be found.
     pub processes: Arc<ProcessRegistry>,
@@ -85,13 +103,43 @@ pub struct Config {
 
 pub(crate) struct Shared {
     pub clock: Arc<dyn Clock>,
-    pub harnesses: HashMap<HarnessId, Arc<dyn Harness>>,
-    pub chooser: Arc<dyn DriverChooser>,
+    /// Replaced whole when the builder asks for a rescan.
+    pub harnesses: RwLock<HashMap<HarnessId, Arc<dyn Harness>>>,
+    pub machine: MachineId,
+    pub logins: BTreeMap<HarnessId, Login>,
+    pub daemon: DaemonLog,
+    pub daemon_jobs: Scheduler<DaemonState>,
+    pub fleet: fleet::Fleet,
     pub settings: Settings,
     pub processes: Arc<ProcessRegistry>,
     pub desk: Arc<Desk>,
     pub sandbox: Arc<dyn Sandbox>,
     pub serial: bool,
+}
+
+impl Shared {
+    pub fn harness(&self, id: HarnessId) -> Option<Arc<dyn Harness>> {
+        self.harnesses
+            .read()
+            .expect("harnesses lock")
+            .get(&id)
+            .cloned()
+    }
+
+    /// What this daemon can start now.
+    pub fn installed(&self) -> Installed {
+        Installed {
+            machine: self.machine,
+            harnesses: self
+                .harnesses
+                .read()
+                .expect("harnesses lock")
+                .keys()
+                .copied()
+                .collect(),
+            logins: self.logins.clone(),
+        }
+    }
 }
 
 /// Why a driver could not be stopped by [`Orchestrator::stop_driver`].
@@ -121,8 +169,12 @@ impl Orchestrator {
         Self {
             shared: Arc::new(Shared {
                 clock: config.clock,
-                harnesses: config.harnesses,
-                chooser: config.chooser,
+                harnesses: RwLock::new(config.harnesses),
+                machine: config.machine,
+                logins: config.logins,
+                daemon: config.daemon,
+                daemon_jobs: config.daemon_jobs,
+                fleet: fleet::Fleet::new(),
                 settings: config.settings,
                 processes: config.processes,
                 desk: config.desk,
@@ -248,6 +300,61 @@ impl Orchestrator {
             Ok(true) => Ok(()),
             _ => Err(StopError::NotLive),
         }
+    }
+
+    /// The builder sets a lead's budget. Refused if the leads' budgets would pass the project's
+    /// total. The next decision for any of the lead's agents reads it.
+    pub async fn set_budget(
+        &self,
+        project: ProjectId,
+        lead: AgentId,
+        budget: Money,
+    ) -> Result<(), Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || builder::set_budget(&ctx, lead, budget)).await
+    }
+
+    /// The builder sets an agent's effort range. A warm driver outside it is replaced at the
+    /// agent's next turn.
+    pub async fn set_effort(
+        &self,
+        project: ProjectId,
+        agent: AgentId,
+        range: EffortRange,
+    ) -> Result<(), Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || builder::set_effort(&ctx, agent, range)).await
+    }
+
+    /// Something in the daemon's log changed that could let an agent waiting for a driver find
+    /// one: a machine's cap, a rescan of the harnesses. Every project tries its waiting agents
+    /// again.
+    pub fn reconsider(&self) {
+        self.shared.fleet.changed();
+    }
+
+    /// The harnesses this run can start, after a rescan found them again.
+    pub fn set_harnesses(&self, harnesses: HashMap<HarnessId, Arc<dyn Harness>>) {
+        *self.shared.harnesses.write().expect("harnesses lock") = harnesses;
+        self.reconsider();
+    }
+
+    /// A job of the daemon's log fired: a cool-off ends, if that job is still what ends it, and
+    /// agents waiting for a driver try again. Blocks on the store briefly.
+    pub async fn daemon_job_fired(&self, job: Job<DaemonJob>) {
+        let shared = Arc::clone(&self.shared);
+        blocking(move || {
+            let over = shared
+                .daemon
+                .with_state(|d| x100_router::cool_off_over(d, &job));
+            if let Some(event) = over
+                && let Err(e) = shared.daemon.append(Actor::Daemon, event)
+            {
+                eprintln!("x100: the end of a cool-off could not be recorded: {e}");
+            }
+        })
+        .await;
+        self.reconsider();
     }
 
     /// Stops every driver, recording a warm one as ended and a running one as failed, both

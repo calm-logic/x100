@@ -25,9 +25,8 @@ const DAY: Duration = Duration::from_secs(24 * 3600);
 
 /// The whole run, from the brief to the second morning's smoke tests.
 async fn run() -> World {
-    let mut setup = Setup::new(SCRIPT);
-    setup.models = &[("Research", "fake-brief")];
-    let w = World::new(setup).await;
+    // The router puts every agent on the cheaper model, whose warm period an hour outlasts.
+    let w = World::new(Setup::new(SCRIPT)).await;
     w.brief("Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.")
         .await;
     w.settle().await;

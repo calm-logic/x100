@@ -7355,11 +7355,13 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 name = "x100-app"
 version = "0.0.0"
 dependencies = [
+ "alacritty_terminal",
  "env_logger",
  "gpui",
  "gpui_platform",
  "log",
  "pulldown-cmark",
+ "serde_json",
  "tempfile",
  "tokio",
  "x100-client",
@@ -7399,6 +7401,8 @@ version = "0.0.0"
 dependencies = [
  "alacritty_terminal",
  "async-trait",
+ "base64 0.22.1",
+ "futures-util",
  "nix",
  "pty-process",
  "serde",
@@ -7461,6 +7465,7 @@ dependencies = [
  "x100-core",
  "x100-drivers",
  "x100-jobs",
+ "x100-router",
  "x100-store",
 ]
 

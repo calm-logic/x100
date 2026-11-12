@@ -11,25 +11,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use x100_core::driver::{DriverState, Incompatible};
+use x100_core::driver::DriverState;
 use x100_core::effort::EffortRange;
-use x100_core::event::{Envelope, ProjectEvent};
-use x100_core::fold::ProjectState;
-use x100_core::harness::{HarnessKind, HarnessModel, ModelName, ModelOffer, Support};
+use x100_core::event::{DaemonEvent, Envelope, ProjectEvent};
+use x100_core::fold::{DaemonState, ProjectState};
+use x100_core::harness::{HarnessKind, HarnessModel, Machine, ModelOffer, Support};
 use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, ProjectId, TaskId};
 use x100_core::money::{Money, Percent};
 use x100_core::party::Actor;
 use x100_core::project::Settings as ProjectSettings;
-use x100_core::settings::DaemonSettings;
+use x100_core::settings::{DaemonSetting, DaemonSettings};
 use x100_core::time::{Clock, FakeClock, Timestamp};
 use x100_drivers::fake::{DaemonTools, FakeHarness};
 use x100_drivers::{DriverHandle, DriverSpec, Harness, StartError, ToolEndpoint};
 use x100_jobs::Scheduler;
-use x100_orch::{
-    AllowAll, Choice, Config, Desk, DriverChooser, NoSandbox, Orchestrator, ProcessRegistry,
-    ToolServer,
-};
-use x100_store::ProjectStore;
+use x100_orch::{AllowAll, Config, Desk, NoSandbox, Orchestrator, ProcessRegistry, ToolServer};
+use x100_store::{DaemonLog, ProjectStore};
 
 pub const FAKE: &str = env!("CARGO_BIN_EXE_x100-orch-fake-harness");
 
@@ -46,6 +43,11 @@ pub struct World {
     pub ceo: AgentId,
     pub orch: Orchestrator,
     pub scheduler: Scheduler<ProjectState>,
+    /// The daemon's log, which the router reads and cool-offs are written to, and its job clock.
+    pub daemon: DaemonLog,
+    pub daemon_jobs: Scheduler<DaemonState>,
+    /// Each provider's harness, in the order the setup named its script.
+    pub harnesses: Vec<HarnessId>,
     pub desk: Arc<Desk>,
     /// Serving the tools over MCP, when the setup asked for it.
     pub tools: Option<ToolServer>,
@@ -55,10 +57,13 @@ pub struct World {
 
 pub type Endpoints = Arc<Mutex<HashMap<DriverId, ToolEndpoint>>>;
 
-/// One script; which model each role runs on, by default the one listed first.
+/// One script, and more for more providers. Every model of every provider is allowed unless the
+/// setup names which.
 pub struct Setup<'a> {
     pub script: &'a str,
-    pub models: &'a [(&'a str, &'a str)],
+    pub providers: &'a [&'a str],
+    pub allowed: Option<&'a [(usize, &'a str)]>,
+    pub budget: Money,
     pub settings: DaemonSettings,
     /// Serve the tools over MCP as well as in-process.
     pub serve: bool,
@@ -73,14 +78,89 @@ impl<'a> Setup<'a> {
         };
         Self {
             script,
-            models: &[],
+            providers: &[],
+            allowed: None,
+            budget: Money::from_dollars(50),
             settings,
             serve: false,
         }
     }
 }
 
-const HARNESS: HarnessId = HarnessId::from_u128(7);
+pub const MACHINE: MachineId = MachineId::from_u128(1);
+
+/// The harness id of the setup's `n`th script.
+pub fn harness_id(n: usize) -> HarnessId {
+    HarnessId::from_u128(7 + n as u128)
+}
+
+/// A daemon's log in `dir` holding the machine and these settings, with its job clock: what the
+/// router reads. Harnesses are added once they exist, with [`add_harnesses`].
+pub fn daemon_log(
+    dir: &Path,
+    clock: Arc<dyn Clock>,
+    settings: &DaemonSettings,
+) -> (DaemonLog, Scheduler<DaemonState>) {
+    let log = x100_store::open_daemon_log(dir, Arc::clone(&clock)).expect("a daemon log");
+    let mut events = vec![DaemonEvent::MachineAdded(Machine {
+        id: MACHINE,
+        name: "local".into(),
+        harnesses: Vec::new(),
+        cap: 16,
+    })];
+    events.extend(
+        all_settings(settings)
+            .into_iter()
+            .map(DaemonEvent::SettingChanged),
+    );
+    log.append_all(events.into_iter().map(|e| (Actor::Daemon, e)).collect())
+        .expect("the daemon's log takes them");
+    let jobs = Scheduler::new(log.clone(), clock);
+    (log, jobs)
+}
+
+/// Records harnesses in the daemon's log as the daemon's discovery would.
+pub fn add_harnesses(log: &DaemonLog, harnesses: &HashMap<HarnessId, Arc<dyn Harness>>) {
+    let mut ids: Vec<_> = harnesses.keys().copied().collect();
+    ids.sort();
+    let events = ids
+        .into_iter()
+        .map(|id| {
+            let h = &harnesses[&id];
+            let record = x100_core::harness::Harness {
+                id,
+                kind: h.kind(),
+                support: h.supports(),
+                models: h.models(),
+            };
+            (Actor::Daemon, DaemonEvent::HarnessAdded(record))
+        })
+        .collect();
+    log.append_all(events).expect("the daemon's log takes them");
+}
+
+/// Every setting as a change, so a log holds exactly these values.
+fn all_settings(s: &DaemonSettings) -> Vec<DaemonSetting> {
+    use DaemonSetting as D;
+    vec![
+        D::RetireAtContext(s.retire_at_context),
+        D::RetireAfterTasks(s.retire_after_tasks),
+        D::RetireAfterAge(s.retire_after_age),
+        D::StallTimeout(s.stall_timeout),
+        D::DefaultWaitDeadline(s.default_wait_deadline),
+        D::MinimumRepeat(s.minimum_repeat),
+        D::StartPackShare(s.start_pack_share),
+        D::LastTurnLimit(s.last_turn_limit),
+        D::TurnsWithoutProgress(s.turns_without_progress),
+        D::CoolOff(s.cool_off),
+    ]
+}
+
+/// The daemon's settings as its log holds them now.
+pub fn settings_of(log: &DaemonLog) -> x100_orch::Settings {
+    let log = log.clone();
+    Arc::new(move || log.with_state(|d| *d.settings()))
+}
 
 impl World {
     pub async fn new(setup: Setup<'_>) -> World {
@@ -90,19 +170,26 @@ impl World {
         let shared: Arc<dyn Clock> = Arc::new(clock.clone());
         let store = ProjectStore::open(&project_dir, Arc::clone(&shared)).expect("a store");
         store.git.prepare().expect("a repository");
-        let script = dir.path().join("script.toml");
-        std::fs::write(&script, setup.script).expect("the script");
-
-        let models = x100_drivers::fake::script::Script::parse(setup.script)
-            .expect("the script parses")
-            .offers();
-        let allowed = models
-            .iter()
-            .map(|m| HarnessModel {
-                harness: HARNESS,
-                model: m.model.clone(),
-            })
+        let scripts: Vec<&str> = std::iter::once(setup.script)
+            .chain(setup.providers.iter().copied())
             .collect();
+        let mut allowed = std::collections::BTreeSet::new();
+        for (n, text) in scripts.iter().enumerate() {
+            let offers = x100_drivers::fake::script::Script::parse(text)
+                .expect("the script parses")
+                .offers();
+            for m in offers {
+                let named = setup
+                    .allowed
+                    .is_none_or(|a| a.iter().any(|(i, model)| *i == n && m.model.0 == *model));
+                if named {
+                    allowed.insert(HarnessModel {
+                        harness: harness_id(n),
+                        model: m.model.clone(),
+                    });
+                }
+            }
+        }
         let ceo = x100_orch::new_id(&*shared, AgentId::new);
         let created = ProjectEvent::Created {
             name: "Fernleaf".into(),
@@ -111,15 +198,19 @@ impl World {
             effort: EffortRange::FULL,
             settings: ProjectSettings {
                 ask_me_about: x100_core::action::AskMeAbout::HighRiskOnly,
-                budget: Money::from_dollars(50),
+                budget: setup.budget,
                 lab_share: Percent::new(10).unwrap(),
                 allowed,
             },
         };
         store.log.append(Actor::Builder, created).expect("created");
 
-        let settings = setup.settings;
-        let settings: x100_orch::Settings = Arc::new(move || settings);
+        let (daemon, daemon_jobs) = daemon_log(
+            &dir.path().join("daemon"),
+            Arc::clone(&shared),
+            &setup.settings,
+        );
+        let settings = settings_of(&daemon);
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
         let tools = match setup.serve {
             true => Some(
@@ -129,36 +220,35 @@ impl World {
             ),
             false => None,
         };
-        let fake = FakeHarness::new(
-            FAKE,
-            &script,
-            Arc::clone(&shared),
-            Some(Arc::clone(&desk) as Arc<dyn DaemonTools>),
-        )
-        .expect("the fake harness");
         let endpoints = Endpoints::default();
-        let harness = Recording {
-            inner: Arc::new(fake),
-            endpoints: Arc::clone(&endpoints),
-        };
-        let default_model = models[0].model.clone();
-        let by_role: HashMap<String, ModelName> = setup
-            .models
-            .iter()
-            .map(|(role, model)| (role.to_string(), ModelName(model.to_string())))
-            .collect();
+        let mut harnesses: HashMap<HarnessId, Arc<dyn x100_drivers::Harness>> = HashMap::new();
+        for (n, text) in scripts.iter().enumerate() {
+            let path = dir.path().join(format!("script-{n}.toml"));
+            std::fs::write(&path, text).expect("the script");
+            let fake = FakeHarness::new(
+                FAKE,
+                &path,
+                Arc::clone(&shared),
+                Some(Arc::clone(&desk) as Arc<dyn DaemonTools>),
+            )
+            .expect("the fake harness");
+            let recording = Recording {
+                inner: Arc::new(fake),
+                endpoints: Arc::clone(&endpoints),
+            };
+            harnesses.insert(harness_id(n), Arc::new(recording));
+        }
+        let ids: Vec<HarnessId> = (0..scripts.len()).map(harness_id).collect();
+        add_harnesses(&daemon, &harnesses);
         let (processes, _) =
             ProcessRegistry::open_and_reap(dir.path().join("drivers.json")).expect("registry");
         let orch = Orchestrator::new(Config {
             clock: Arc::clone(&shared),
-            harnesses: HashMap::from([(
-                HARNESS,
-                Arc::new(harness) as Arc<dyn x100_drivers::Harness>,
-            )]),
-            chooser: Arc::new(ByRole {
-                default: default_model,
-                by_role,
-            }),
+            harnesses,
+            machine: MACHINE,
+            logins: Default::default(),
+            daemon: daemon.clone(),
+            daemon_jobs: daemon_jobs.clone(),
             settings,
             processes: Arc::new(processes),
             desk: Arc::clone(&desk),
@@ -176,6 +266,9 @@ impl World {
             ceo,
             orch,
             scheduler,
+            daemon,
+            daemon_jobs,
+            harnesses: ids,
             desk,
             tools,
             endpoints,
@@ -199,7 +292,7 @@ impl World {
     }
 
     /// Waits until nothing more happens without the builder or the clock: no turn running or
-    /// starting, and nothing in any inbox waiting for one.
+    /// starting, and nothing in any inbox waiting for one, but for an agent waiting for a driver.
     pub async fn settle(&self) {
         self.until("everything settles", quiet).await;
     }
@@ -234,6 +327,18 @@ impl World {
                 .job_fired(self.project, f.job, f.at)
                 .await
                 .expect("the orchestrator acts on the job");
+        }
+        let jobs = self.daemon_jobs.clone();
+        let fired = tokio::task::spawn_blocking(move || {
+            let mut fired = Vec::new();
+            jobs.fire_due(|f| fired.push(f))
+                .expect("the daemon's jobs fire");
+            fired
+        })
+        .await
+        .unwrap();
+        for f in fired {
+            self.orch.daemon_job_fired(f.job).await;
         }
     }
 
@@ -307,7 +412,16 @@ pub fn quiet(s: &ProjectState) -> bool {
             DriverState::Starting | DriverState::Running | DriverState::Compacting
         )
     });
-    !busy && s.agents().all(|a| a.inbox.waiting().next().is_none())
+    // An agent waiting for a driver keeps its items until something changes that could help.
+    let waits_for_driver = |a: &x100_core::fold::AgentRecord| {
+        matches!(
+            a.state,
+            x100_core::agent::AgentState::Waiting(x100_core::agent::Waiting::ForDriver(_))
+        )
+    };
+    !busy
+        && s.agents()
+            .all(|a| a.inbox.waiting().next().is_none() || waits_for_driver(a))
 }
 
 /// Each event's kind, for comparing runs whose ids and times differ.
@@ -329,34 +443,6 @@ pub fn kind(e: &ProjectEvent) -> String {
         ProjectEvent::Job { event, .. } => format!("Job.{}", event.name()),
         ProjectEvent::Action { event, .. } => format!("Action.{}", event.name()),
         _ => outer,
-    }
-}
-
-/// Picks each role's model from the setup, at the lowest effort its range allows.
-struct ByRole {
-    default: ModelName,
-    by_role: HashMap<String, ModelName>,
-}
-
-impl DriverChooser for ByRole {
-    fn choose(&self, project: &ProjectState, agent: AgentId) -> Result<Choice, Vec<Incompatible>> {
-        let a = project
-            .agent(agent)
-            .ok_or(vec![Incompatible::NothingAllowed])?;
-        let range = project
-            .project()
-            .and_then(|p| p.team.effort(agent))
-            .ok_or(vec![Incompatible::NoEffortInRange])?;
-        Ok(Choice {
-            harness: HARNESS,
-            model: self
-                .by_role
-                .get(&a.role)
-                .cloned()
-                .unwrap_or(self.default.clone()),
-            effort: range.min(),
-            machine: MachineId::from_u128(1),
-        })
     }
 }
 

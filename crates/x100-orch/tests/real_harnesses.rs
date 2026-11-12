@@ -10,20 +10,20 @@ mod common;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::json;
 use x100_core::action::Request;
-use x100_core::driver::{DriverState, Incompatible};
-use x100_core::effort::{Effort, EffortRange};
+use x100_core::driver::DriverState;
+use x100_core::effort::EffortRange;
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessModel, ModelName};
-use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, ProjectId, TaskId};
+use x100_core::id::{AgentId, DriverId, HarnessId, ProjectId, TaskId};
 use x100_core::money::{Money, Percent};
 use x100_core::party::Actor;
-use x100_core::project::Settings as ProjectSettings;
+use x100_core::project::{SettingChange, Settings as ProjectSettings};
 use x100_core::settings::DaemonSettings;
 use x100_core::spec::SpecKind;
 use x100_core::task::{Outcome, TaskState};
@@ -34,10 +34,7 @@ use x100_drivers::codex::{Codex, CodexConfig};
 use x100_drivers::testing::{FakeProvider, Reply};
 use x100_drivers::{CommandLine, CommandWrapper, Harness};
 use x100_jobs::Scheduler;
-use x100_orch::{
-    AllowAll, Choice, Config, Desk, DriverChooser, Orchestrator, ProcessRegistry, Sandbox,
-    ToolServer,
-};
+use x100_orch::{AllowAll, Config, Desk, Orchestrator, ProcessRegistry, Sandbox, ToolServer};
 use x100_store::ProjectStore;
 
 const HARNESS: HarnessId = HarnessId::from_u128(11);
@@ -53,8 +50,8 @@ struct Run {
     desk: Arc<Desk>,
     _tools: ToolServer,
     provider: FakeProvider,
-    /// Holds the CEO's first driver back until the model's replies are queued.
-    release: mpsc::Sender<()>,
+    /// Allowed only once the model's replies are queued, so the CEO waits for a driver until then.
+    model: HarnessModel,
 }
 
 /// A harness program on PATH, or `None` with a note so a skipped test is visible.
@@ -87,27 +84,6 @@ impl Sandbox for TestEnv {
     }
 }
 
-/// The one harness and model, at low effort, once the test lets the first choice through.
-struct Held {
-    model: ModelName,
-    gate: Mutex<Option<mpsc::Receiver<()>>>,
-}
-
-impl DriverChooser for Held {
-    fn choose(&self, _: &ProjectState, _: AgentId) -> Result<Choice, Vec<Incompatible>> {
-        if let Some(gate) = self.gate.lock().unwrap().take() {
-            gate.recv_timeout(PATIENCE)
-                .expect("the test lets the driver start");
-        }
-        Ok(Choice {
-            harness: HARNESS,
-            model: self.model.clone(),
-            effort: Effort::Low,
-            machine: MachineId::from_u128(1),
-        })
-    }
-}
-
 impl Run {
     async fn start(
         model: &str,
@@ -134,23 +110,23 @@ impl Run {
                 ask_me_about: x100_core::action::AskMeAbout::HighRiskOnly,
                 budget: Money::from_dollars(5),
                 lab_share: Percent::new(10).unwrap(),
-                allowed: [HarnessModel {
-                    harness: HARNESS,
-                    model: ModelName(model.into()),
-                }]
-                .into(),
+                allowed: Default::default(),
             },
         };
         store.log.append(Actor::Builder, created).unwrap();
 
         let provider = FakeProvider::start().await.unwrap();
-        let settings: x100_orch::Settings = Arc::new(DaemonSettings::default);
+        let (daemon, daemon_jobs) = common::daemon_log(
+            &dir.path().join("daemon"),
+            Arc::clone(&shared),
+            &DaemonSettings::default(),
+        );
+        let settings = common::settings_of(&daemon);
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
         let tools = ToolServer::start(Arc::clone(&desk)).await.unwrap();
         let harness = harness(&state, &provider, Arc::clone(&shared));
         let (processes, _) =
             ProcessRegistry::open_and_reap(dir.path().join("drivers.json")).unwrap();
-        let (release, gate) = mpsc::channel();
         let env = TestEnv(vec![
             format!("HOME={}", home.display()),
             format!("{}={}", key.0, key.1),
@@ -158,13 +134,15 @@ impl Run {
             format!("HTTP_PROXY={}", provider.url()),
             "NO_PROXY=127.0.0.1,localhost".into(),
         ]);
+        let harnesses = HashMap::from([(HARNESS, harness)]);
+        common::add_harnesses(&daemon, &harnesses);
         let orch = Orchestrator::new(Config {
             clock: Arc::clone(&shared),
-            harnesses: HashMap::from([(HARNESS, harness)]),
-            chooser: Arc::new(Held {
-                model: ModelName(model.into()),
-                gate: Mutex::new(Some(gate)),
-            }),
+            harnesses,
+            machine: common::MACHINE,
+            logins: Default::default(),
+            daemon,
+            daemon_jobs,
             settings,
             processes: Arc::new(processes),
             desk: Arc::clone(&desk),
@@ -186,7 +164,10 @@ impl Run {
             desk,
             _tools: tools,
             provider,
-            release,
+            model: HarnessModel {
+                harness: HARNESS,
+                model: ModelName(model.into()),
+            },
         }
     }
 
@@ -216,7 +197,11 @@ impl Run {
         for reply in replies(task) {
             self.provider.reply(reply);
         }
-        self.release.send(()).unwrap();
+        let allow = ProjectEvent::SettingChanged(SettingChange::Allow {
+            what: self.model.clone(),
+            allowed: true,
+        });
+        self.store.log.append(Actor::Builder, allow).unwrap();
         task
     }
 

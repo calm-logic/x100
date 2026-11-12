@@ -10,7 +10,7 @@ use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::ProjectId;
 use x100_core::time::Clock;
 use x100_jobs::Scheduler;
-use x100_orch::Orchestrator;
+use x100_orch::{Desk, Orchestrator};
 use x100_proto::{Cursor, ErrorCode, RpcError, Snapshot};
 use x100_store::{DaemonLog, Follow, ProjectStore};
 
@@ -33,13 +33,15 @@ pub struct Hub {
     pub clock: Arc<dyn Clock>,
     pub log: DaemonLog,
     pub orch: Orchestrator,
+    /// What harnesses found by a rescan reach the daemon's tools through.
+    pub desk: Arc<Desk>,
     projects: Mutex<Projects>,
     /// The job clocks and what they feed, stopped with the daemon.
     tasks: Mutex<Vec<JoinHandle<()>>>,
     /// One per project, so a job scheduled through it wakes the clock that fires it.
     schedulers: Mutex<BTreeMap<ProjectId, Scheduler<ProjectState>>>,
-    /// The daemon log's, kept for `daemon.set_clock` on a fake clock.
-    daemon_jobs: Mutex<Option<Scheduler<DaemonState>>>,
+    /// The daemon log's job clock: cool-offs ending.
+    daemon_jobs: Scheduler<DaemonState>,
 }
 
 /// A subscription's logs, registered together with the snapshot or the cursor's events.
@@ -52,16 +54,23 @@ pub struct Registered {
 }
 
 impl Hub {
-    pub fn new(config: Config, log: DaemonLog, orch: Orchestrator) -> Self {
+    pub fn new(
+        config: Config,
+        log: DaemonLog,
+        orch: Orchestrator,
+        desk: Arc<Desk>,
+        daemon_jobs: Scheduler<DaemonState>,
+    ) -> Self {
         Self {
             clock: Arc::clone(&config.clock),
             config,
             log,
             orch,
+            desk,
             projects: Mutex::new(Projects::default()),
             tasks: Mutex::new(Vec::new()),
             schedulers: Mutex::new(BTreeMap::new()),
-            daemon_jobs: Mutex::new(None),
+            daemon_jobs,
         }
     }
 
@@ -98,20 +107,25 @@ impl Hub {
             .extend([clock_task, feed]);
     }
 
-    /// Runs the daemon log's job clock. Its only job is a cool-off ending, which arrives with M8.
+    /// Runs the daemon log's job clock, whose jobs end cool-offs. On a fake clock
+    /// `daemon.set_clock` fires them instead.
     pub fn start_daemon_jobs(&self) {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let scheduler = Scheduler::new(self.log.clone(), Arc::clone(&self.clock));
         if self.config.fake_clock.is_some() {
-            *self.daemon_jobs.lock().expect("daemon jobs lock") = Some(scheduler);
             return;
         }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let scheduler = self.daemon_jobs.clone();
         let clock_task = tokio::spawn(async move {
             if let Err(e) = scheduler.run(tx).await {
                 eprintln!("x100d: the daemon's job clock stopped: {e}");
             }
         });
-        let feed = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        let orch = self.orch.clone();
+        let feed = tokio::spawn(async move {
+            while let Some(fired) = rx.recv().await {
+                orch.daemon_job_fired(fired.job).await;
+            }
+        });
         self.tasks
             .lock()
             .expect("tasks lock")
@@ -128,9 +142,8 @@ impl Hub {
             .collect()
     }
 
-    /// The daemon log's job clock, which the daemon keeps only on a fake clock.
-    pub fn daemon_jobs(&self) -> Option<Scheduler<DaemonState>> {
-        self.daemon_jobs.lock().expect("daemon jobs lock").clone()
+    pub fn daemon_jobs(&self) -> Scheduler<DaemonState> {
+        self.daemon_jobs.clone()
     }
 
     pub fn scheduler(&self, id: ProjectId) -> Option<Scheduler<ProjectState>> {

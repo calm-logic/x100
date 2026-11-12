@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use serde_json::json;
 use x100_core::effort::Effort;
 use x100_core::id::DriverId;
 use x100_core::time::{FakeClock, Timestamp};

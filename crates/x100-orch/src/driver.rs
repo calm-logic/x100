@@ -2,21 +2,17 @@
 //! and end it. A task per driver owns the process handle; the project's loop sends it turns and
 //! never touches the handle.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
-use x100_core::driver::{
-    Driver, DriverEvent, Failure, Purpose, RetireReason, StartReason, StopReason, View,
-};
+use x100_core::driver::{Driver, DriverEvent, Failure, Purpose, StartReason, StopReason};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
-use x100_core::harness::ModelOffer;
-use x100_core::id::{AgentId, DriverId, InboxItemId, MessageId};
+use x100_core::harness::{HarnessModel, ModelOffer};
+use x100_core::id::{AgentId, DriverId, InboxItemId, MessageId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::JobEvent;
-use x100_core::ledger::{Charge, ChargeSource};
-use x100_core::message::{Message, Route};
 use x100_core::party::{Actor, Party};
 use x100_core::task::TaskState;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
@@ -24,26 +20,29 @@ use x100_drivers::{
     Decision, DriverControl, DriverOutput, DriverSpec, Permissions, SpawnHook, Spent, StallPolicy,
     StartError, TurnEnd,
 };
+use x100_router::{Choice, EndWhy};
 
 use crate::Shared;
 use crate::branches::{self, Ready};
-use crate::choose::Choice;
 use crate::ctx::{Events, ProjectCtx};
-use crate::ids::new_id;
 use crate::pack;
 use crate::project::Msg;
+use crate::route;
 use crate::store::blocking;
-use crate::turns::{self, Ending};
-
-/// How long a driver stays warm when its model does not say.
-const DEFAULT_WARM: Duration = Duration::from_secs(300);
+use crate::turns;
 
 pub(crate) enum Cmd {
-    /// Give the driver a turn with these inbox items.
-    Turn(Vec<InboxItemId>),
+    /// Give the driver a turn with these inbox items. `carried` is every task it has had a turn
+    /// on, this one's included.
+    Turn {
+        items: Vec<InboxItemId>,
+        carried: BTreeSet<TaskId>,
+    },
     Stop(How, oneshot::Sender<()>),
-    /// Its warm period is over: end it.
-    Retire(oneshot::Sender<()>),
+    /// The router ended it between turns: retired, or no longer fit for its agent's work.
+    End(EndWhy, oneshot::Sender<()>),
+    /// A task it carried was accepted and its harness can compact.
+    Compact,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +58,7 @@ pub(crate) struct Start {
     pub driver: DriverId,
     pub choice: Choice,
     pub first: Vec<InboxItemId>,
+    pub carried: BTreeSet<TaskId>,
 }
 
 /// The turn in progress.
@@ -73,6 +73,11 @@ struct Actor_ {
     ctx: Arc<ProjectCtx>,
     agent: AgentId,
     driver: DriverId,
+    /// Its record, once it is in the log.
+    record: Option<Driver>,
+    carried: BTreeSet<TaskId>,
+    /// The router ended it with the turn that just finished.
+    ended: bool,
     offer: Option<ModelOffer>,
     turn: Option<Turn>,
 }
@@ -91,6 +96,9 @@ pub(crate) async fn run(
         ctx,
         agent,
         driver,
+        record: None,
+        carried: start.carried.clone(),
+        ended: false,
         offer: None,
         turn: None,
     };
@@ -100,7 +108,12 @@ pub(crate) async fn run(
     if let Err(e) = blocking(move || processes.forget(driver)).await {
         eprintln!("x100: could not cross driver {driver}'s process off the list: {e}");
     }
-    let _ = msgs.send(Msg::Exited { agent, failure });
+    actor.shared.fleet.release(driver);
+    let _ = msgs.send(Msg::Exited {
+        agent,
+        driver,
+        failure,
+    });
 }
 
 impl Actor_ {
@@ -112,7 +125,7 @@ impl Actor_ {
     ) -> Option<Failure> {
         let Start { choice, first, .. } = start;
         let (agent, driver) = (self.agent, self.driver);
-        let harness = self.shared.harnesses.get(&choice.harness).cloned();
+        let harness = self.shared.harness(choice.harness);
         self.offer = harness
             .as_ref()
             .and_then(|h| h.models().into_iter().find(|m| m.model == choice.model));
@@ -137,9 +150,10 @@ impl Actor_ {
             effort: choice.effort,
             machine: choice.machine,
             purpose: Purpose::Work,
-            view: View::Headless,
+            view: choice.view,
             why: why.clone(),
         };
+        self.record = Some(record.clone());
         if let Err(e) = self
             .append(vec![(Actor::Daemon, ProjectEvent::DriverStarted(record))])
             .await
@@ -200,7 +214,8 @@ impl Actor_ {
         loop {
             tokio::select! {
                 cmd = cmds.recv() => match cmd {
-                    Some(Cmd::Turn(items)) => {
+                    Some(Cmd::Turn { items, carried }) => {
+                        self.carried = carried;
                         let ready = match self.ready(&items).await {
                             Ok(r) => r,
                             Err(detail) => return self.abort(&control, detail).await,
@@ -217,11 +232,16 @@ impl Actor_ {
                         let _ = ack.send(());
                         return None;
                     }
-                    Some(Cmd::Retire(ack)) => {
-                        self.end(DriverEvent::Retired(RetireReason::WarmTooLong)).await;
+                    Some(Cmd::End(why, ack)) => {
+                        self.end(turns::end_events(why)).await;
                         control.stop().await;
                         let _ = ack.send(());
                         return None;
+                    }
+                    Some(Cmd::Compact) => {
+                        if let Err(detail) = self.compact(&control).await {
+                            return self.abort(&control, detail).await;
+                        }
                     }
                     // The loop that owns this driver is gone, so nothing can use it.
                     None => {
@@ -235,6 +255,10 @@ impl Actor_ {
                     Some(out) => {
                         if let Err(detail) = self.on_output(&control, out, msgs).await {
                             return self.abort(&control, detail).await;
+                        }
+                        if self.ended {
+                            control.stop().await;
+                            return None;
                         }
                     }
                     None => return self.fail(Failure::StreamBroke).await,
@@ -389,34 +413,44 @@ impl Actor_ {
             DriverOutput::TurnEnded(TurnEnd::Interrupted) => {
                 return Err("a turn was interrupted that nobody asked to interrupt".into());
             }
-            DriverOutput::Compacted | DriverOutput::Warning(_) | DriverOutput::Failed(_) => {}
+            DriverOutput::Compacted => {
+                self.event(DriverEvent::Compacted).await?;
+                let _ = msgs.send(Msg::Compacted {
+                    agent: self.agent,
+                    driver: self.driver,
+                });
+            }
+            DriverOutput::Warning(_) | DriverOutput::Failed(_) => {}
         }
         Ok(())
     }
 
     async fn charge(&self, spent: Spent) {
         self.transcript(Item::Usage { usage: spent.usage }).await;
-        let (agent, driver) = (self.agent, self.driver);
+        let Some(record) = self.record.clone() else {
+            return;
+        };
         let ctx = Arc::clone(&self.ctx);
         let charged = blocking(move || {
-            ctx.commit(|s, _| {
-                let Some(payer) = s.project().and_then(|p| p.team.payer(agent)) else {
-                    return (Vec::new(), ());
-                };
-                let charge = Charge {
-                    payer,
-                    source: ChargeSource::Turn { driver, agent },
-                    usage: spent.usage,
-                    cost: spent.cost,
-                    basis: spent.basis,
-                };
-                (vec![(Actor::Daemon, ProjectEvent::Charged(charge))], ())
+            ctx.commit(|s, clock| {
+                let events =
+                    route::charged(s, clock, &record, spent.usage, spent.cost, spent.basis);
+                (events, ())
             })
         })
         .await;
         if let Err(e) = charged {
             eprintln!("x100: charge for {}: {e}", self.driver);
         }
+    }
+
+    /// A task it carried was accepted: it compacts, and is warm again once it says so.
+    async fn compact(&mut self, control: &DriverControl) -> Result<(), String> {
+        self.event(DriverEvent::CompactionStarted).await?;
+        control
+            .compact()
+            .await
+            .map_err(|e| format!("the driver would not compact: {e}"))
     }
 
     /// The turn completed: checkpoint the work, answer the builder if the CEO was asked, count the
@@ -432,50 +466,58 @@ impl Actor_ {
         })
         .await;
         let (ctx, agent, driver) = (Arc::clone(&self.ctx), self.agent, self.driver);
-        let warm = self
-            .offer
-            .as_ref()
-            .map_or(DEFAULT_WARM, |o| o.cache_lifetime);
-        let limit = (self.shared.settings)().turns_without_progress;
-        blocking(move || {
+        let shared = Arc::clone(&self.shared);
+        let mut close = turns::Close {
+            agent,
+            driver,
+            record: self.record.clone(),
+            carried: self.carried.clone(),
+            given: turn.given,
+            text: turn.text,
+            reply_to: turn.reply_to,
+            checkpoint: None,
+            limit: (self.shared.settings)().turns_without_progress,
+        };
+        let ended = blocking(move || {
             let dir = ctx.store.git.worktree_path(agent);
-            let checkpoint = match ctx.store.git.checkpoint(&dir, &agent.to_string()) {
+            close.checkpoint = match ctx.store.git.checkpoint(&dir, &agent.to_string()) {
                 Ok(c) => Some(c),
                 Err(e) => {
                     eprintln!("x100: could not checkpoint {agent}: {e}");
                     None
                 }
             };
-            ctx.commit(|s, clock| {
-                let body = turn.text.join("\n\n");
-                let is_ceo = s.project().is_some_and(|p| p.team.ceo() == agent);
-                let reply = (is_ceo && !body.trim().is_empty()).then(|| Message {
-                    id: new_id(clock, MessageId::new),
-                    route: Route::CeoToBuilder,
-                    body,
-                    attachments: Vec::new(),
-                    in_reply_to: turn.reply_to,
-                });
-                let ending = Ending {
-                    agent,
-                    driver,
-                    given: turn.given,
-                    checkpoint,
-                    reply,
-                    warm_until: clock.now() + warm,
-                    limit,
-                };
-                (turns::ended(s, clock, ending), ())
-            })
+            ctx.commit(|s, clock| turns::close(&shared, s, clock, close))
         })
         .await
         .map_err(|e| format!("the log refused the end of a turn: {e}"))?;
-        let _ = msgs.send(Msg::TurnEnded { agent });
+        self.ended = ended;
+        let _ = msgs.send(Msg::TurnEnded {
+            agent,
+            driver,
+            last: ended,
+        });
         Ok(())
     }
 
-    /// The driver failed: the turn it was in is lost and its items wait for the next driver.
+    /// The driver failed: the turn it was in is lost and its items wait for the next driver. A
+    /// failure that looks like the provider's cools its harness and model off for every project.
     async fn fail(&mut self, failure: Failure) -> Option<Failure> {
+        if let (
+            Failure::Error {
+                provider: Some(why),
+                ..
+            },
+            Some(r),
+        ) = (&failure, &self.record)
+        {
+            let of = HarnessModel {
+                harness: r.harness,
+                model: r.model.clone(),
+            };
+            let (shared, why) = (Arc::clone(&self.shared), why.clone());
+            blocking(move || route::cool_off(&shared, of, why)).await;
+        }
         if self.turn.take().is_some() {
             let detail = format!("{failure:?}");
             self.transcript(Item::TurnEnded {
@@ -483,7 +525,7 @@ impl Actor_ {
             })
             .await;
         }
-        self.end(DriverEvent::Failed(failure.clone())).await;
+        self.end(vec![DriverEvent::Failed(failure.clone())]).await;
         Some(failure)
     }
 
@@ -500,16 +542,19 @@ impl Actor_ {
             How::Shutdown if mid_turn => DriverEvent::Failed(Failure::DaemonRestarted),
             How::Shutdown => DriverEvent::Stopped(StopReason::DaemonRestarted),
         };
-        self.end(event).await;
+        self.end(vec![event]).await;
     }
 
     /// Records the driver's end, and calls off the end of its warm period, which has no driver
     /// left to end.
-    async fn end(&self, event: DriverEvent) {
+    async fn end(&self, ending: Vec<DriverEvent>) {
         let (ctx, driver) = (Arc::clone(&self.ctx), self.driver);
         let ended = blocking(move || {
             ctx.commit(|s, _| {
-                let mut events = vec![(Actor::Daemon, ProjectEvent::Driver { driver, event })];
+                let mut events: Events = ending
+                    .into_iter()
+                    .map(|event| (Actor::Daemon, ProjectEvent::Driver { driver, event }))
+                    .collect();
                 if let Some(job) = turns::warm_period_job(s, driver) {
                     let cancel = JobEvent::Cancelled { by: Actor::Daemon };
                     events.push((Actor::Daemon, ProjectEvent::Job { job, event: cancel }));

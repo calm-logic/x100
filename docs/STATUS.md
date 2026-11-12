@@ -92,12 +92,29 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   animations, Lato not Manrope, no provider logo in the driver pill, no drawn window bar, a real composer with
   Attach and "By path". **Not verified:** macOS, a real file chooser (WSL has no portal, so "By path" exists),
   the licence check (`cargo-deny` is not installed here, CI runs it).
+- **M8, router, budgets and driver reuse.** Verified by the orchestrator in a clean copy of HEAD with only
+  M8's three crates added, because M3T's unfinished work in `x100-drivers` stops the main tree building: 291
+  tests pass twice, clippy and fmt clean. The choice is a pure function with one rule table: effort in range,
+  allowed, not cooling off, room on the machine and login, budget. Cheapest is the price of three input tokens
+  to one output token, ties broken deterministically. Table tests cover ranges, allow-lists, cool-offs and
+  full machines. In-process with the fake harness posing as two providers: nothing compatible makes the agent
+  wait and tells its parent, and a setting change starts it; a lead at its budget starts nothing while others
+  carry on; a project at its total starts nothing; a warm compatible driver is reused; a task after the warm
+  period or needing more effort gets a new driver; a driver past the context threshold between tasks is
+  retired and the next start pack carries the agent's recent tasks; a provider failure cools the model off.
+  `agents.set_budget`, `agents.set_effort`, `machines.set_cap` and `harnesses.rescan` are real. **Known
+  loss on retiring until M13:** what the agent read in handled messages and in accepted workers' reports.
 
 ## In progress
 
 - M15b, the agent's live terminal view in the desktop app. Opus subagent, owns `crates/x100-app`.
 - M3T, terminal drivers on local logins. Opus subagent, owns `crates/x100-drivers`.
-- M8, router and budgets. Opus subagent, owns `crates/x100-router`.
+- M16, the remaining tabs: reported. Verified and committed together with M15b, since both are in
+  `crates/x100-app`.
+- After M3T: wire the terminal drivers into the orchestrator and daemon (choose them, record their terminal,
+  serve `terminal.read` and `terminal.subscribe`), with the core changes M8 asked for (a login on the harness
+  record, a per-login cap setting, `Incompatible::LoginFull`, a retire reason for a warm driver that no longer
+  fits, a deadline for a wait for a driver, a machine update event).
 
 ## Waiting on the owner
 

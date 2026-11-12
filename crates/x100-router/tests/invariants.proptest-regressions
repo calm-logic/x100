@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c3f516773dee00da64acb141a866b0d4e3272a84cc9147b20e2f87a8d9f75d5c # shrinks to ops = [Charge { who: 0, micros: 0 }, Charge { who: 0, micros: 0 }, Charge { who: 0, micros: 2348328 }, SetBudget { lead: 0, dollars: 0 }, SetBudget { lead: 1, dollars: 0 }, Charge { who: 0, micros: 0 }, Charge { who: 0, micros: 0 }, Turn { who: 1, effort: Low }]
+cc 64cd945eb9377bddc32143c17e31ce92fa22ef8e06d915a6605f5a696f7004d3 # shrinks to ops = [Turn { who: 2, effort: Low }, Turn { who: 0, effort: Low }, Turn { who: 1, effort: Low }, Turn { who: 3, effort: Low }]

@@ -335,35 +335,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         ProjectId::from_u128(1),
         x100_core::id::AgentId::from_u128(1),
     );
-    let rep = x100_core::effort::EffortRange::FULL;
     let later: Vec<(Call, &str)> = vec![
-        (
-            SetMachineCap {
-                machine: x100_core::id::MachineId::from_u128(1),
-                cap: 1,
-            }
-            .into(),
-            "M8",
-        ),
-        (RescanHarnesses {}.into(), "M8"),
-        (
-            SetLeadBudget {
-                project: p,
-                lead: a,
-                budget: x100_core::money::Money::from_dollars(1),
-            }
-            .into(),
-            "M8",
-        ),
-        (
-            SetEffortRange {
-                project: p,
-                agent: a,
-                range: rep,
-            }
-            .into(),
-            "M8",
-        ),
         (
             ReplaceDriver {
                 project: p,
@@ -501,6 +473,10 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "drivers.start_pack",
         "drivers.stop",
         "daemon.set_clock",
+        "machines.set_cap",
+        "harnesses.rescan",
+        "agents.set_budget",
+        "agents.set_effort",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);
@@ -852,5 +828,85 @@ async fn a_job_that_wakes_an_agent_fires_and_a_cancelled_one_does_not() {
     let fired = c.project(project).unwrap().job(due).unwrap().fired;
     assert_eq!(fired, 1);
     assert_eq!(c.project(project).unwrap().job(later).unwrap().fired, 0);
+    d.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_builders_controls_for_drivers_work_through_the_protocol() {
+    let d = Local::start(|_| {}).await;
+    let c = d.client().await;
+    let project = create_project(&c, &d.env, "plants").await;
+    let code = |r: Result<Done, ClientError>| rpc_code(r.unwrap_err());
+
+    // A machine's cap: known machines only.
+    let machine = c.with_state(|s| s.daemon.machines().next().unwrap().id);
+    c.request(SetMachineCap { machine, cap: 3 }).await.unwrap();
+    c.wait_for(WAIT, |s| {
+        (s.daemon.machines().next()?.cap == 3).then_some(())
+    })
+    .await
+    .expect("the cap reaches the client");
+    let unknown = x100_core::id::MachineId::from_u128(999);
+    assert_eq!(
+        code(
+            c.request(SetMachineCap {
+                machine: unknown,
+                cap: 3
+            })
+            .await
+        ),
+        ErrorCode::NotFound
+    );
+
+    // A rescan finds the same harnesses again, under the ids the log already gave them.
+    let known: Vec<_> = c.with_state(|s| s.daemon.harnesses().map(|h| h.id).collect());
+    let found = c.request(RescanHarnesses {}).await.unwrap();
+    assert_eq!(found.harnesses, known);
+
+    // An effort range for the CEO, and a budget only for a lead, inside the project's total.
+    let ceo = c.with_state(|s| s.projects[&project].project().unwrap().ceo);
+    let range = x100_core::effort::EffortRange::new(
+        x100_core::effort::Effort::Low,
+        x100_core::effort::Effort::High,
+    )
+    .unwrap();
+    c.request(SetEffortRange {
+        project,
+        agent: ceo,
+        range,
+    })
+    .await
+    .unwrap();
+    c.wait_for(WAIT, |s| {
+        let team = &s.projects.get(&project)?.project()?.team;
+        (team.effort(ceo) == Some(range)).then_some(())
+    })
+    .await
+    .expect("the range reaches the client");
+    let budget = x100_core::money::Money::from_dollars(1);
+    assert_eq!(
+        code(
+            c.request(SetLeadBudget {
+                project,
+                lead: ceo,
+                budget
+            })
+            .await
+        ),
+        ErrorCode::Rejected,
+        "the CEO has no budget of its own"
+    );
+    let nobody = x100_core::id::AgentId::from_u128(999);
+    assert_eq!(
+        code(
+            c.request(SetLeadBudget {
+                project,
+                lead: nobody,
+                budget
+            })
+            .await
+        ),
+        ErrorCode::NotFound
+    );
     d.finish().await;
 }

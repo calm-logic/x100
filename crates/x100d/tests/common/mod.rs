@@ -22,7 +22,8 @@ name = "fake-anthropic"
 [[model]]
 model = "fake-small"
 context_window = 200000
-efforts = ["low", "medium"]
+# The CEO's task from the builder needs High, and a driver must meet it.
+efforts = ["low", "medium", "high"]
 price = { input = 1.0, output = 5.0, cache_read = 0.1 }
 
 # A turn that is still going when a test kills or stops the daemon.

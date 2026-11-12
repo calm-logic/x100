@@ -1,7 +1,7 @@
 use x100_orch::StopError;
 use x100_proto::{
     CancelJob, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack, ReadWaits, RpcError,
-    StartPack, StopDriver, Waits,
+    SetEffortRange, SetLeadBudget, StartPack, StopDriver, Waits,
 };
 
 use super::{project, refused};
@@ -81,5 +81,25 @@ pub async fn stop_driver(hub: &Hub, p: StopDriver) -> Result<Done, RpcError> {
             StopError::NotFound => RpcError::new(ErrorCode::NotFound, e.to_string()),
             StopError::NotLive => RpcError::new(ErrorCode::WrongState, e.to_string()),
         })?;
+    Ok(Done {})
+}
+
+/// Through the orchestrator, so the change is checked and appended under the project's lock, and
+/// the next decision for the lead's agents reads it.
+pub async fn set_budget(hub: &Hub, p: SetLeadBudget) -> Result<Done, RpcError> {
+    project(hub, p.project)?;
+    hub.orch
+        .set_budget(p.project, p.lead, p.budget)
+        .await
+        .map_err(refused)?;
+    Ok(Done {})
+}
+
+pub async fn set_effort(hub: &Hub, p: SetEffortRange) -> Result<Done, RpcError> {
+    project(hub, p.project)?;
+    hub.orch
+        .set_effort(p.project, p.agent, p.range)
+        .await
+        .map_err(refused)?;
     Ok(Done {})
 }

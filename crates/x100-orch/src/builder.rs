@@ -6,15 +6,19 @@
 //! progress note. Such a message is still delivered as the message it is: the CEO answers the
 //! builder, and finds the task it opened in its records.
 
+use x100_core::agent::{AgentEvent, AgentState};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, FileId, JobId, MessageId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::{JobEvent, JobState};
+use x100_core::ledger::Budgets;
 use x100_core::message::{Message, Route};
+use x100_core::money::Money;
 use x100_core::party::{Actor, Party};
 use x100_core::task::{Assignment, Opening, Task, TaskState};
+use x100_core::team::TeamOp;
 use x100_core::time::Clock;
 
 use crate::ctx::{Events, ProjectCtx};
@@ -28,6 +32,9 @@ pub enum Refused {
     NotFound(String),
     #[error("{0}")]
     WrongState(String),
+    /// It breaks a rule, such as the leads' budgets passing the project's total.
+    #[error("{0}")]
+    Rejected(String),
     #[error(transparent)]
     Store(#[from] x100_store::Error),
 }
@@ -222,5 +229,61 @@ pub(crate) fn cancel_job(ctx: &ProjectCtx, job: JobId) -> Result<(), Refused> {
                 other.name()
             ))),
         }
+    })?
+}
+
+/// An agent on the team and not retired.
+fn live(state: &ProjectState, agent: AgentId) -> Result<(), Refused> {
+    match state.agent(agent).map(|a| &a.state) {
+        Some(AgentState::Retired) => Err(Refused::WrongState(format!("{agent} is retired"))),
+        Some(_) => Ok(()),
+        None => Err(Refused::NotFound(format!("no agent {agent}"))),
+    }
+}
+
+/// The builder sets a lead's budget, which the leads' budgets together may not take past the
+/// project's total. Blocks.
+pub(crate) fn set_budget(ctx: &ProjectCtx, lead: AgentId, budget: Money) -> Result<(), Refused> {
+    ctx.commit(|s, _| -> Decided<()> {
+        if let Err(e) = live(s, lead) {
+            return refused(e);
+        }
+        let Some(project) = s.project() else {
+            return refused(Refused::NotFound("no project".into()));
+        };
+        let op = TeamOp::SetBudget {
+            agent: lead,
+            budget,
+        };
+        let shaped = match project.team.apply(&op) {
+            Ok(t) => t,
+            Err(e) => return refused(Refused::Rejected(e.to_string())),
+        };
+        if let Err(e) = Budgets::in_force(&project.settings, &shaped).check_leads() {
+            return refused(Refused::Rejected(e.to_string()));
+        }
+        let event = ProjectEvent::Agent {
+            agent: lead,
+            event: AgentEvent::BudgetSet(budget),
+        };
+        (vec![(Actor::Builder, event)], Ok(()))
+    })?
+}
+
+/// The builder sets an agent's effort range. Blocks.
+pub(crate) fn set_effort(
+    ctx: &ProjectCtx,
+    agent: AgentId,
+    range: EffortRange,
+) -> Result<(), Refused> {
+    ctx.commit(|s, _| -> Decided<()> {
+        if let Err(e) = live(s, agent) {
+            return refused(e);
+        }
+        let event = ProjectEvent::Agent {
+            agent,
+            event: AgentEvent::EffortSet(range),
+        };
+        (vec![(Actor::Builder, event)], Ok(()))
     })?
 }

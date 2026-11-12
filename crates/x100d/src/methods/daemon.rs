@@ -4,8 +4,9 @@ use x100_core::event::DaemonEvent;
 use x100_core::party::Actor;
 use x100_core::settings::DaemonSetting;
 use x100_proto::{
-    Done, ErrorCode, LogId, LogPage, Page, PositionedEntry, ReadLog, ReadTranscript, RpcError,
-    SetClock, SetDaemonSetting, TranscriptPage,
+    Done, ErrorCode, LogId, LogPage, Page, PositionedEntry, ReadLog, ReadTranscript,
+    RescanHarnesses, Rescanned, RpcError, SetClock, SetDaemonSetting, SetMachineCap,
+    TranscriptPage,
 };
 
 use super::{blocking, project, refused, store_error};
@@ -125,11 +126,58 @@ pub async fn set_clock(hub: &Hub, p: SetClock) -> Result<Done, RpcError> {
             hub.orch.job_fired(id, f.job, f.at).await.map_err(refused)?;
         }
     }
-    // The daemon's own jobs have nothing to act on yet, as on the real clock.
-    if let Some(jobs) = hub.daemon_jobs() {
-        blocking(move || jobs.fire_due(|_| {}))
-            .await
-            .map_err(job_error)?;
+    // The daemon's own jobs: cool-offs ending, which agents waiting for a driver may be waiting on.
+    let jobs = hub.daemon_jobs();
+    let fired = blocking(move || {
+        let mut fired = Vec::new();
+        jobs.fire_due(|f| fired.push(f)).map(|()| fired)
+    })
+    .await
+    .map_err(job_error)?;
+    for f in fired {
+        hub.orch.daemon_job_fired(f.job).await;
     }
     Ok(Done {})
+}
+
+/// A machine's cap on live drivers. Lowering it stops no driver; raising it lets agents waiting
+/// for room try again.
+pub async fn set_cap(hub: &Hub, p: SetMachineCap) -> Result<Done, RpcError> {
+    if hub
+        .log
+        .with_state(|d| d.machines().all(|m| m.id != p.machine))
+    {
+        return Err(RpcError::new(
+            ErrorCode::NotFound,
+            format!("no machine {}", p.machine),
+        ));
+    }
+    let log = hub.log.clone();
+    let event = DaemonEvent::MachineCapSet {
+        machine: p.machine,
+        cap: p.cap,
+    };
+    blocking(move || log.append(Actor::Builder, event))
+        .await
+        .map_err(|e| store_error(&e))?;
+    hub.orch.reconsider();
+    Ok(Done {})
+}
+
+/// Looks for harnesses again, records what changed, and lets the router use what was found.
+pub async fn rescan(hub: &Hub, _: RescanHarnesses) -> Result<Rescanned, RpcError> {
+    let (config, log, desk) = (hub.config.clone(), hub.log.clone(), hub.desk.clone());
+    let found = blocking(move || crate::discover::discover(&config, &log, desk))
+        .await
+        .map_err(|e| RpcError::new(ErrorCode::Internal, e.to_string()))?;
+    if found.harnesses.is_empty() {
+        return Err(RpcError::new(
+            ErrorCode::Unavailable,
+            "no harness was found on this machine",
+        ));
+    }
+    let mut harnesses: Vec<_> = found.harnesses.keys().copied().collect();
+    harnesses.sort();
+    hub.orch.set_harnesses(found.harnesses);
+    Ok(Rescanned { harnesses })
 }

@@ -1,18 +1,20 @@
 //! What a job that fired does in a project. The job clock has already written the firing; this is
 //! the reaction, appended after it: the waits it ends, the note it delivers, the fresh task it
-//! delegates. Ending a warm period stops a process, so the turn loop does that part.
+//! delegates, the tasks given up when a wait for a driver runs out. Ending a warm period stops a
+//! process, so the turn loop does that part.
 
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::id::TaskId;
 use x100_core::inbox::InboxItem;
-use x100_core::job::{Job, JobEvent, ProjectJob};
+use x100_core::job::{Job, JobEvent, ProjectJob, ProjectRoutine};
 use x100_core::party::{Actor, Party};
 use x100_core::task::{Assignment, Opening, Task};
 use x100_core::time::{Clock, Timestamp};
 
 use crate::ctx::Events;
 use crate::ids::new_id;
+use crate::route;
 use crate::settle::{deliver, settle};
 
 pub(crate) fn fired(
@@ -71,7 +73,10 @@ pub(crate) fn fired(
                 out.push(deliver(clock, *to, InboxItem::Task { task: id }));
             }
         }
-        ProjectJob::Routine(_) => {}
+        ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, wait }) => {
+            out.extend(route::deadline_passed(state, clock, *agent, *wait));
+        }
+        ProjectJob::Routine(ProjectRoutine::EndWarmPeriod { .. }) => {}
     }
     out
 }

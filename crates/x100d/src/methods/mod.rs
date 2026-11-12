@@ -33,6 +33,7 @@ pub(crate) fn refused(e: Refused) -> RpcError {
     match e {
         Refused::NotFound(m) => RpcError::new(ErrorCode::NotFound, m),
         Refused::WrongState(m) => RpcError::new(ErrorCode::WrongState, m),
+        Refused::Rejected(m) => RpcError::new(ErrorCode::Rejected, m),
         Refused::Store(e) => store_error(&e),
     }
 }
@@ -72,6 +73,10 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ReadWaits(p) => out(agents::waits(hub, p)),
         Call::ReadStartPack(p) => out(agents::start_pack(hub, p)),
         Call::StopDriver(p) => out(agents::stop_driver(hub, p).await),
+        Call::SetLeadBudget(p) => out(agents::set_budget(hub, p).await),
+        Call::SetEffortRange(p) => out(agents::set_effort(hub, p).await),
+        Call::SetMachineCap(p) => out(daemon::set_cap(hub, p).await),
+        Call::RescanHarnesses(p) => out(daemon::rescan(hub, p).await),
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)

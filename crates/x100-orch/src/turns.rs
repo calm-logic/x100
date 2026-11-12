@@ -4,21 +4,27 @@
 //! through a nudge in the inbox, and after the daemon's set number of such turns in a row the task
 //! is reported failed. The count rides on the nudge itself, so it survives a change of driver.
 
+use std::collections::BTreeSet;
+
 use x100_core::agent::{AgentEvent, AgentState};
-use x100_core::driver::DriverEvent;
+use x100_core::driver::{Driver, DriverEvent};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::git::CommitId;
-use x100_core::id::{AgentId, DriverId, InboxItemId, JobId, TaskId};
+use x100_core::id::{AgentId, DriverId, InboxItemId, JobId, MessageId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::{Job, JobEvent, JobState, ProjectJob, ProjectRoutine, Schedule};
-use x100_core::message::Message;
+use x100_core::message::{Message, Route};
 use x100_core::party::Actor;
 use x100_core::task::TaskFailure;
 use x100_core::time::{Clock, Timestamp};
 
+use x100_router::{EndWhy, Upkeep, Warm};
+
+use crate::Shared;
 use crate::ctx::Events;
 use crate::ids::new_id;
+use crate::route;
 use crate::settle::deliver;
 use crate::tools::report_failed;
 
@@ -61,6 +67,82 @@ pub(crate) fn warm_period_job(state: &ProjectState, driver: DriverId) -> Option<
     })
 }
 
+/// What a turn that completed leaves to record.
+pub(crate) struct Close {
+    pub agent: AgentId,
+    pub driver: DriverId,
+    pub record: Option<Driver>,
+    /// Every task the driver has had a turn on.
+    pub carried: BTreeSet<TaskId>,
+    pub given: Vec<InboxItemId>,
+    /// What the driver said, which for the CEO is its reply in the chat.
+    pub text: Vec<String>,
+    pub reply_to: Option<MessageId>,
+    pub checkpoint: Option<CommitId>,
+    pub limit: u32,
+}
+
+/// The end of a turn, and whether the router ends its driver with it. Decided in the same append
+/// as the turn's end, so the log never shows warm a driver the router had already ended.
+pub(crate) fn close(
+    shared: &Shared,
+    state: &ProjectState,
+    clock: &dyn Clock,
+    c: Close,
+) -> (Events, bool) {
+    let body = c.text.join("\n\n");
+    let is_ceo = state.project().is_some_and(|p| p.team.ceo() == c.agent);
+    let reply = (is_ceo && !body.trim().is_empty()).then(|| Message {
+        id: new_id(clock, MessageId::new),
+        route: Route::CeoToBuilder,
+        body,
+        attachments: Vec::new(),
+        in_reply_to: c.reply_to,
+    });
+    let warm = Warm {
+        driver: c.driver,
+        carried: c.carried,
+        accepted: false,
+    };
+    let end = match route::upkeep_in(shared, state, &warm, clock.now()) {
+        Upkeep::End(why) => Some(why),
+        Upkeep::Keep => None,
+    };
+    let warm_until = match (&end, &c.record) {
+        (Some(_), _) => None,
+        (None, Some(r)) => Some(
+            shared
+                .daemon
+                .with_state(|d| x100_router::warm_until(d, r, clock.now())),
+        ),
+        (None, None) => Some(clock.now() + x100_router::DEFAULT_WARM),
+    };
+    let ending = Ending {
+        agent: c.agent,
+        driver: c.driver,
+        given: c.given,
+        checkpoint: c.checkpoint,
+        reply,
+        warm_until,
+        limit: c.limit,
+    };
+    let mut events = ended(state, clock, ending);
+    for event in end.map(end_events).unwrap_or_default() {
+        let driver = c.driver;
+        events.push((Actor::Daemon, ProjectEvent::Driver { driver, event }));
+    }
+    (events, end.is_some())
+}
+
+/// How a driver the router ends between turns is recorded. One that no longer fits is recorded as
+/// a planned handoff with no last turn: between turns there is nothing left for one to write.
+pub(crate) fn end_events(why: EndWhy) -> Vec<DriverEvent> {
+    match why {
+        EndWhy::Retire(reason) => vec![DriverEvent::Retired(reason)],
+        EndWhy::Unfit(reason) => vec![DriverEvent::HandoffStarted(reason), DriverEvent::TurnEnded],
+    }
+}
+
 /// A turn that completed.
 pub(crate) struct Ending {
     pub agent: AgentId,
@@ -69,8 +151,9 @@ pub(crate) struct Ending {
     pub checkpoint: Option<CommitId>,
     /// The CEO's text, as its reply in the chat.
     pub reply: Option<Message>,
-    /// When the driver's warm period ends: its model's cache lifetime from now.
-    pub warm_until: Timestamp,
+    /// When the driver's warm period ends: its model's cache lifetime from now. `None` when it
+    /// ends with this turn.
+    pub warm_until: Option<Timestamp>,
     /// Turns in a row without a report or a wait before the task is reported failed.
     pub limit: u32,
 }
@@ -132,12 +215,14 @@ pub(crate) fn ended(state: &ProjectState, clock: &dyn Clock, e: Ending) -> Event
             ));
         }
     }
-    let job = Job {
-        id: new_id(clock, JobId::new),
-        when: Schedule::Once { at: e.warm_until },
-        does: ProjectJob::Routine(ProjectRoutine::EndWarmPeriod { driver: e.driver }),
-    };
-    out.push((Actor::Daemon, ProjectEvent::JobScheduled(job)));
+    if let Some(at) = e.warm_until {
+        let job = Job {
+            id: new_id(clock, JobId::new),
+            when: Schedule::Once { at },
+            does: ProjectJob::Routine(ProjectRoutine::EndWarmPeriod { driver: e.driver }),
+        };
+        out.push((Actor::Daemon, ProjectEvent::JobScheduled(job)));
+    }
     out
 }
 

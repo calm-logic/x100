@@ -37,6 +37,9 @@ use crate::tools::who;
 const CHARS_PER_TOKEN: u64 = 4;
 const TRANSCRIPT_ENTRIES: u64 = 400;
 const RESULT_CHARS: usize = 400;
+/// How many of its finished tasks an agent's pack recalls, with their reports and last notes. A
+/// retired driver's context is gone, and this is what the next one needs of it until memories.
+const RECENT_TASKS: usize = 5;
 
 /// Builds an agent's start pack from its records. Blocks on the store and git.
 pub(crate) fn build(
@@ -166,6 +169,11 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
             let _ = writeln!(p, "- {}: {} ({note})", t.task.id, t.task.title);
         }
     }
+    let recent = recent_tasks(state, agent);
+    if !recent.is_empty() {
+        p.push_str("\nYOUR RECENT TASKS, LATEST LAST (what you reported, and your last note):\n");
+        p.push_str(&recent);
+    }
     let business = open_business(state, agent);
     if !business.is_empty() {
         let _ = write!(p, "\nOPEN BUSINESS:\n{business}");
@@ -184,6 +192,43 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
         reason(state, agent, why)
     );
     p
+}
+
+/// The tasks `agent` reported most recently, each with its report and the last progress note.
+fn recent_tasks(state: &ProjectState, agent: AgentId) -> String {
+    let mut done: Vec<_> = state
+        .tasks()
+        .filter_map(|t| {
+            let (asg, report) = match &t.state {
+                TaskState::InReview(a, r) | TaskState::Promoting(a, r) | TaskState::Done(a, r) => {
+                    (a, r)
+                }
+                _ => return None,
+            };
+            (asg.assignee == agent).then_some((t, report))
+        })
+        .collect();
+    done.sort_by_key(|(t, _)| (t.opened, t.task.id));
+    let skip = done.len().saturating_sub(RECENT_TASKS);
+    let mut out = String::new();
+    for (t, report) in done.into_iter().skip(skip) {
+        let outcome = match &report.outcome {
+            x100_core::task::Outcome::Completed => "completed".to_owned(),
+            x100_core::task::Outcome::Failed(f) => format!("failed: {}", items::failure(f)),
+        };
+        let _ = writeln!(
+            out,
+            "- {} \"{}\", {}, {outcome}. Report: {}",
+            t.task.id,
+            t.task.title,
+            t.state.name(),
+            report.summary
+        );
+        if let Some(note) = &t.progress {
+            let _ = writeln!(out, "  Last note: {}", note.note);
+        }
+    }
+    out
 }
 
 /// A member of the team as a labelled line: `Lead Tech: agt_...` or `Worker Backend: agt_...`.

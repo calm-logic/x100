@@ -6,7 +6,6 @@
 //! subscriptions. The daemon starts again from the store: drivers do not outlive it, so what the
 //! log shows as live is settled first, and a process a killed daemon left behind is stopped.
 
-mod chooser;
 mod config;
 mod conn;
 mod discover;
@@ -33,7 +32,6 @@ pub use config::{
 pub use error::Error;
 pub use unavailable::arrives_with;
 
-use chooser::FirstAllowed;
 use hub::Hub;
 
 pub struct Daemon {
@@ -101,15 +99,18 @@ impl Daemon {
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
         let tools = ToolServer::start(Arc::clone(&desk)).await?;
         let found = discover::discover(&config, &log, desk.clone())?;
-        let chooser = FirstAllowed {
-            log: log.clone(),
-            machine: found.machine,
-            available: found.harnesses.keys().copied().collect(),
-        };
+        // A rescan makes harnesses again, which reach the tools through the same desk.
+        let rescan_tools = Arc::clone(&desk);
+        // The daemon log's job clock: the orchestrator tells it of each cool-off it starts.
+        let daemon_jobs = x100_jobs::Scheduler::new(log.clone(), Arc::clone(&clock));
         let orch = Orchestrator::new(x100_orch::Config {
             clock: Arc::clone(&clock),
             harnesses: found.harnesses,
-            chooser: Arc::new(chooser),
+            machine: found.machine,
+            // No harness runs on a login yet: terminal drivers arrive with M3T.
+            logins: Default::default(),
+            daemon: log.clone(),
+            daemon_jobs: daemon_jobs.clone(),
             settings,
             processes: Arc::new(processes),
             desk,
@@ -117,7 +118,13 @@ impl Daemon {
             // Turns run side by side, except where a fake clock asks for a repeatable run.
             serial: config.fake_clock.is_some(),
         });
-        let hub = Arc::new(Hub::new(config.clone(), log, orch));
+        let hub = Arc::new(Hub::new(
+            config.clone(),
+            log,
+            orch,
+            rescan_tools,
+            daemon_jobs,
+        ));
 
         let projects: Vec<_> = hub
             .log
