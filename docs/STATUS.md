@@ -152,10 +152,39 @@ Running, each on its own crates:
   `~/x100/` and opens the builder's task. A project's own state moves to the daemon's data directory. The
   name-and-directory form is removed. Also in that step: the facts table above an agent's output is deleted,
   and memories, skills and trials are hidden until built. Opus subagent, edits most crates.
-- **M10, the sandbox**, as a crate on its own (`crates/x100-sandbox`). Opus subagent.
-- **M11, the vault and proxy**, as a crate on its own (`crates/x100-vault`). Opus subagent.
-- **M12, the gate**, as a crate on its own (`crates/x100-gate`). Sonnet subagent.
-- **Homebox research**, read-only: how its API, keys, projects and deploys work. Opus subagent.
+
+Built as crates on their own and verified by the orchestrator with `-p`, each twice, clippy and fmt clean.
+**None is wired into the daemon yet**, so nothing an agent does is contained, kept from credentials or held:
+
+- **M10, `x100-sandbox`.** 24 tests: the same 12 on bubblewrap and on containers (Docker; the subagent also
+  ran them on Podman). From inside, deleting the home, writing outside the worktree and a direct outbound
+  connection fail or touch only the sandbox. Two sandboxes cannot see each other. A commit inside merges
+  outside. The next driver finds the last one's files and its background server still serving. Destroy ends
+  everything, a double-forked process included. The real `claude` and `codex` start inside (`--version` only).
+  Both endpoints (proxy, daemon tools) are carried by one tunnel over the helper's standard input and output,
+  so addresses are the same inside and out. Measured by the subagent under load from other builds: create
+  20 ms on bubblewrap and about 190 ms on Docker, a command start 7 ms and 80 ms, and no measurable overhead on
+  a build of the workspace without the app (20.1 s and 21.0 s against 21.7 s outside). Numbers are in
+  `crates/x100-sandbox/MEASUREMENTS.md`. **Limits:** every agent can read and write the project's git objects
+  and other agents' branch refs. On macOS nothing ran, and the container backend there needs Linux builds of
+  the harnesses in the image and cannot reach Claude's Keychain login or Codex's app-server socket.
+- **M11, `x100-vault`.** 46 tests. A client that knows only a reference makes an HTTPS request through the
+  proxy to a local server that requires the real value, and succeeds. The same request to a host not on the
+  credential's list arrives with the reference unreplaced. A search of everything the client saw finds no
+  form of the value. The store's file holds no form of it, and the key file is mode 0600. Streamed bodies of
+  several megabytes pass without being buffered whole, with references and values split across writes still
+  handled. The real `curl`, `claude` and `codex` went through the proxy with only a reference as their key,
+  and a local fake provider received the real value, which settles the certificate-authority unknowns in
+  HARNESSES.md. Encryption is XChaCha20-Poly1305 (RustCrypto), TLS is rustls. **Limits:** a request body over
+  4 MiB with a declared length is passed through unswapped. A value broken up by terminal escape sequences is
+  not caught. With no secret service here the key is a file. The macOS Keychain path is unbuilt and unrun.
+- **M12, `x100-gate`.** 44 tests. One rule table covers every tool (a new tool without a rule does not
+  compile), merges, egress by kind of host and method, and commands by pattern. At each "Ask me about" level
+  the table tests give: at High risk only a production deploy is held and a file edit is not, at Nothing
+  neither, at Every decision both, and a team change is held at every level. What no rule covers goes to a
+  classifier whose answer is parsed strictly, and no answer or an unparseable one is High. An "allowed once"
+  grant is exact, single-use and per agent. **Not run:** the plan's end-to-end part, which needs the wiring,
+  and the classifier's prompt against a real model.
 
 Queued, in this order:
 

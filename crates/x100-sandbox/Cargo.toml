@@ -7,3 +7,22 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+# The one helper program a sandbox needs: inside it, the end of the tunnel and the runner of a
+# container's commands; outside it, the starter of a container's commands.
+[[bin]]
+name = "x100-sandbox"
+path = "src/bin/x100-sandbox.rs"
+
+[dependencies]
+x100-drivers = { path = "../x100-drivers" }
+async-trait = "0.1"
+nix = { version = "0.29", features = ["signal", "process", "user"] }
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
+
+[dev-dependencies]
+x100-core = { path = "../x100-core" }
+x100-store = { path = "../x100-store" }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }

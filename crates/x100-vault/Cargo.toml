@@ -7,3 +7,40 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+x100-core = { path = "../x100-core" }
+aho-corasick = "1"
+base64 = "0.22"
+bytes = "1"
+chacha20poly1305 = "0.10"
+getrandom = "0.3"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+keyring-core = "1"
+memchr = "2"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["std"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+zeroize = "1"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[dev-dependencies]
+x100-drivers = { path = "../x100-drivers", features = ["testing"] }
+proptest = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
