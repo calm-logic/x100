@@ -173,9 +173,7 @@ async fn connect(socket: &Path, wire: &mut Wire) -> std::io::Result<()> {
 #[async_trait]
 impl Harness for CodexTerminal {
     fn kind(&self) -> HarnessKind {
-        HarnessKind::Custom {
-            name: "codex-terminal".into(),
-        }
+        HarnessKind::CodexTerminal
     }
 
     fn models(&self) -> Vec<ModelOffer> {

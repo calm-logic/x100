@@ -67,6 +67,8 @@ pub struct Setup<'a> {
     pub settings: DaemonSettings,
     /// Serve the tools over MCP as well as in-process.
     pub serve: bool,
+    /// The scripts, by number, whose harness the daemon's log puts on a provider login.
+    pub logins: &'a [(usize, &'a str)],
 }
 
 impl<'a> Setup<'a> {
@@ -83,6 +85,7 @@ impl<'a> Setup<'a> {
             budget: Money::from_dollars(50),
             settings,
             serve: false,
+            logins: &[],
         }
     }
 }
@@ -107,6 +110,7 @@ pub fn daemon_log(
         name: "local".into(),
         harnesses: Vec::new(),
         cap: 16,
+        passed_over: Vec::new(),
     })];
     events.extend(
         all_settings(settings)
@@ -119,8 +123,13 @@ pub fn daemon_log(
     (log, jobs)
 }
 
-/// Records harnesses in the daemon's log as the daemon's discovery would.
-pub fn add_harnesses(log: &DaemonLog, harnesses: &HashMap<HarnessId, Arc<dyn Harness>>) {
+/// Records harnesses in the daemon's log as the daemon's discovery would, those named in `logins`
+/// on that login.
+pub fn add_harnesses(
+    log: &DaemonLog,
+    harnesses: &HashMap<HarnessId, Arc<dyn Harness>>,
+    logins: &[(HarnessId, &str)],
+) {
     let mut ids: Vec<_> = harnesses.keys().copied().collect();
     ids.sort();
     let events = ids
@@ -132,6 +141,10 @@ pub fn add_harnesses(log: &DaemonLog, harnesses: &HashMap<HarnessId, Arc<dyn Har
                 kind: h.kind(),
                 support: h.supports(),
                 models: h.models(),
+                login: logins
+                    .iter()
+                    .find(|(h, _)| *h == id)
+                    .map(|(_, l)| x100_core::harness::Login((*l).into())),
             };
             (Actor::Daemon, DaemonEvent::HarnessAdded(record))
         })
@@ -153,6 +166,7 @@ fn all_settings(s: &DaemonSettings) -> Vec<DaemonSetting> {
         D::LastTurnLimit(s.last_turn_limit),
         D::TurnsWithoutProgress(s.turns_without_progress),
         D::CoolOff(s.cool_off),
+        D::TerminalDriversPerLogin(s.terminal_drivers_per_login),
     ]
 }
 
@@ -239,14 +253,18 @@ impl World {
             harnesses.insert(harness_id(n), Arc::new(recording));
         }
         let ids: Vec<HarnessId> = (0..scripts.len()).map(harness_id).collect();
-        add_harnesses(&daemon, &harnesses);
+        let logins: Vec<_> = setup
+            .logins
+            .iter()
+            .map(|(n, l)| (harness_id(*n), *l))
+            .collect();
+        add_harnesses(&daemon, &harnesses, &logins);
         let (processes, _) =
             ProcessRegistry::open_and_reap(dir.path().join("drivers.json")).expect("registry");
         let orch = Orchestrator::new(Config {
             clock: Arc::clone(&shared),
             harnesses,
             machine: MACHINE,
-            logins: Default::default(),
             daemon: daemon.clone(),
             daemon_jobs: daemon_jobs.clone(),
             settings,

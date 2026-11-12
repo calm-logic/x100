@@ -8,6 +8,7 @@
 
 mod config;
 mod conn;
+mod defaults;
 mod discover;
 mod error;
 mod hub;
@@ -26,7 +27,8 @@ use x100_orch::{AllowAll, Desk, NoSandbox, Orchestrator, ProcessRegistry, ToolSe
 use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
-    Config, DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, QUEUE_CAPACITY, SCRIPTS_ENV,
+    CLAUDE_BASE_URL_ENV, CLAUDE_LOGIN_ENV, CODEX_BASE_URL_ENV, CODEX_LOGIN_ENV, Config,
+    DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, QUEUE_CAPACITY, SCRIPTS_ENV,
     default_data_dir,
 };
 pub use error::Error;
@@ -107,8 +109,6 @@ impl Daemon {
             clock: Arc::clone(&clock),
             harnesses: found.harnesses,
             machine: found.machine,
-            // No harness runs on a login yet: terminal drivers arrive with M3T.
-            logins: Default::default(),
             daemon: log.clone(),
             daemon_jobs: daemon_jobs.clone(),
             settings,

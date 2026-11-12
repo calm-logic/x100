@@ -24,7 +24,7 @@ use x100_core::time::Clock;
 
 use crate::handle::DriverHandle;
 use crate::harness::{
-    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, StartError, check_offered,
+    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError, check_offered,
 };
 use crate::supervisor::Launch;
 use crate::version::VersionPolicy;
@@ -161,17 +161,27 @@ pub(crate) enum Provider<'a> {
     },
 }
 
+/// Codex's own sandbox: off, unless the driver may only change its own directory, where Codex's
+/// sandbox holds its commands to that directory with no network.
+pub(crate) fn sandbox_mode(permissions: Permissions) -> &'static str {
+    match permissions {
+        Permissions::Worktree => "workspace-write",
+        Permissions::AllowAll | Permissions::AskDaemon => "danger-full-access",
+    }
+}
+
 /// The approval policy is set on `thread/start`, not here: 0.167.1 refuses `untrusted` in the file
 /// but takes it on the thread.
 pub(crate) fn config_toml(provider: &Provider, spec: &DriverSpec) -> String {
     // Keys at the top level come before the first table.
     let mut toml = format!(
         "model = {model}\n\
-         sandbox_mode = \"danger-full-access\"\n\
+         sandbox_mode = \"{sandbox}\"\n\
          check_for_update_on_startup = false\n\
          project_doc_max_bytes = 0\n\
          model_auto_compact_token_limit = 1000000000000\n",
         model = toml_str(&spec.model.0),
+        sandbox = sandbox_mode(spec.permissions),
     );
     match provider {
         Provider::Keyed { .. } => toml.push_str("model_provider = \"x100\"\n"),
@@ -222,9 +232,11 @@ pub(crate) fn config_toml(provider: &Provider, spec: &DriverSpec) -> String {
         "\n[projects.{dir}]\ntrust_level = \"trusted\"\n",
         dir = toml_str(&spec.dir.display().to_string()),
     ));
+    // The daemon gates its own tools, so Codex never asks about them, whatever its sandbox.
     if let Some(tools) = &spec.tools {
         toml.push_str(&format!(
-            "\n[mcp_servers.x100]\nurl = {url}\nbearer_token_env_var = \"{TOKEN_VAR}\"\n",
+            "\n[mcp_servers.x100]\nurl = {url}\nbearer_token_env_var = \"{TOKEN_VAR}\"\n\
+             default_tools_approval_mode = \"approve\"\n",
             url = toml_str(&tools.url),
         ));
     }

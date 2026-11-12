@@ -27,6 +27,7 @@ pub use actions::{kind, request};
 
 use crate::words;
 use actions::action_event;
+pub(crate) use drivers::unfit;
 use drivers::{driver_event, handoff, incompatible, one_off};
 
 /// One line of the Log: who did it, and what, as a sentence without a full stop.
@@ -458,6 +459,9 @@ fn job(n: &Names, does: &ProjectJob) -> String {
         }
         ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, .. }) => {
             format!("the deadline of {}'s wait", n.agent(*agent))
+        }
+        ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent }) => {
+            format!("the deadline of {}'s wait for a driver", n.agent(*agent))
         }
     }
 }

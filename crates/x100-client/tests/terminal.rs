@@ -1,5 +1,6 @@
 //! `follow_terminal` against a scripted daemon on a socket: the client's side of
-//! `terminal.subscribe` and `terminal.chunk`, which the real daemon does not serve yet.
+//! `terminal.subscribe` and `terminal.chunk`, with a dropped connection the real daemon cannot be
+//! made to drop on cue. The daemon's own tests follow real terminals through it.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

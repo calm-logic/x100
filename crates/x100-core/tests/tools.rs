@@ -211,10 +211,15 @@ fn inbox_items_and_routines_round_trip() {
         let json = serde_json::to_string(&item).unwrap();
         assert_eq!(serde_json::from_str::<InboxItem>(&json).unwrap(), item);
     }
-    let routine = ProjectJob::Routine(ProjectRoutine::WaitDeadline {
-        agent: agent(1),
-        wait: WaitId::from_u128(1),
-    });
-    let json = serde_json::to_string(&routine).unwrap();
-    assert_eq!(serde_json::from_str::<ProjectJob>(&json).unwrap(), routine);
+    let routines = [
+        ProjectRoutine::WaitDeadline {
+            agent: agent(1),
+            wait: WaitId::from_u128(1),
+        },
+        ProjectRoutine::DriverWaitDeadline { agent: agent(1) },
+    ];
+    for routine in routines.map(ProjectJob::Routine) {
+        let json = serde_json::to_string(&routine).unwrap();
+        assert_eq!(serde_json::from_str::<ProjectJob>(&json).unwrap(), routine);
+    }
 }

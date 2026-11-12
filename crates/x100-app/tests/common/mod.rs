@@ -27,7 +27,7 @@ const SCRIPTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../x100-orch/tests/s
 
 /// The daemon's binaries, built by this workspace. A test of this package cannot name another
 /// package's binary, so they are found beside the test's own executable, and built if missing.
-fn binary(name: &str) -> PathBuf {
+pub fn binary(name: &str) -> PathBuf {
     let exe = std::env::current_exe().expect("the test's path");
     let dir = exe
         .parent()

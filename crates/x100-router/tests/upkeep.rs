@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use x100_core::driver::{PlannedReason, RetireReason};
+use x100_core::driver::{RetireReason, Unfit};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::DaemonEvent;
 use x100_core::harness::Machine;
@@ -16,7 +16,7 @@ use x100_core::money::Money;
 use x100_core::settings::DaemonSetting;
 use x100_core::testing::START;
 use x100_core::time::Timestamp;
-use x100_router::{EndWhy, Upkeep, upkeep, warm_until};
+use x100_router::{Upkeep, upkeep, warm_until};
 
 struct Case {
     /// The lead still holds the task its driver worked on.
@@ -75,6 +75,7 @@ fn run(c: &Case) -> Upkeep {
         name: "local".into(),
         harnesses: vec![CHEAP, DEAR],
         cap: 8,
+        passed_over: Vec::new(),
     })];
     events.extend(
         harnesses(c.compaction)
@@ -96,7 +97,7 @@ fn run(c: &Case) -> Upkeep {
 
 #[test]
 fn warm_drivers_are_kept_or_ended_by_the_table() {
-    let retire = |r| Upkeep::End(EndWhy::Retire(r));
+    let retire = Upkeep::End;
     let four_hours = Duration::from_secs(4 * 3600);
     let cases: Vec<(&str, Case, Upkeep)> = vec![
         ("an ordinary warm driver is kept", base(), Upkeep::Keep),
@@ -157,7 +158,7 @@ fn warm_drivers_are_kept_or_ended_by_the_table() {
                 mid_task: true,
                 ..base()
             },
-            Upkeep::End(EndWhy::Unfit(PlannedReason::Disallowed)),
+            Upkeep::End(RetireReason::Unfit(Unfit::Disallowed)),
         ),
     ];
     let mut failed = Vec::new();

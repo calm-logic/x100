@@ -21,6 +21,12 @@ pub const LAG_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 pub const DATA_DIR_ENV: &str = "X100_DATA_DIR";
 pub const SCRIPTS_ENV: &str = "X100_FAKE_SCRIPTS";
 pub const FAKE_PROGRAM_ENV: &str = "X100_FAKE_HARNESS";
+pub const CLAUDE_LOGIN_ENV: &str = "X100_CLAUDE_LOGIN";
+pub const CODEX_LOGIN_ENV: &str = "X100_CODEX_LOGIN";
+/// Where each provider is reached, if not at its own address: the variables the two programs
+/// themselves read, passed on to the drivers that run them in a terminal.
+pub const CLAUDE_BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
+pub const CODEX_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
 
 #[derive(Clone)]
 pub struct Config {
@@ -40,6 +46,13 @@ pub struct Config {
     /// each project runs one turn at a time, so a run of fake-harness scripts is the same every
     /// time. For tests and scripted runs.
     pub fake_clock: Option<FakeClock>,
+    /// The builder's Claude Code login directory, which terminal drivers of Claude Code run on:
+    /// `~/.claude` unless named. The daemon checks that it exists and never opens what is in it.
+    pub claude_login: Option<PathBuf>,
+    /// The builder's Codex login directory, `~/.codex` unless named.
+    pub codex_login: Option<PathBuf>,
+    pub claude_base_url: Option<String>,
+    pub codex_base_url: Option<String>,
 }
 
 impl Config {
@@ -53,6 +66,10 @@ impl Config {
             lag_after: LAG_AFTER,
             clock: Arc::new(SystemClock),
             fake_clock: None,
+            claude_login: home_dir(".claude", |k| std::env::var_os(k)),
+            codex_login: home_dir(".codex", |k| std::env::var_os(k)),
+            claude_base_url: None,
+            codex_base_url: None,
         }
     }
 
@@ -60,14 +77,16 @@ impl Config {
         self.data_dir.join("x100d.sock")
     }
 
-    /// From `--data-dir`, `--scripts-dir` and `--fake-harness` arguments, each of which falls back to
-    /// its environment variable, and `--fake-clock`. The data directory then falls back to the
-    /// user's data directory.
+    /// From `--data-dir`, `--scripts-dir`, `--fake-harness`, `--claude-login` and `--codex-login`
+    /// arguments, each of which falls back to its environment variable, and `--fake-clock`. The
+    /// data directory then falls back to the user's data directory, and each login to the
+    /// program's own directory in the user's home.
     pub fn from_args(
         args: impl IntoIterator<Item = OsString>,
         env: impl Fn(&str) -> Option<OsString>,
     ) -> Result<Self, String> {
         let (mut data, mut scripts, mut fake, mut clock) = (None, None, None, None);
+        let (mut claude, mut codex) = (None, None);
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let slot = match arg.to_str() {
@@ -75,6 +94,8 @@ impl Config {
                 Some("--scripts-dir") => &mut scripts,
                 Some("--fake-harness") => &mut fake,
                 Some("--fake-clock") => &mut clock,
+                Some("--claude-login") => &mut claude,
+                Some("--codex-login") => &mut codex,
                 _ => return Err(format!("unknown argument {arg:?}")),
             };
             let value = args
@@ -94,6 +115,17 @@ impl Config {
         config.fake_program = fake
             .map(PathBuf::from)
             .or_else(|| env(FAKE_PROGRAM_ENV).map(PathBuf::from));
+        config.claude_login = claude
+            .or_else(|| env(CLAUDE_LOGIN_ENV))
+            .map(PathBuf::from)
+            .or_else(|| home_dir(".claude", &env));
+        config.codex_login = codex
+            .or_else(|| env(CODEX_LOGIN_ENV))
+            .map(PathBuf::from)
+            .or_else(|| home_dir(".codex", &env));
+        let text = |k: &str| env(k).and_then(|v| v.into_string().ok());
+        config.claude_base_url = text(CLAUDE_BASE_URL_ENV);
+        config.codex_base_url = text(CODEX_BASE_URL_ENV);
         if let Some(start) = clock {
             // A real harness bills real time, so only scripted ones run on a fake clock.
             if config.scripts_dir.is_none() {
@@ -111,6 +143,11 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+/// `name` in the user's home, where each program keeps its login by default.
+fn home_dir(name: &str, env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    env("HOME").map(|h| PathBuf::from(h).join(name))
 }
 
 /// `$XDG_DATA_HOME/x100`, or `~/.local/share/x100`. The client library derives the same path.
@@ -186,6 +223,23 @@ mod tests {
                 .fake_clock
                 .is_none()
         );
+    }
+
+    #[test]
+    fn each_login_is_the_programs_own_directory_unless_named() {
+        let home = |k: &str| (k == "HOME").then(|| OsString::from("/home/b"));
+        let c = Config::from_args(["--data-dir".into(), "/d".into()], home).unwrap();
+        assert_eq!(c.claude_login, Some(PathBuf::from("/home/b/.claude")));
+        assert_eq!(c.codex_login, Some(PathBuf::from("/home/b/.codex")));
+        let named = |k: &str| match k {
+            "HOME" => Some(OsString::from("/home/b")),
+            CODEX_LOGIN_ENV => Some(OsString::from("/elsewhere/codex")),
+            _ => None,
+        };
+        let args = ["--data-dir", "/d", "--claude-login", "/throwaway/claude"];
+        let c = Config::from_args(args.map(OsString::from), named).unwrap();
+        assert_eq!(c.claude_login, Some(PathBuf::from("/throwaway/claude")));
+        assert_eq!(c.codex_login, Some(PathBuf::from("/elsewhere/codex")));
     }
 
     #[test]

@@ -224,6 +224,12 @@ impl Harness for ClaudeCode {
             Permissions::AskDaemon => {
                 args.extend(["--permission-prompt-tool".into(), "stdio".into()])
             }
+            Permissions::Worktree => args.extend([
+                "--permission-mode".into(),
+                "acceptEdits".into(),
+                "--permission-prompt-tool".into(),
+                "stdio".into(),
+            ]),
             Permissions::AllowAll => {
                 args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
             }

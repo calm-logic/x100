@@ -35,11 +35,12 @@ mod recover;
 mod route;
 mod sandbox;
 mod settle;
+mod spec;
 mod store;
 mod tools;
 mod turns;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::{mpsc, oneshot};
@@ -56,7 +57,7 @@ use x100_core::time::{Clock, Timestamp};
 use x100_core::wait::Wait;
 use x100_drivers::Harness;
 use x100_jobs::Scheduler;
-use x100_router::{Installed, Login};
+use x100_router::Installed;
 use x100_store::{DaemonLog, ProjectStore};
 
 pub use builder::Refused;
@@ -82,8 +83,6 @@ pub struct Config {
     pub harnesses: HashMap<HarnessId, Arc<dyn Harness>>,
     /// The machine those harnesses run on.
     pub machine: MachineId,
-    /// The harnesses that run as a terminal program on a provider login, and which login.
-    pub logins: BTreeMap<HarnessId, Login>,
     /// The daemon's log: harnesses, machines, cool-offs and settings, which the router reads and
     /// a cool-off is written to.
     pub daemon: DaemonLog,
@@ -106,7 +105,6 @@ pub(crate) struct Shared {
     /// Replaced whole when the builder asks for a rescan.
     pub harnesses: RwLock<HashMap<HarnessId, Arc<dyn Harness>>>,
     pub machine: MachineId,
-    pub logins: BTreeMap<HarnessId, Login>,
     pub daemon: DaemonLog,
     pub daemon_jobs: Scheduler<DaemonState>,
     pub fleet: fleet::Fleet,
@@ -137,7 +135,6 @@ impl Shared {
                 .keys()
                 .copied()
                 .collect(),
-            logins: self.logins.clone(),
         }
     }
 }
@@ -171,7 +168,6 @@ impl Orchestrator {
                 clock: config.clock,
                 harnesses: RwLock::new(config.harnesses),
                 machine: config.machine,
-                logins: config.logins,
                 daemon: config.daemon,
                 daemon_jobs: config.daemon_jobs,
                 fleet: fleet::Fleet::new(),

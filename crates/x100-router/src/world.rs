@@ -2,47 +2,25 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use x100_core::driver::{Driver, View};
 use x100_core::fold::{DaemonState, ProjectState};
+use x100_core::harness::Login;
 use x100_core::id::{HarnessId, MachineId};
 use x100_core::time::Timestamp;
 
-/// How many terminal drivers may run at once on one provider login, the owner's default of
-/// 2026-11-12. The builder is meant to set it per login; core has no setting for it yet, so it is
-/// this constant until one exists.
-pub const TERMINAL_DRIVERS_PER_LOGIN: u32 = 4;
-
-/// A provider login that terminal drivers share. Core keeps no record of logins, so the daemon
-/// names each from what it found when it discovered the harness.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Login(pub String);
-
-/// What this daemon can start: on which machine, which harnesses, and which of those run as a
-/// terminal program on a login. A harness the log remembers but this run cannot start is not here.
+/// What this daemon can start: on which machine, and which harnesses. A harness the log remembers
+/// but this run cannot start is not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
     pub machine: MachineId,
     pub harnesses: BTreeSet<HarnessId>,
-    /// A harness here runs in a terminal on that login; any other runs headless.
-    pub logins: BTreeMap<HarnessId, Login>,
 }
 
-impl Installed {
-    pub fn view(&self, harness: HarnessId) -> View {
-        if self.logins.contains_key(&harness) {
-            View::Terminal
-        } else {
-            View::Headless
-        }
-    }
-
-    /// The room a driver of `harness` takes on `machine`: the machine's cap always, and its login's
-    /// cap for a terminal driver.
-    pub fn slot(&self, harness: HarnessId, machine: MachineId) -> Slot {
-        Slot {
-            machine,
-            login: self.logins.get(&harness).cloned(),
-        }
+/// The room a driver of `harness` takes on `machine`: the machine's cap always, and the cap of the
+/// login its harness runs on, if it runs on one.
+pub fn slot(daemon: &DaemonState, harness: HarnessId, machine: MachineId) -> Slot {
+    Slot {
+        machine,
+        login: daemon.harness(harness).and_then(|h| h.login.clone()),
     }
 }
 
@@ -65,12 +43,12 @@ impl Occupancy {
     /// Counted from the records: every live driver of every project in `states`.
     pub fn count<'a>(
         states: impl IntoIterator<Item = &'a ProjectState>,
-        installed: &Installed,
+        daemon: &DaemonState,
     ) -> Self {
         let mut o = Occupancy::default();
         for s in states {
             for d in s.live_drivers() {
-                o.take(&slot_of(&d.driver, installed));
+                o.take(&slot(daemon, d.driver.harness, d.driver.machine));
             }
         }
         o
@@ -98,16 +76,6 @@ impl Occupancy {
 
     pub fn on_login(&self, login: &Login) -> u32 {
         self.logins.get(login).copied().unwrap_or(0)
-    }
-}
-
-fn slot_of(driver: &Driver, installed: &Installed) -> Slot {
-    Slot {
-        machine: driver.machine,
-        login: match driver.view {
-            View::Terminal => installed.logins.get(&driver.harness).cloned(),
-            View::Headless => None,
-        },
     }
 }
 

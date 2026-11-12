@@ -24,7 +24,7 @@ use x100_core::job::{Job, ProjectJob, ProjectRoutine};
 use x100_core::party::Actor;
 use x100_core::task::{TaskEvent, TaskFailure, Verdict};
 use x100_core::time::Timestamp;
-use x100_router::{EndWhy, Upkeep, Warm};
+use x100_router::{Upkeep, Warm};
 
 use crate::Shared;
 use crate::ctx::ProjectCtx;
@@ -311,13 +311,12 @@ impl Loop {
                     .find(|(_, l)| l.driver == driver && !l.busy)
                     .map(|(a, _)| *a);
                 if let Some(agent) = agent {
-                    self.end(agent, EndWhy::Retire(RetireReason::WarmTooLong))
-                        .await;
+                    self.end(agent, RetireReason::WarmTooLong).await;
                 }
             }
             // A wait for a driver that ran out leaves the agent idle with its items: it does not
             // try again until something new reaches it.
-            ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, .. }) => {
+            ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent }) => {
                 let ctx = Arc::clone(&self.ctx);
                 let idle = blocking(move || {
                     ctx.store
@@ -349,7 +348,7 @@ impl Loop {
     }
 
     /// Ends `agent`'s warm driver and waits until its end is recorded and its process is gone.
-    async fn end(&mut self, agent: AgentId, why: EndWhy) {
+    async fn end(&mut self, agent: AgentId, why: RetireReason) {
         let Some(live) = self.live.remove(&agent) else {
             return;
         };

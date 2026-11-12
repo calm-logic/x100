@@ -6,7 +6,6 @@ use x100_proto::{Call, ErrorCode, RpcError};
 /// The milestone that makes this method real, or `None` if it is real already.
 pub fn arrives_with(call: &Call) -> Option<&'static str> {
     Some(match call {
-        Call::ReadTerminal(_) | Call::SubscribeTerminal(_) => "M3T",
         Call::ReplaceDriver(_) => "M9",
         Call::AddCredential(_)
         | Call::ReplaceCredential(_)

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use x100_core::driver::{Incompatible, PlannedReason, Purpose, RetireReason, View};
+use x100_core::driver::{Incompatible, Purpose, RetireReason, Unfit};
 use x100_core::effort::Effort;
 use x100_core::harness::ModelName;
 use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, TaskId};
@@ -11,16 +11,15 @@ use x100_core::ledger::Payer;
 
 use crate::rules::{self, Ask, Candidate, RULES};
 use crate::upkeep::worn;
-use crate::world::World;
+use crate::world::{World, slot};
 
-/// A driver to start: the harness, model and effort, where it runs and how it is shown.
+/// A driver to start: the harness, model and effort, and where it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choice {
     pub harness: HarnessId,
     pub model: ModelName,
     pub effort: Effort,
     pub machine: MachineId,
-    pub view: View,
 }
 
 /// The agent's live driver, between turns, as the orchestrator knows it. A driver never outlives
@@ -54,19 +53,11 @@ pub enum Decision {
     },
 }
 
-/// A warm driver that must end before its agent's next driver starts.
+/// A warm driver that must be retired before its agent's next driver starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ending {
     pub driver: DriverId,
-    pub why: EndWhy,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EndWhy {
-    Retire(RetireReason),
-    /// It is healthy but may not take this work. Recorded as a planned handoff with no last
-    /// turn, since between turns there is nothing left for one to write.
-    Unfit(PlannedReason),
+    pub why: RetireReason,
 }
 
 /// Decides `need`'s next turn. `Err` lists, rule by rule, every reason that excluded a driver, so
@@ -120,9 +111,9 @@ pub fn choose(world: &World, need: &Need) -> Result<Decision, Vec<Incompatible>>
 /// worn out by the daemon's thresholds. `Ok(true)` if it must compact first: a task it carried
 /// was accepted, and compaction waits for the next turn, so a driver never needed again is not
 /// paid to compact. One whose harness cannot compact is retired instead.
-fn keep(ask: &Ask, agent: AgentId, warm: &Warm) -> Result<bool, EndWhy> {
+fn keep(ask: &Ask, agent: AgentId, warm: &Warm) -> Result<bool, RetireReason> {
     let Some(rec) = ask.world.project.driver(warm.driver) else {
-        return Err(EndWhy::Unfit(PlannedReason::Disallowed));
+        return Err(RetireReason::Unfit(Unfit::Disallowed));
     };
     let d = &rec.driver;
     let price = ask
@@ -142,17 +133,17 @@ fn keep(ask: &Ask, agent: AgentId, warm: &Warm) -> Result<bool, EndWhy> {
         holds_slot: true,
     };
     if rules::effort(ask, &c).is_err() {
-        return Err(EndWhy::Unfit(if ask.range.contains(d.effort) {
-            PlannedReason::EffortChanged
+        return Err(RetireReason::Unfit(if ask.range.contains(d.effort) {
+            Unfit::EffortChanged
         } else {
-            PlannedReason::RangeNarrowed
+            Unfit::RangeNarrowed
         }));
     }
     unfit(ask, &c)?;
     let task = ask.world.project.current_task(agent).map(|t| t.task.id);
     let new_task = task.is_none_or(|t| !warm.carried.contains(&t));
     if let Some(reason) = worn(&ask.world, rec, warm).filter(|_| new_task) {
-        return Err(EndWhy::Retire(reason));
+        return Err(reason);
     }
     if !warm.accepted {
         return Ok(false);
@@ -165,18 +156,15 @@ fn keep(ask: &Ask, agent: AgentId, warm: &Warm) -> Result<bool, EndWhy> {
     if compacts {
         Ok(true)
     } else {
-        Err(EndWhy::Retire(RetireReason::CannotCompact))
+        Err(RetireReason::CannotCompact)
     }
 }
 
 /// Rules 2 and 3 for a driver that is already running: one the builder turned off, or one whose
-/// harness and model are cooling off, takes no more turns. Core has no planned reason for a
-/// cool-off, so it is recorded as disallowed, which is what the cool-off does to it meanwhile.
-pub(crate) fn unfit(ask: &Ask, c: &Candidate) -> Result<(), EndWhy> {
-    match rules::allowed(ask, c).and_then(|()| rules::cool_off(ask, c)) {
-        Ok(()) => Ok(()),
-        Err(_) => Err(EndWhy::Unfit(PlannedReason::Disallowed)),
-    }
+/// harness and model are cooling off, takes no more turns.
+pub(crate) fn unfit(ask: &Ask, c: &Candidate) -> Result<(), RetireReason> {
+    rules::allowed(ask, c).map_err(|_| RetireReason::Unfit(Unfit::Disallowed))?;
+    rules::cool_off(ask, c).map_err(|_| RetireReason::Unfit(Unfit::CoolingOff))
 }
 
 fn allocate(mut ask: Ask, ending: Option<Ending>) -> Result<Decision, Vec<Incompatible>> {
@@ -184,7 +172,7 @@ fn allocate(mut ask: Ask, ending: Option<Ending>) -> Result<Decision, Vec<Incomp
     // The warm driver's room is freed by ending it.
     if let Some(d) = ending.and_then(|e| world.project.driver(e.driver)) {
         ask.occupancy
-            .free(&world.installed.slot(d.driver.harness, d.driver.machine));
+            .free(&slot(world.daemon, d.driver.harness, d.driver.machine));
     }
     let (candidates, no_level) = rules::candidates(&ask);
     let mut why: [Vec<Incompatible>; RULES.len()] = Default::default();
@@ -203,7 +191,6 @@ fn allocate(mut ask: Ask, ending: Option<Ending>) -> Result<Decision, Vec<Incomp
                     model: c.model.clone(),
                     effort: c.effort,
                     machine: c.machine,
-                    view: world.installed.view(c.harness),
                 },
                 ending,
             });

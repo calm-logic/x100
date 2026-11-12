@@ -28,6 +28,7 @@ pub use facts::{AgentFacts, FactsModel};
 pub use output::{AgentOutput, SegmentShown};
 pub use row::{AgentHeader, AgentModel, AgentRow, RowEvent};
 
+use crate::reflection::Reflection;
 use crate::session::{Session, SessionEvent};
 use crate::{theme, widgets};
 
@@ -51,6 +52,8 @@ pub struct TeamView {
     drivers: HashMap<DriverId, Entity<DriverRow>>,
     listed_drivers: Vec<DriverId>,
     output: Option<Entity<AgentOutput>>,
+    /// The agent's memories, skills and trials, under its output.
+    reflection: Option<Entity<Reflection>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -72,6 +75,7 @@ impl TeamView {
             drivers: HashMap::new(),
             listed_drivers: Vec::new(),
             output: None,
+            reflection: None,
             _subscriptions: vec![subscription],
         };
         view.relist(cx);
@@ -103,11 +107,16 @@ impl TeamView {
         self.output.clone()
     }
 
+    pub fn reflection(&self) -> Option<Entity<Reflection>> {
+        self.reflection.clone()
+    }
+
     /// Opens an agent, or the CEO for `None`.
     pub fn open(&mut self, agent: Option<AgentId>, cx: &mut Context<Self>) {
         self.focus = agent;
         self.header = None;
         self.output = None;
+        self.reflection = None;
         self.relist(cx);
         cx.notify();
     }
@@ -183,9 +192,12 @@ impl TeamView {
                 .as_ref()
                 .is_none_or(|o| o.read(cx).agent() != agent)
         {
+            let reflection = session.clone();
             self.output = Some(cx.new(|cx| AgentOutput::new(session, project, agent, cx)));
+            self.reflection = Some(cx.new(|cx| Reflection::new(reflection, project, agent, cx)));
         } else if !wants_output {
             self.output = None;
+            self.reflection = None;
         }
         let changed = children != self.listed || live != self.listed_drivers;
         self.listed = children;
@@ -331,6 +343,11 @@ impl TeamView {
                 self.output
                     .clone()
                     .map(|o| div().flex_1().min_h_0().w_full().child(o)),
+            )
+            .children(
+                self.reflection
+                    .clone()
+                    .map(|r| div().flex_none().w_full().child(r)),
             )
             .into_any_element()
     }

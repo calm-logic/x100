@@ -90,6 +90,19 @@ pub enum Permissions {
     /// Calls the harness would ask about arrive as [`crate::DriverOutput::PermissionRequest`] and
     /// wait for an answer. Needs [`Support::permission_hook`].
     AskDaemon,
+    /// The harness may change files in the driver's directory without asking. Commands run in
+    /// the harness's own sandbox, which can write only that directory and reach no network, where
+    /// the harness has one that works without prompting (Codex); where it has none (Claude Code),
+    /// every command, and every edit outside the directory, is asked of the daemon as with
+    /// [`Permissions::AskDaemon`]. Needs [`Support::permission_hook`].
+    Worktree,
+}
+
+impl Permissions {
+    /// Whether some calls are asked of the daemon.
+    pub(crate) fn asks(self) -> bool {
+        self != Permissions::AllowAll
+    }
 }
 
 /// How long a driver may be silent before it counts as stalled.
@@ -222,7 +235,7 @@ pub(crate) fn check_offered(
             effort: spec.effort,
         });
     }
-    if spec.permissions == Permissions::AskDaemon && !support.permission_hook {
+    if spec.permissions.asks() && !support.permission_hook {
         return Err(StartError::Unsupported("ask the daemon for permission"));
     }
     Ok(())

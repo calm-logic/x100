@@ -2,8 +2,10 @@
 //! stop them, so each driver's process is written down when it starts, and the next daemon stops
 //! what is still running from that list.
 //!
-//! A process is identified by its id and the time it started, since ids are reused. The harness
-//! child leads a process group of its own, so killing the group takes what it started with it.
+//! A process is identified by its id and the time it started, since ids are reused. Each process a
+//! driver starts leads a process group of its own, so killing the group takes what it started with
+//! it. A driver may start more than one: Codex in a terminal runs its app-server and the terminal
+//! program attached to it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -33,7 +35,7 @@ pub struct Reaped {
 /// The driver processes the daemon has started and not yet seen end. Methods block.
 pub struct ProcessRegistry {
     path: PathBuf,
-    live: Mutex<BTreeMap<String, Entry>>,
+    live: Mutex<BTreeMap<String, Vec<Entry>>>,
 }
 
 impl ProcessRegistry {
@@ -41,11 +43,14 @@ impl ProcessRegistry {
     /// an empty list. Run before any driver is started.
     pub fn open_and_reap(path: impl Into<PathBuf>) -> std::io::Result<(Self, Vec<Reaped>)> {
         let path = path.into();
-        let old: BTreeMap<String, Entry> = std::fs::read_to_string(&path)
+        let old: BTreeMap<String, Vec<Entry>> = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
         let mut reaped = Vec::new();
+        let old = old
+            .into_iter()
+            .flat_map(|(driver, entries)| entries.into_iter().map(move |e| (driver.clone(), e)));
         for (driver, entry) in old {
             // A leader that is gone is no reason to leave its group alone: while any process is in
             // a group, its id cannot be given to another process, so what is in it is ours. A
@@ -69,23 +74,25 @@ impl ProcessRegistry {
         Ok((registry, reaped))
     }
 
+    /// Adds a process to the driver's list.
     pub fn record(&self, driver: DriverId, pid: u32) -> std::io::Result<()> {
         let entry = Entry {
             pid,
             started: start_time(pid).unwrap_or_default(),
         };
         let mut live = self.live.lock().expect("registry lock");
-        live.insert(driver.to_string(), entry);
+        live.entry(driver.to_string()).or_default().push(entry);
         self.write(&live)
     }
 
+    /// Crosses off every process of the driver, once they are all gone.
     pub fn forget(&self, driver: DriverId) -> std::io::Result<()> {
         let mut live = self.live.lock().expect("registry lock");
         live.remove(&driver.to_string());
         self.write(&live)
     }
 
-    fn write(&self, live: &BTreeMap<String, Entry>) -> std::io::Result<()> {
+    fn write(&self, live: &BTreeMap<String, Vec<Entry>>) -> std::io::Result<()> {
         // Renamed into place so a daemon killed mid-write leaves the last whole list.
         let part = self.path.with_extension("part");
         std::fs::write(&part, serde_json::to_vec(live).expect("a list serialises"))?;

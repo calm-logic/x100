@@ -7366,6 +7366,7 @@ dependencies = [
  "tokio",
  "x100-client",
  "x100-core",
+ "x100-drivers",
  "x100-proto",
 ]
 
@@ -7531,6 +7532,7 @@ dependencies = [
  "x100-jobs",
  "x100-orch",
  "x100-proto",
+ "x100-router",
  "x100-store",
 ]
 

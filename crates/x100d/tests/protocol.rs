@@ -409,25 +409,6 @@ async fn methods_that_later_milestones_make_real_say_which() {
             .into(),
             "M13",
         ),
-        (
-            ReadTerminal {
-                project: p,
-                driver: x100_core::id::DriverId::from_u128(1),
-                after: None,
-                limit: 10,
-            }
-            .into(),
-            "M3T",
-        ),
-        (
-            SubscribeTerminal {
-                project: p,
-                driver: x100_core::id::DriverId::from_u128(1),
-                after: None,
-            }
-            .into(),
-            "M3T",
-        ),
         (Reflect { project: p }.into(), "M14"),
         (ListTrials { project: p }.into(), "M14"),
     ];
@@ -455,6 +436,8 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "events.read",
         "transcript.read",
         "transcript.subscribe",
+        "terminal.read",
+        "terminal.subscribe",
         "daemon.get",
         "daemon.set_setting",
         "projects.list",

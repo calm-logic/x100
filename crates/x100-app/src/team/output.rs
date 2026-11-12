@@ -401,9 +401,6 @@ impl AgentOutput {
     /// transcript in its place.
     fn refused(&mut self, driver: DriverId, error: ClientError, cx: &mut Context<Self>) {
         let line = match &error {
-            ClientError::Rpc(e) if e.code == ErrorCode::Unavailable => {
-                "The daemon cannot show terminals yet. This driver's transcript follows.".into()
-            }
             ClientError::Rpc(e) if e.code == ErrorCode::NotFound => {
                 "This driver has no terminal to show. Its transcript follows.".into()
             }

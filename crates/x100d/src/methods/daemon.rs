@@ -1,13 +1,16 @@
 use std::time::Duration;
 
+use x100_core::driver::View;
 use x100_core::event::DaemonEvent;
+use x100_core::id::{DriverId, ProjectId};
 use x100_core::party::Actor;
 use x100_core::settings::DaemonSetting;
 use x100_proto::{
-    Done, ErrorCode, LogId, LogPage, Page, PositionedEntry, ReadLog, ReadTranscript,
-    RescanHarnesses, Rescanned, RpcError, SetClock, SetDaemonSetting, SetMachineCap,
-    TranscriptPage,
+    Done, ErrorCode, LogId, LogPage, Page, PositionedChunk, PositionedEntry, ReadLog, ReadTerminal,
+    ReadTranscript, RescanHarnesses, Rescanned, RpcError, SetClock, SetDaemonSetting,
+    SetMachineCap, TerminalPage, TranscriptPage,
 };
+use x100_store::ProjectStore;
 
 use super::{blocking, project, refused, store_error};
 use crate::hub::Hub;
@@ -72,6 +75,44 @@ pub async fn read_transcript(hub: &Hub, p: ReadTranscript) -> Result<TranscriptP
     })
 }
 
+/// The store of a driver that has a terminal of its own. Any other driver is `not_found`, as the
+/// protocol says of a headless one.
+pub(crate) fn terminal_of(
+    hub: &Hub,
+    project_id: ProjectId,
+    driver: DriverId,
+) -> Result<ProjectStore, RpcError> {
+    let store = project(hub, project_id)?;
+    match store
+        .log
+        .with_state(|s| s.driver(driver).map(|d| d.driver.view))
+    {
+        Some(View::Terminal) => Ok(store),
+        Some(View::Headless) => Err(RpcError::new(
+            ErrorCode::NotFound,
+            format!("driver {driver} runs headless and has no terminal"),
+        )),
+        None => Err(RpcError::new(
+            ErrorCode::NotFound,
+            format!("no driver {driver}"),
+        )),
+    }
+}
+
+pub async fn read_terminal(hub: &Hub, p: ReadTerminal) -> Result<TerminalPage, RpcError> {
+    let store = terminal_of(hub, p.project, p.driver)?;
+    let limit = p.limit.min(MAX_PAGE) as usize;
+    let rows = blocking(move || store.terminals.read(p.driver, p.after, limit))
+        .await
+        .map_err(|e| store_error(&e))?;
+    Ok(TerminalPage {
+        chunks: rows
+            .into_iter()
+            .map(|(position, chunk)| PositionedChunk { position, chunk })
+            .collect(),
+    })
+}
+
 pub async fn set_setting(hub: &Hub, p: SetDaemonSetting) -> Result<Done, RpcError> {
     if let Some(why) = invalid(&p.setting) {
         return Err(RpcError::new(ErrorCode::Rejected, why));
@@ -80,6 +121,8 @@ pub async fn set_setting(hub: &Hub, p: SetDaemonSetting) -> Result<Done, RpcErro
     blocking(move || log.append(Actor::Builder, DaemonEvent::SettingChanged(p.setting)))
         .await
         .map_err(|e| store_error(&e))?;
+    // A higher cap per login lets agents waiting for a driver try again.
+    hub.orch.reconsider();
     Ok(Done {})
 }
 
@@ -96,9 +139,9 @@ fn invalid(setting: &DaemonSetting) -> Option<&'static str> {
         {
             Some("a duration must be above zero")
         }
-        DaemonSetting::RetireAfterTasks(0) | DaemonSetting::TurnsWithoutProgress(0) => {
-            Some("a count must be above zero")
-        }
+        DaemonSetting::RetireAfterTasks(0)
+        | DaemonSetting::TurnsWithoutProgress(0)
+        | DaemonSetting::TerminalDriversPerLogin(0) => Some("a count must be above zero"),
         _ => None,
     }
 }

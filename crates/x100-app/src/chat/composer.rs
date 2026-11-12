@@ -133,19 +133,20 @@ impl Composer {
         .detach();
     }
 
-    /// Uploads each file and attaches it once the daemon has it.
+    /// Uploads each file and attaches it once the daemon has it, one after another, so they are
+    /// attached in the order they were chosen however long each takes.
     pub fn attach(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
-        for path in paths {
-            self.uploading += 1;
-            let client = self.session.read(cx).client().clone();
-            let project = self.project;
-            let read = cx.background_spawn({
-                let path = path.clone();
-                async move { std::fs::read(path) }
-            });
-            cx.spawn(async move |this, cx| {
-                let uploaded = attach::upload(client, project, path, read.await).await;
-                let _ = this.update(cx, |c, cx| {
+        self.uploading += paths.len();
+        let client = self.session.read(cx).client().clone();
+        let project = self.project;
+        cx.spawn(async move |this, cx| {
+            for path in paths {
+                let read = cx.background_spawn({
+                    let path = path.clone();
+                    async move { std::fs::read(path) }
+                });
+                let uploaded = attach::upload(client.clone(), project, path, read.await).await;
+                let alive = this.update(cx, |c, cx| {
                     c.uploading -= 1;
                     match uploaded {
                         Ok(up) => {
@@ -158,9 +159,12 @@ impl Composer {
                     }
                     cx.notify();
                 });
-            })
-            .detach();
-        }
+                if alive.is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
         cx.notify();
     }
 

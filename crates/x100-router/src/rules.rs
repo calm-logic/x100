@@ -8,7 +8,7 @@
 //! | 1 | Its effort is inside the agent's range and at least what the task needs, clamped into it | `NoEffortInRange` |
 //! | 2 | The builder allows its harness and model in the project | `NothingAllowed` |
 //! | 3 | Its harness and model are not cooling off | `CoolingOff` |
-//! | 4 | Its machine is under its cap on live drivers, and a terminal driver's login under its cap | `MachineFull` |
+//! | 4 | Its machine is under its cap on live drivers, and a terminal driver's login under its cap | `MachineFull`, `LoginFull` |
 //! | 5 | The budget that pays for it, and the project's total, admit another turn | `Budget` |
 //!
 //! Cheapest compares a blended list price: what a reference turn of three input tokens to every
@@ -19,12 +19,12 @@
 use x100_core::driver::Incompatible;
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::fold::{Project, ProjectState};
-use x100_core::harness::{HarnessModel, ModelName, ModelOffer};
+use x100_core::harness::{HarnessModel, Login, ModelName, ModelOffer};
 use x100_core::id::{AgentId, HarnessId, MachineId};
 use x100_core::ledger::{BudgetReached, Budgets, Payer, Spend};
 use x100_core::money::Price;
 
-use crate::world::{Login, Occupancy, TERMINAL_DRIVERS_PER_LOGIN, World};
+use crate::world::{Occupancy, World};
 
 /// A driver that could run the agent's work: a new one, or its warm one.
 #[derive(Debug, Clone)]
@@ -143,23 +143,26 @@ pub(crate) fn cool_off(ask: &Ask, c: &Candidate) -> Result<(), Incompatible> {
     }
 }
 
-/// Core has no reason for a full login, so a login at its cap is reported as its machine full.
 pub(crate) fn machine(ask: &Ask, c: &Candidate) -> Result<(), Incompatible> {
     if c.holds_slot {
         return Ok(());
     }
-    let full = Err(Incompatible::MachineFull { machine: c.machine });
-    let cap = ask
-        .world
-        .daemon
+    let daemon = ask.world.daemon;
+    let cap = daemon
         .machines()
         .find(|m| m.id == c.machine)
         .map_or(0, |m| m.cap);
     if ask.occupancy.on_machine(c.machine) >= cap {
-        return full;
+        return Err(Incompatible::MachineFull { machine: c.machine });
     }
     match c.login {
-        Some(login) if ask.occupancy.on_login(login) >= TERMINAL_DRIVERS_PER_LOGIN => full,
+        Some(login)
+            if ask.occupancy.on_login(login) >= daemon.settings().terminal_drivers_per_login =>
+        {
+            Err(Incompatible::LoginFull {
+                login: login.clone(),
+            })
+        }
         _ => Ok(()),
     }
 }
@@ -183,7 +186,7 @@ pub(crate) fn candidates<'a>(ask: &Ask<'a>) -> (Vec<Candidate<'a>>, bool) {
     for h in harnesses {
         for offer in &h.models {
             let before = out.len();
-            out.extend(levels(ask, h.id, offer));
+            out.extend(levels(ask, h.id, h.login.as_ref(), offer));
             no_level |= out.len() == before;
         }
     }
@@ -191,7 +194,12 @@ pub(crate) fn candidates<'a>(ask: &Ask<'a>) -> (Vec<Candidate<'a>>, bool) {
     (out, no_level)
 }
 
-fn levels<'a>(ask: &Ask<'a>, harness: HarnessId, offer: &'a ModelOffer) -> Vec<Candidate<'a>> {
+fn levels<'a>(
+    ask: &Ask<'a>,
+    harness: HarnessId,
+    login: Option<&'a Login>,
+    offer: &'a ModelOffer,
+) -> Vec<Candidate<'a>> {
     let installed = ask.world.installed;
     offer
         .levels
@@ -202,7 +210,7 @@ fn levels<'a>(ask: &Ask<'a>, harness: HarnessId, offer: &'a ModelOffer) -> Vec<C
             effort: *effort,
             price: Some(price),
             machine: installed.machine,
-            login: installed.logins.get(&harness),
+            login,
             holds_slot: false,
         })
         .filter(|c| effort(ask, c).is_ok())

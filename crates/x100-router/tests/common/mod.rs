@@ -2,7 +2,7 @@
 //! at different prices on one machine, and a project with a CEO, one lead and a task for it.
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use x100_core::agent::{Agent, AgentEvent, Position};
@@ -10,6 +10,7 @@ use x100_core::driver::{ContextFill, DriverEvent, StartReason};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::{DaemonEvent, Envelope, ProjectEvent, Seq};
 use x100_core::fold::{DaemonState, ProjectState};
+use x100_core::harness::Login;
 use x100_core::harness::{
     CoolOff, Harness, HarnessKind, HarnessModel, Machine, ModelName, ModelOffer, ProviderFailure,
     Support,
@@ -20,10 +21,11 @@ use x100_core::ledger::{Charge, ChargeSource, CostBasis, Payer};
 use x100_core::money::{Money, Percent, Price, Rates};
 use x100_core::party::{Actor, Party};
 use x100_core::project::Settings;
+use x100_core::settings::DaemonSetting;
 use x100_core::settings::DaemonSettings;
 use x100_core::testing::{LogBuilder, START};
 use x100_core::time::Timestamp;
-use x100_router::{Installed, Login, Occupancy, Slot, Warm, World};
+use x100_router::{Installed, Occupancy, Slot, Warm, World};
 
 pub const MACHINE: MachineId = MachineId::from_u128(1);
 pub const CHEAP: HarnessId = HarnessId::from_u128(2);
@@ -90,6 +92,7 @@ pub fn harnesses(compaction: bool) -> Vec<Harness> {
                 offer("small", &[Low, Medium], 1, 5),
                 offer("mid", &[Medium, High], 2, 10),
             ],
+            login: None,
         },
         Harness {
             id: DEAR,
@@ -98,6 +101,7 @@ pub fn harnesses(compaction: bool) -> Vec<Harness> {
             },
             support,
             models: vec![offer("large", &Effort::ALL, 5, 25)],
+            login: None,
         },
     ]
 }
@@ -107,17 +111,34 @@ pub fn daemon(cap: u32, cooling: &[HarnessModel]) -> DaemonState {
 }
 
 pub fn daemon_with(cap: u32, cooling: &[HarnessModel], compaction: bool) -> DaemonState {
+    daemon_on_login(cap, cooling, compaction, None)
+}
+
+/// The cheap harness on a login, with the daemon's cap on terminal drivers per login.
+pub fn daemon_on_login(
+    cap: u32,
+    cooling: &[HarnessModel],
+    compaction: bool,
+    login: Option<(&str, u32)>,
+) -> DaemonState {
     let mut events = vec![DaemonEvent::MachineAdded(Machine {
         id: MACHINE,
         name: "local".into(),
         harnesses: vec![CHEAP, DEAR],
         cap,
+        passed_over: Vec::new(),
     })];
-    events.extend(
-        harnesses(compaction)
-            .into_iter()
-            .map(DaemonEvent::HarnessAdded),
-    );
+    events.extend(harnesses(compaction).into_iter().map(|mut h| {
+        if h.id == CHEAP {
+            h.login = login.map(|(l, _)| Login(l.into()));
+        }
+        DaemonEvent::HarnessAdded(h)
+    }));
+    if let Some((_, per_login)) = login {
+        events.push(DaemonEvent::SettingChanged(
+            DaemonSetting::TerminalDriversPerLogin(per_login),
+        ));
+    }
     for (i, of) in cooling.iter().enumerate() {
         events.push(DaemonEvent::CoolOffStarted {
             cool_off: CoolOff {
@@ -149,7 +170,6 @@ pub fn installed() -> Installed {
     Installed {
         machine: MACHINE,
         harnesses: BTreeSet::from([CHEAP, DEAR]),
-        logins: BTreeMap::new(),
     }
 }
 

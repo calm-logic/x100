@@ -4,15 +4,16 @@
 mod common;
 
 use common::*;
-use x100_core::driver::{Incompatible, PlannedReason, Purpose, RetireReason};
+use x100_core::driver::{Incompatible, Purpose, RetireReason, Unfit};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::harness::HarnessModel;
+use x100_core::harness::Login;
 use x100_core::id::TrialId;
 use x100_core::ledger::{BudgetReached, Payer};
 use x100_core::money::Money;
 use x100_core::testing::START;
 use x100_core::trial::Arm;
-use x100_router::{Decision, EndWhy, Installed, Login, Need, choose};
+use x100_router::{Decision, Need, choose, slot};
 
 use Effort::*;
 
@@ -30,7 +31,8 @@ struct Setup {
     cap: u32,
     occupied: u32,
     /// The cheap harness runs in a terminal on a login with this many drivers live.
-    cheap_login: Option<u32>,
+    /// The cheap harness on a login: its cap per login, and how many drivers it has live.
+    cheap_login: Option<(u32, u32)>,
     /// The lead's warm driver: its model, effort and context used.
     warm: Option<(HarnessModel, Effort, u64)>,
     lab: bool,
@@ -66,11 +68,13 @@ fn base() -> Setup {
 #[derive(Debug, PartialEq, Eq)]
 enum Expect {
     Start(HarnessModel, Effort),
-    Replace(HarnessModel, Effort, EndWhy),
+    Replace(HarnessModel, Effort, RetireReason),
     Reuse,
     CompactThenReuse,
     Waits(Vec<Incompatible>),
 }
+
+const CHEAP_LOGIN: &str = "/home/builder/.cheap";
 
 const LEAD: x100_core::id::AgentId = x100_core::id::AgentId::from_u128(2);
 
@@ -102,25 +106,19 @@ fn run(s: &Setup) -> Expect {
     if s.lab_spent > 0 {
         p.spend(Payer::Lab, s.lab_spent);
     }
-    let daemon = daemon_with(s.cap, &s.cooling, s.compaction);
-    let mut installed = installed();
+    let login = s.cheap_login.map(|(cap, _)| (CHEAP_LOGIN, cap));
+    let daemon = daemon_on_login(s.cap, &s.cooling, s.compaction, login);
+    let installed = installed();
     let mut occupancy = occupied(s.occupied, None);
-    if let Some(n) = s.cheap_login {
-        installed = Installed {
-            logins: [(CHEAP, Login("builder@cheap".into()))].into(),
-            ..installed
-        };
-        occupancy = occupied(s.occupied, None);
-        for _ in 0..n {
-            occupancy.take(&x100_router::Slot {
-                machine: MACHINE,
-                login: Some(Login("builder@cheap".into())),
-            });
-        }
+    for _ in 0..s.cheap_login.map_or(0, |(_, live)| live) {
+        occupancy.take(&x100_router::Slot {
+            machine: MACHINE,
+            login: Some(Login(CHEAP_LOGIN.into())),
+        });
     }
     if let Some(w) = &warm {
-        occupancy
-            .take(&installed.slot(p.state().driver(w.driver).unwrap().driver.harness, MACHINE));
+        let harness = p.state().driver(w.driver).unwrap().driver.harness;
+        occupancy.take(&slot(&daemon, harness, MACHINE));
     }
     let need = Need {
         agent: p.lead,
@@ -217,7 +215,7 @@ fn the_choice_follows_the_table() {
         (
             "a login at its cap of terminal drivers is skipped",
             Setup {
-                cheap_login: Some(4),
+                cheap_login: Some((4, 4)),
                 ..base()
             },
             Expect::Start(large(), Low),
@@ -225,10 +223,32 @@ fn the_choice_follows_the_table() {
         (
             "a login under its cap is used",
             Setup {
-                cheap_login: Some(3),
+                cheap_login: Some((4, 3)),
                 ..base()
             },
             Expect::Start(small(), Low),
+        ),
+        (
+            "the cap per login is the daemon's setting",
+            Setup {
+                cheap_login: Some((1, 1)),
+                ..base()
+            },
+            Expect::Start(large(), Low),
+        ),
+        (
+            "with the dear provider not allowed and the login full, the agent waits and is told both",
+            Setup {
+                cheap_login: Some((2, 2)),
+                allowed: vec![small(), mid()],
+                ..base()
+            },
+            Expect::Waits(vec![
+                Incompatible::NothingAllowed,
+                Incompatible::LoginFull {
+                    login: Login(CHEAP_LOGIN.into()),
+                },
+            ]),
         ),
         (
             "a full machine starts nothing",
@@ -330,7 +350,7 @@ fn the_choice_follows_the_table() {
                 needs: High,
                 ..base()
             },
-            Expect::Replace(mid(), High, EndWhy::Unfit(PlannedReason::EffortChanged)),
+            Expect::Replace(mid(), High, RetireReason::Unfit(Unfit::EffortChanged)),
         ),
         (
             "a warm driver below a narrowed range gets a new driver",
@@ -339,7 +359,7 @@ fn the_choice_follows_the_table() {
                 narrow_to: Some((High, Max)),
                 ..base()
             },
-            Expect::Replace(mid(), High, EndWhy::Unfit(PlannedReason::RangeNarrowed)),
+            Expect::Replace(mid(), High, RetireReason::Unfit(Unfit::RangeNarrowed)),
         ),
         (
             "a warm driver past the context threshold is retired before a new task",
@@ -347,7 +367,7 @@ fn the_choice_follows_the_table() {
                 warm: Some((small(), Low, 150_000)),
                 ..base()
             },
-            Expect::Replace(small(), Low, EndWhy::Retire(RetireReason::ContextFull)),
+            Expect::Replace(small(), Low, RetireReason::ContextFull),
         ),
         (
             "a warm driver whose model was turned off gets a new driver",
@@ -356,7 +376,7 @@ fn the_choice_follows_the_table() {
                 allowed: vec![mid(), large()],
                 ..base()
             },
-            Expect::Replace(mid(), Medium, EndWhy::Unfit(PlannedReason::Disallowed)),
+            Expect::Replace(mid(), Medium, RetireReason::Unfit(Unfit::Disallowed)),
         ),
         (
             "a warm driver whose model cools off gets a new driver",
@@ -365,7 +385,7 @@ fn the_choice_follows_the_table() {
                 cooling: vec![small()],
                 ..base()
             },
-            Expect::Replace(mid(), Medium, EndWhy::Unfit(PlannedReason::Disallowed)),
+            Expect::Replace(mid(), Medium, RetireReason::Unfit(Unfit::CoolingOff)),
         ),
         (
             "a warm driver on a full machine is still reused: it holds its room",
@@ -393,7 +413,7 @@ fn the_choice_follows_the_table() {
                 compaction: false,
                 ..base()
             },
-            Expect::Replace(small(), Low, EndWhy::Retire(RetireReason::CannotCompact)),
+            Expect::Replace(small(), Low, RetireReason::CannotCompact),
         ),
         (
             "a warm driver takes no turn once the budget is reached",

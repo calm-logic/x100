@@ -2,7 +2,7 @@
 
 use x100_core::driver::{
     DriverEvent, Failure, Handoff, HandoffCause, InFlight, Incompatible, PlannedReason,
-    RetireReason, StopReason, TakeoverCause,
+    RetireReason, StopReason, TakeoverCause, Unfit,
 };
 use x100_core::harness::{OneOffCall, OneOffPurpose};
 use x100_core::id::DriverId;
@@ -21,6 +21,7 @@ pub(super) fn incompatible(n: &Names, why: &Incompatible) -> String {
             what.model.0
         ),
         Incompatible::MachineFull { .. } => "the machine is full".into(),
+        Incompatible::LoginFull { login } => format!("the login at {} is full", login.0),
         Incompatible::Budget(b) => match b {
             BudgetReached::Project => "the project is at its budget".into(),
             BudgetReached::Lead(lead) => format!("{} is at its budget", n.agent(*lead)),
@@ -65,6 +66,16 @@ fn planned(p: PlannedReason) -> &'static str {
     }
 }
 
+/// Why a warm driver no longer fits, in the words both the log and the Team tab use.
+pub(crate) fn unfit(u: Unfit) -> &'static str {
+    match u {
+        Unfit::Disallowed => "the builder stopped allowing it",
+        Unfit::CoolingOff => "its model is cooling off",
+        Unfit::RangeNarrowed => "the effort range was narrowed",
+        Unfit::EffortChanged => "the task needs more effort than it runs at",
+    }
+}
+
 fn stop_reason(s: StopReason) -> &'static str {
     match s {
         StopReason::ReplacedByBuilder => "the builder replaced it",
@@ -96,6 +107,7 @@ pub(super) fn driver_event(n: &Names, driver: DriverId, event: &DriverEvent) -> 
                 RetireReason::TooOld => "it was too old",
                 RetireReason::CannotCompact => "it could not compact",
                 RetireReason::AgentRetired => "the agent was retired",
+                RetireReason::Unfit(why) => unfit(*why),
             }
         ),
         DriverEvent::Stopped(reason) => {

@@ -15,7 +15,7 @@ use x100_core::driver::{Driver, RetireReason};
 use x100_core::fold::{DaemonState, DriverRecord};
 use x100_core::time::Timestamp;
 
-use crate::choose::{EndWhy, Warm, unfit};
+use crate::choose::{Warm, unfit};
 use crate::rules::{Ask, Candidate};
 use crate::world::World;
 
@@ -26,7 +26,7 @@ pub const DEFAULT_WARM: Duration = Duration::from_secs(300);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Upkeep {
     Keep,
-    End(EndWhy),
+    End(RetireReason),
 }
 
 /// When `driver`'s warm period ends if its turn ends at `now`: its model's cache lifetime later.
@@ -75,7 +75,7 @@ pub fn upkeep(world: &World, warm: &Warm) -> Upkeep {
         .agent(d.agent)
         .is_some_and(|a| a.open_tasks.is_empty());
     match worn(world, rec, warm).filter(|_| between_tasks) {
-        Some(reason) => Upkeep::End(EndWhy::Retire(reason)),
+        Some(reason) => Upkeep::End(reason),
         None => Upkeep::Keep,
     }
 }

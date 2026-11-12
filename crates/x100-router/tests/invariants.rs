@@ -10,7 +10,7 @@ mod common;
 use common::*;
 use proptest::prelude::*;
 use x100_core::agent::{Agent, AgentEvent, Position};
-use x100_core::driver::{DriverEvent, StartReason};
+use x100_core::driver::{DriverEvent, RetireReason, StartReason};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::{DaemonEvent, ProjectEvent};
 use x100_core::fold::{DaemonState, ProjectState};
@@ -21,7 +21,7 @@ use x100_core::money::Money;
 use x100_core::party::{Actor, Party};
 use x100_core::project::SettingChange;
 use x100_core::testing::START;
-use x100_router::{Decision, EndWhy, Need, Occupancy, Warm, choose, needs};
+use x100_router::{Decision, Need, Occupancy, Warm, choose, needs};
 
 const CAP: u32 = 3;
 
@@ -120,6 +120,7 @@ impl Run {
             name: "local".into(),
             harnesses: vec![CHEAP, DEAR],
             cap: CAP,
+            passed_over: Vec::new(),
         })];
         events.extend(harnesses(true).into_iter().map(DaemonEvent::HarnessAdded));
         for (i, of) in self.cooling.iter().enumerate() {
@@ -216,7 +217,7 @@ impl Run {
         self.p.b.open_delegated(from, agent, "t", "a", effort);
         let daemon = self.daemon();
         let installed = installed();
-        let occupancy = Occupancy::count([self.state()], &installed);
+        let occupancy = Occupancy::count([self.state()], &daemon);
         let warm = self.state().acting_driver(agent).map(|driver| Warm {
             driver,
             carried: Default::default(),
@@ -290,17 +291,12 @@ impl Run {
         Ok(())
     }
 
-    fn end(&mut self, driver: x100_core::id::DriverId, why: EndWhy) {
-        let ev = |event| ProjectEvent::Driver { driver, event };
-        match why {
-            EndWhy::Retire(r) => self.p.b.push(Actor::Daemon, ev(DriverEvent::Retired(r))),
-            EndWhy::Unfit(r) => {
-                self.p
-                    .b
-                    .push(Actor::Daemon, ev(DriverEvent::HandoffStarted(r)));
-                self.p.b.push(Actor::Daemon, ev(DriverEvent::TurnEnded));
-            }
-        }
+    fn end(&mut self, driver: x100_core::id::DriverId, why: RetireReason) {
+        let event = ProjectEvent::Driver {
+            driver,
+            event: DriverEvent::Retired(why),
+        };
+        self.p.b.push(Actor::Daemon, event);
     }
 
     fn run_turn(&mut self, driver: x100_core::id::DriverId) {

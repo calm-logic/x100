@@ -135,12 +135,11 @@ impl Run {
             "NO_PROXY=127.0.0.1,localhost".into(),
         ]);
         let harnesses = HashMap::from([(HARNESS, harness)]);
-        common::add_harnesses(&daemon, &harnesses);
+        common::add_harnesses(&daemon, &harnesses, &[]);
         let orch = Orchestrator::new(Config {
             clock: Arc::clone(&shared),
             harnesses,
             machine: common::MACHINE,
-            logins: Default::default(),
             daemon,
             daemon_jobs,
             settings,

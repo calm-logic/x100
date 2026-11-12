@@ -111,6 +111,20 @@ impl DaemonState {
                 self.machines.get_mut(machine).ok_or(unknown(record))?.cap = *cap;
                 ch.part(DaemonPart::Machines).record(record);
             }
+            D::MachineHarnessesSet {
+                machine,
+                harnesses,
+                passed_over,
+            } => {
+                if let Some(h) = harnesses.iter().find(|h| !self.harnesses.contains_key(h)) {
+                    return Err(unknown(Record::Harness(*h)));
+                }
+                let record = Record::Machine(*machine);
+                let m = self.machines.get_mut(machine).ok_or(unknown(record))?;
+                m.harnesses = harnesses.clone();
+                m.passed_over = passed_over.clone();
+                ch.part(DaemonPart::Machines).record(record);
+            }
             D::HarnessAdded(h) => {
                 insert_new(&mut self.harnesses, h.id, h.clone(), Record::Harness(h.id))?;
                 ch.part(DaemonPart::Harnesses).record(Record::Harness(h.id));

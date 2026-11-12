@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::effort::Effort;
-use crate::harness::{HarnessModel, ModelName, ProviderFailure};
+use crate::harness::{HarnessModel, Login, ModelName, ProviderFailure};
 use crate::id::{ActionId, AgentId, DriverId, HarnessId, InboxItemId, MachineId, TaskId, TrialId};
 use crate::ledger::BudgetReached;
 use crate::machine::{MachineKind, Rejected};
@@ -161,6 +161,23 @@ pub enum RetireReason {
     /// Its task was accepted and its harness cannot compact.
     CannotCompact,
     AgentRetired,
+    /// It is healthy, but between turns it no longer fits its agent's work. Retired, not handed
+    /// off: between turns there is nothing left for a last turn to write.
+    Unfit(Unfit),
+}
+
+/// Why a warm driver no longer fits its agent's work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unfit {
+    /// The builder disallowed its harness or model.
+    Disallowed,
+    /// Its harness and model are cooling off after a provider failure.
+    CoolingOff,
+    /// The agent's effort range was narrowed and no longer holds it.
+    RangeNarrowed,
+    /// Its agent's task needs more effort than it runs at.
+    EffortChanged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -194,7 +211,13 @@ pub enum Incompatible {
     NoEffortInRange,
     NothingAllowed,
     CoolingOff(HarnessModel),
-    MachineFull { machine: MachineId },
+    MachineFull {
+        machine: MachineId,
+    },
+    /// The login its terminal drivers run on has as many live as the daemon allows.
+    LoginFull {
+        login: Login,
+    },
     Budget(BudgetReached),
 }
 

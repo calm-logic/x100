@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::credential::{Credential, CredentialScope};
-use crate::harness::{CoolOff, Harness, HarnessModel, Machine};
-use crate::id::{CredentialRef, JobId, MachineId, ProjectId};
+use crate::harness::{CoolOff, Harness, HarnessModel, Machine, PassedOver};
+use crate::id::{CredentialRef, HarnessId, JobId, MachineId, ProjectId};
 use crate::job::{DaemonJob, Job, JobEvent};
 use crate::settings::DaemonSetting;
 
@@ -14,6 +14,13 @@ pub enum DaemonEvent {
     MachineCapSet {
         machine: MachineId,
         cap: u32,
+    },
+    /// A scan of the machine changed what it found: the harnesses it can run, and those it passed
+    /// over. The whole list replaces the old one.
+    MachineHarnessesSet {
+        machine: MachineId,
+        harnesses: Vec<HarnessId>,
+        passed_over: Vec<PassedOver>,
     },
     /// A harness was found on this machine, with its models, effort levels and prices.
     HarnessAdded(Harness),

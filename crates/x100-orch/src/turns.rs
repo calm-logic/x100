@@ -19,7 +19,8 @@ use x100_core::party::Actor;
 use x100_core::task::TaskFailure;
 use x100_core::time::{Clock, Timestamp};
 
-use x100_router::{EndWhy, Upkeep, Warm};
+use x100_core::driver::RetireReason;
+use x100_router::{Upkeep, Warm};
 
 use crate::Shared;
 use crate::ctx::Events;
@@ -104,7 +105,7 @@ pub(crate) fn close(
         carried: c.carried,
         accepted: false,
     };
-    let end = match route::upkeep_in(shared, state, &warm, clock.now()) {
+    let end: Option<RetireReason> = match route::upkeep_in(shared, state, &warm, clock.now()) {
         Upkeep::End(why) => Some(why),
         Upkeep::Keep => None,
     };
@@ -127,20 +128,12 @@ pub(crate) fn close(
         limit: c.limit,
     };
     let mut events = ended(state, clock, ending);
-    for event in end.map(end_events).unwrap_or_default() {
+    if let Some(why) = end {
+        let event = DriverEvent::Retired(why);
         let driver = c.driver;
         events.push((Actor::Daemon, ProjectEvent::Driver { driver, event }));
     }
     (events, end.is_some())
-}
-
-/// How a driver the router ends between turns is recorded. One that no longer fits is recorded as
-/// a planned handoff with no last turn: between turns there is nothing left for one to write.
-pub(crate) fn end_events(why: EndWhy) -> Vec<DriverEvent> {
-    match why {
-        EndWhy::Retire(reason) => vec![DriverEvent::Retired(reason)],
-        EndWhy::Unfit(reason) => vec![DriverEvent::HandoffStarted(reason), DriverEvent::TurnEnded],
-    }
 }
 
 /// A turn that completed.

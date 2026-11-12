@@ -1,17 +1,13 @@
 //! Where the orchestrator asks the router, and what it records of the answers: the wait for a
 //! driver, its deadline and who is told, the charge for a turn and the notices it causes, and
 //! cool-offs. The rules themselves are all in `x100-router`.
-//!
-//! Core has no routine for the deadline of a wait for a driver, which has no `Wait` record of its
-//! own. Its deadline is a `WaitDeadline` routine naming a wait id that no `Wait` record has, and
-//! that is how it is told apart from the deadline of a wait an agent opened.
 
 use x100_core::agent::{AgentEvent, AgentState, Waiting};
 use x100_core::driver::{Driver, Incompatible, Purpose};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessModel, ProviderFailure};
-use x100_core::id::{AgentId, DriverId, JobId, MessageId, TaskId, WaitId};
+use x100_core::id::{AgentId, DriverId, JobId, MessageId, TaskId};
 use x100_core::inbox::InboxItem;
 use x100_core::job::{Job, JobEvent, JobState, ProjectJob, ProjectRoutine, Schedule};
 use x100_core::ledger::{BudgetReached, CostBasis};
@@ -64,15 +60,25 @@ pub(crate) fn decide(
                     purpose: Purpose::Work,
                     warm,
                 };
-                x100_router::choose(&world, &need)
+                x100_router::choose(&world, &need).map(|decision| {
+                    let slot = match &decision {
+                        Decision::Start { choice, .. } => {
+                            Some(x100_router::slot(d, choice.harness, choice.machine))
+                        }
+                        Decision::Reuse { .. } => None,
+                    };
+                    (decision, slot)
+                })
             });
             (decision, p.current_task(agent).map(|t| t.task.id))
         });
         match decision {
-            Ok(Decision::Reuse { compact, .. }) => ((Ok(Planned::Reuse { compact }), task), None),
-            Ok(Decision::Start { choice, ending }) => {
+            Ok((Decision::Reuse { compact, .. }, _)) => {
+                ((Ok(Planned::Reuse { compact }), task), None)
+            }
+            Ok((Decision::Start { choice, ending }, slot)) => {
                 let driver = new_id(&*shared.clock, DriverId::new);
-                let slot = installed.slot(choice.harness, choice.machine);
+                let slot = slot.expect("a start takes room");
                 let planned = Planned::Start {
                     driver,
                     choice,
@@ -156,7 +162,6 @@ pub(crate) fn no_driver(
         )),
     }
     if deadlines(state, agent).is_empty() {
-        let wait = new_id(clock, WaitId::new);
         out.push((
             Actor::Daemon,
             ProjectEvent::JobScheduled(Job {
@@ -164,7 +169,7 @@ pub(crate) fn no_driver(
                 when: Schedule::Once {
                     at: clock.now() + deadline,
                 },
-                does: ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, wait }),
+                does: ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent }),
             }),
         ));
     }
@@ -200,38 +205,26 @@ pub(crate) fn found(state: &ProjectState, agent: AgentId) -> Events {
 
 /// The deadline jobs of `agent`'s wait for a driver that can still fire.
 fn deadlines(state: &ProjectState, agent: AgentId) -> Vec<JobId> {
-    let Some(a) = state.agent(agent) else {
-        return Vec::new();
-    };
     state
         .jobs()
         .filter(|j| matches!(j.state, JobState::Scheduled { .. }))
         .filter(|j| {
-            matches!(&j.job.does, ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent: of, wait })
-                if *of == agent && !a.waits.contains_key(wait))
+            matches!(&j.job.does, ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent: of })
+                if *of == agent)
         })
         .map(|j| j.job.id)
         .collect()
 }
 
 /// The wait for a driver reached its deadline: every task the agent holds is reported failed to
-/// its delegator, and the agent goes idle. A deadline that names a wait the agent opened is
-/// `settle`'s, not this.
-pub(crate) fn deadline_passed(
-    state: &ProjectState,
-    clock: &dyn Clock,
-    agent: AgentId,
-    wait: WaitId,
-) -> Events {
+/// its delegator, and the agent goes idle.
+pub(crate) fn deadline_passed(state: &ProjectState, clock: &dyn Clock, agent: AgentId) -> Events {
     let Some(a) = state.agent(agent) else {
         return Vec::new();
     };
     let AgentState::Waiting(Waiting::ForDriver(why)) = &a.state else {
         return Vec::new();
     };
-    if a.waits.contains_key(&wait) {
-        return Vec::new();
-    }
     let mut out = Vec::new();
     for task in &a.open_tasks {
         let summary = format!("No driver could be found: {}.", reasons(state, why));
@@ -334,6 +327,10 @@ fn reasons(state: &ProjectState, why: &[Incompatible]) -> String {
                 of.model.0, of.harness
             ),
             Incompatible::MachineFull { .. } => "the machine is at its cap of drivers".into(),
+            Incompatible::LoginFull { login } => format!(
+                "the login at {} has as many terminal drivers as the daemon allows",
+                login.0
+            ),
             Incompatible::Budget(BudgetReached::Project) => {
                 "the project has reached its budget".into()
             }

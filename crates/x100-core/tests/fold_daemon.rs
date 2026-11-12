@@ -85,3 +85,47 @@ fn each_daemon_event_says_what_it_changed() {
         }
     }
 }
+
+#[test]
+fn a_rescan_replaces_the_machines_harness_list_and_what_it_passed_over() {
+    use x100_core::event::{DaemonEvent, Envelope, Seq};
+    use x100_core::harness::PassedOver;
+    use x100_core::id::{HarnessId, MachineId};
+    use x100_core::party::Actor;
+
+    let mut s = state();
+    let machine = s.machines().next().unwrap().id;
+    let next = |s: &DaemonState, event| Envelope {
+        seq: Seq(s.seq().unwrap().0 + 1),
+        at: Timestamp::from_millis(9_000_000),
+        by: Actor::Daemon,
+        event,
+    };
+    let passed_over = vec![PassedOver {
+        kind: HarnessKind::CodexTerminal,
+        why: "no login at /home/b/.codex".into(),
+    }];
+    let rescan = DaemonEvent::MachineHarnessesSet {
+        machine,
+        harnesses: vec![CLAUDE],
+        passed_over: passed_over.clone(),
+    };
+    let changes = s.apply(&next(&s, rescan)).unwrap();
+    assert!(changes.parts.contains(&DaemonPart::Machines));
+    let m = s.machines().next().unwrap();
+    assert_eq!(m.harnesses, vec![CLAUDE]);
+    assert_eq!(m.passed_over, passed_over);
+
+    let unknown = DaemonEvent::MachineHarnessesSet {
+        machine,
+        harnesses: vec![HarnessId::from_u128(999)],
+        passed_over: Vec::new(),
+    };
+    assert!(s.apply(&next(&s, unknown)).is_err());
+    let no_machine = DaemonEvent::MachineHarnessesSet {
+        machine: MachineId::from_u128(999),
+        harnesses: vec![CLAUDE],
+        passed_over: Vec::new(),
+    };
+    assert!(s.apply(&next(&s, no_machine)).is_err());
+}

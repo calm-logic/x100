@@ -246,9 +246,7 @@ fn make_home(home: &Path, login: &Path, worktree: &Path) -> std::io::Result<()> 
 #[async_trait]
 impl Harness for ClaudeTerminal {
     fn kind(&self) -> HarnessKind {
-        HarnessKind::Custom {
-            name: "claude-code-terminal".into(),
-        }
+        HarnessKind::ClaudeCodeTerminal
     }
 
     fn models(&self) -> Vec<ModelOffer> {
@@ -396,6 +394,9 @@ impl Harness for ClaudeTerminal {
             match spec.permissions {
                 Permissions::AllowAll => "bypassPermissions",
                 Permissions::AskDaemon => "manual",
+                // Claude Code's own sandbox needs `socat` on Linux and is not relied on: its
+                // commands are asked of the daemon through the permission hook instead.
+                Permissions::Worktree => "acceptEdits",
             }
             .into(),
         ]);

@@ -37,3 +37,4 @@ env_logger = "0.11"
 gpui = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["test-support"] }
 tempfile = "3"
 x100-core = { path = "../x100-core", features = ["testing"] }
+x100-drivers = { path = "../x100-drivers", features = ["testing"] }

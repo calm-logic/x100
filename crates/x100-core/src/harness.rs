@@ -19,12 +19,16 @@ pub struct ModelName(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessKind {
+    /// Claude Code run headless on stream-json, on an API key.
     ClaudeCode,
+    /// Codex run headless as its app-server, on an API key.
     Codex,
+    /// Claude Code's own terminal program in a pseudo-terminal, on the builder's local login.
+    ClaudeCodeTerminal,
+    /// Codex's own terminal program attached to its app-server, on the builder's local login.
+    CodexTerminal,
     /// A harness around an LLM, built to the same interface.
-    Custom {
-        name: String,
-    },
+    Custom { name: String },
 }
 
 /// What a harness can do beyond the minimum every harness must. The daemon works without each of
@@ -50,12 +54,21 @@ pub struct ModelOffer {
     pub levels: Vec<(Effort, Price)>,
 }
 
+/// A provider login that terminal drivers run on: the directory its harness keeps it in, as the
+/// daemon found it. x100 records where the login is and never opens it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Login(pub String);
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Harness {
     pub id: HarnessId,
     pub kind: HarnessKind,
     pub support: Support,
     pub models: Vec<ModelOffer>,
+    /// The builder's login its drivers run on, for a harness run as its own terminal program.
+    /// Every harness on one login shares that login's cap. A headless harness has none.
+    pub login: Option<Login>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -65,6 +78,16 @@ pub struct Machine {
     pub harnesses: Vec<HarnessId>,
     /// The most live drivers it may run at once.
     pub cap: u32,
+    /// Harnesses the last scan found on the machine and could not register, and why, so the
+    /// builder can see what to fix.
+    pub passed_over: Vec<PassedOver>,
+}
+
+/// A harness found on a machine and not registered.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PassedOver {
+    pub kind: HarnessKind,
+    pub why: String,
 }
 
 /// A harness and model together: the unit the builder allows, and the unit that cools off.

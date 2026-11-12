@@ -97,6 +97,8 @@ pub enum ProjectRoutine {
     EndWarmPeriod { driver: DriverId },
     /// A wait reached its deadline.
     WaitDeadline { agent: AgentId, wait: WaitId },
+    /// The agent's wait for a driver reached its deadline: its tasks are reported failed.
+    DriverWaitDeadline { agent: AgentId },
 }
 
 /// What a job in the daemon's log does. These belong to no project.

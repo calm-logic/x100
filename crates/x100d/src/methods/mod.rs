@@ -6,6 +6,8 @@ mod daemon;
 mod files;
 mod projects;
 
+pub(crate) use daemon::terminal_of;
+
 use serde::Serialize;
 use serde_json::Value;
 use x100_core::id::ProjectId;
@@ -55,6 +57,7 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
     match call {
         Call::ReadLog(p) => out(daemon::read_log(hub, p).await),
         Call::ReadTranscript(p) => out(daemon::read_transcript(hub, p).await),
+        Call::ReadTerminal(p) => out(daemon::read_terminal(hub, p).await),
         Call::GetDaemon(_) => out(Ok(hub.log.state())),
         Call::SetDaemonSetting(p) => out(daemon::set_setting(hub, p).await),
         Call::SetClock(p) => out(daemon::set_clock(hub, p).await),
@@ -80,7 +83,8 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)
-        | Call::SubscribeTranscript(_) => {
+        | Call::SubscribeTranscript(_)
+        | Call::SubscribeTerminal(_) => {
             unreachable!("the connection answers these")
         }
         // Every other method is in the table of what arrives later, which answered above.

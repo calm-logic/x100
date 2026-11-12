@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use common::*;
 use x100_core::agent::{AgentEvent, AgentState, Waiting};
-use x100_core::driver::{
-    DriverEvent, DriverState, EndReason, Incompatible, PlannedReason, RetireReason,
-};
+use x100_core::driver::{DriverEvent, DriverState, EndReason, Incompatible, RetireReason, Unfit};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::{DriverRecord, ProjectState};
@@ -26,6 +24,7 @@ use x100_core::message::Route;
 use x100_core::money::Money;
 use x100_core::party::Actor;
 use x100_core::project::SettingChange;
+use x100_core::settings::DaemonSettings;
 use x100_core::task::TaskState;
 
 const CHEAP: &str = r#"
@@ -144,12 +143,26 @@ fn on(w: &World, provider: usize, model: &str) -> HarnessModel {
 }
 
 async fn world(allowed: Option<&[(usize, &str)]>, budget: Money) -> World {
+    world_on(allowed, budget, &[], DaemonSettings::default()).await
+}
+
+async fn world_on(
+    allowed: Option<&[(usize, &str)]>,
+    budget: Money,
+    logins: &[(usize, &str)],
+    settings: DaemonSettings,
+) -> World {
     let (cheap, dear) = (cheap(), dear());
     let providers = [dear.as_str()];
     let mut setup = Setup::new(&cheap);
     setup.providers = &providers;
     setup.allowed = allowed;
     setup.budget = budget;
+    setup.logins = logins;
+    setup.settings = DaemonSettings {
+        default_wait_deadline: setup.settings.default_wait_deadline,
+        ..settings
+    };
     World::new(setup).await
 }
 
@@ -265,7 +278,9 @@ async fn one_needing_more_effort_than_the_warm_driver_has_gets_a_new_driver() {
     assert_eq!(ds.len(), 2);
     assert_eq!(
         ds[0].state,
-        DriverState::Ended(EndReason::HandedOff(PlannedReason::EffortChanged))
+        DriverState::Ended(EndReason::Retired(RetireReason::Unfit(
+            Unfit::EffortChanged
+        )))
     );
     // Only the dear provider runs at Max.
     assert_eq!(of(ds[1]), (on(&w, 1, "dear"), Effort::Max));
@@ -337,7 +352,7 @@ async fn waiting_for_max() -> (World, AgentId) {
     assert!(told, "the CEO is told");
     // The wait has a deadline.
     let deadline = s.jobs().any(|j| {
-        matches!(&j.job.does, ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, .. }) if *agent == dev)
+        matches!(&j.job.does, ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent }) if *agent == dev)
             && matches!(j.state, JobState::Scheduled { .. })
     });
     assert!(deadline, "the wait for a driver has a deadline");
@@ -366,10 +381,68 @@ async fn nothing_compatible_the_agent_waits_its_parent_is_told_and_it_starts_whe
     });
     assert!(found);
     let open_deadline = s.jobs().any(|j| {
-        matches!(&j.job.does, ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, .. }) if *agent == dev)
+        matches!(&j.job.does, ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent }) if *agent == dev)
             && matches!(j.state, JobState::Scheduled { .. })
     });
     assert!(!open_deadline, "its deadline is called off");
+    w.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_login_at_its_cap_makes_the_next_agent_wait_until_a_driver_on_it_ends() {
+    const LOGIN: &str = "/home/builder/.cheap";
+    let allowed: &[(usize, &str)] = &[(0, "cheap")];
+    let one = DaemonSettings {
+        terminal_drivers_per_login: 1,
+        ..DaemonSettings::default()
+    };
+    let w = world_on(Some(allowed), Money::from_dollars(50), &[(0, LOGIN)], one).await;
+    w.brief("Start: first\nLevel: low").await;
+    let dev = |s: &ProjectState| s.agents().find(|a| a.role == "Dev").map(|a| a.id);
+    w.until("the worker waits for a driver", |s| {
+        dev(s).is_some_and(|d| waiting_for_driver(s, d).is_some())
+    })
+    .await;
+    w.settle().await;
+    let s = w.state();
+    let dev = dev(&s).unwrap();
+    let full = Incompatible::LoginFull {
+        login: x100_core::harness::Login(LOGIN.into()),
+    };
+    // The dear provider is not allowed, and the cheap one's login is full.
+    assert_eq!(
+        waiting_for_driver(&s, dev).unwrap(),
+        vec![Incompatible::NothingAllowed, full]
+    );
+    assert!(drivers(&s, dev).is_empty());
+    let ceo = s.project().unwrap().ceo;
+    assert!(
+        drivers(&s, ceo)[0].state.is_live(),
+        "the CEO's warm driver holds the login's one place"
+    );
+    // The CEO's driver ends with its warm period, and its place goes to the worker.
+    w.clock_to(START + Duration::from_secs(600)).await;
+    w.until("the worker reports and the CEO waits for the place", |s| {
+        waiting_for_driver(s, ceo).is_some()
+    })
+    .await;
+    let s = w.state();
+    assert_eq!(
+        drivers(&s, ceo)[0].state,
+        DriverState::Ended(EndReason::Retired(RetireReason::WarmTooLong))
+    );
+    assert_eq!(of(drivers(&s, dev)[0]), (on(&w, 0, "cheap"), Effort::Low));
+    // And back to the CEO once the worker's driver ends, to accept the report.
+    w.clock_to(START + Duration::from_secs(1200)).await;
+    w.until("the task is done", |s| done(s, "first")).await;
+    let lives = |s: &ProjectState| s.drivers().filter(|d| d.state.is_live()).count();
+    let mut most = 0;
+    let mut replay = ProjectState::default();
+    for e in w.log() {
+        replay.apply(&e).unwrap();
+        most = most.max(lives(&replay));
+    }
+    assert_eq!(most, 1, "never two live on the login");
     w.finish().await;
 }
 

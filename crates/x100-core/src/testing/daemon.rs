@@ -92,6 +92,7 @@ fn claude() -> Harness {
                 false,
             ),
         ],
+        login: None,
     }
 }
 
@@ -108,6 +109,7 @@ fn codex(cache_lifetime: Duration) -> Harness {
             permission_hook: false,
         },
         models: vec![gpt],
+        login: None,
     }
 }
 
@@ -138,6 +140,7 @@ pub fn daemon_log(start: Timestamp) -> Vec<Envelope<DaemonEvent>> {
             name: "laptop".into(),
             harnesses: vec![CLAUDE, CODEX],
             cap: 8,
+            passed_over: Vec::new(),
         }),
         D::HarnessAdded(claude()),
         D::HarnessAdded(codex(Duration::from_secs(300))),

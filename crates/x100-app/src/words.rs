@@ -24,6 +24,8 @@ pub fn harness(daemon: &DaemonState, id: HarnessId) -> String {
     match daemon.harness(id).map(|h| &h.kind) {
         Some(HarnessKind::ClaudeCode) => "Claude Code".into(),
         Some(HarnessKind::Codex) => "Codex".into(),
+        Some(HarnessKind::ClaudeCodeTerminal) => "Claude Code, terminal".into(),
+        Some(HarnessKind::CodexTerminal) => "Codex, terminal".into(),
         Some(HarnessKind::Custom { name }) => name.clone(),
         None => "Unknown harness".into(),
     }

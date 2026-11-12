@@ -131,15 +131,22 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Rough or unseen:** the held strip, a preview address and the memories view were never seen in a real
     window, since the script produces none. The log wraps mid-word. Facts truncate. A terminal driver has not
     been seen inside the app, since the daemon does not serve terminals yet.
+- **Terminal drivers wired through the daemon.** The orchestrator's run, twice: 363 tests pass, 0 fail, 5
+  ignored, clippy and fmt clean, no process left. Through the real daemon as a child process, a brief to a
+  project that allows only the Claude Code terminal harness (real `claude`, dummy login, fake provider) ends
+  with the BRD written and the task reported over MCP, and the same for Codex. `terminal.subscribe` delivers
+  chunks during the turn, a late subscriber gets everything from the first chunk then live with none twice,
+  and a replay matches `terminal.read`. With the cap at 1 a second agent waits with `LoginFull` (in-process,
+  fake harness). A killed daemon's Codex terminal driver, both processes, is gone after restart. In the app,
+  with no display, the CEO's view shows the terminal's screen equal to a bare replay. This completes M3T's
+  "a client following the terminal sees output as it arrives".
 
 ## In progress
 
-- Wiring the terminal drivers into the orchestrator and daemon: register them, pass the login directory,
-  record each driver's terminal, serve `terminal.read` and `terminal.subscribe`, count the cap per login, keep
-  every pid a driver reports. With the core changes M8 and M3T asked for (terminal harness kinds, a login on
-  the harness record, a per-login cap setting, `Incompatible::LoginFull`, a retire reason for a warm driver
-  that no longer fits, a deadline for a wait for a driver, a machine update event). Opus subagent.
-- Then the end-to-end run of the owner's goal: a small real project through the desktop app on local logins.
+- The end-to-end run of the owner's goal: a small real project through the desktop app on local logins.
+  Opus subagent, with a budget of real turns. It also fixes what stands in the way: the CEO's terminal is not
+  reachable from the Team tab once it has leads, and the CEO's charter and start pack have never met a real
+  model.
 
 ## Waiting on the owner
 
@@ -232,6 +239,24 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From the wiring of terminal drivers:
+
+- **Contract.** Harness kinds for the two terminal harnesses. A login on the harness record. The cap per login
+  as a daemon setting. `Incompatible::LoginFull`. `RetireReason::Unfit` for a warm driver that no longer fits.
+  A deadline routine for an agent's wait for a driver. An event when a machine's harness list changes, with
+  the harnesses passed over and why, which is how a missing login shows to a client.
+- **Defaults**, in `crates/x100d/src/defaults.rs`: a new project allows each terminal harness's cheapest model
+  (claude-haiku-5-5, gpt-6-luna) and no headless model, since a key can only come through the vault. The CEO's
+  range is Low to Medium. Budget 50 dollars at list price.
+- **What a real driver may do, with no sandbox until M10**, one setting in `x100-orch/src/spec.rs`. Claude Code
+  runs in its accept-edits mode: edits inside the worktree go through, and every command and every edit
+  outside it is put to the daemon and refused, since the gate is M12. So a Claude Code driver cannot run
+  commands at all yet. Codex runs commands in its own sandbox: writes only to the worktree and /tmp, no
+  network. **Remaining risk:** both run as the builder and can read anything the builder can, the provider
+  login included, and what they read can reach the provider in the model's context.
+- **Known gap:** an agent with agents under it shows no output, so the CEO's terminal cannot be reached from
+  the Team tab once it has leads.
 
 From M3T:
 
@@ -326,6 +351,8 @@ From M1a, where the documents were silent:
 
 ## Could not be verified, and why
 
+- CI, 2026-11-12: Linux and the licence check are green on 8877094. macOS failed one app test that pressed
+  Ctrl+C to copy where macOS uses Cmd+C. Fixed in the test.
 - macOS by hosted CI only. First run, 2026-11-12, of commit 2c3a3e3: Linux and macOS both green, which covers
   the store's git plumbing, the kill tests and the daemon restart test there. The next push failed on macOS in
   one test, `two_clients_see_the_same_events`, a race in the test between two followers. Being fixed with M6a.

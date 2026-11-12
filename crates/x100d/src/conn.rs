@@ -18,8 +18,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use x100_proto::{
     BadLine, Call, ClosedBecause, ErrorCode, EventNotice, Hello, Message, Notice, PROTOCOL_VERSION,
-    Request, Response, RpcError, Subscribe, SubscribeTranscript, Subscribed, SubscriptionClosed,
-    SubscriptionId, TranscriptNotice, TranscriptSubscribed, Unsubscribe, Welcome,
+    Request, Response, RpcError, Subscribe, SubscribeTerminal, SubscribeTranscript, Subscribed,
+    SubscriptionClosed, SubscriptionId, TerminalNotice, TerminalSubscribed, TranscriptNotice,
+    TranscriptSubscribed, Unsubscribe, Welcome,
 };
 
 use crate::hub::{Hub, NewProject, Registered};
@@ -199,7 +200,8 @@ async fn write_loop(mut write: OwnedWriteHalf, mut queue: mpsc::Receiver<Queued>
         if let Message::Notice(
             Notice::Event(EventNotice::Daemon { subscription, .. })
             | Notice::Event(EventNotice::Project { subscription, .. })
-            | Notice::TranscriptEntry(TranscriptNotice { subscription, .. }),
+            | Notice::TranscriptEntry(TranscriptNotice { subscription, .. })
+            | Notice::TerminalChunk(TerminalNotice { subscription, .. }),
         ) = &message
             && !active.lock().expect("active lock").contains(subscription)
         {
@@ -268,6 +270,7 @@ impl Conn {
             Call::Subscribe(p) => self.subscribe(p).await,
             Call::Unsubscribe(p) => self.unsubscribe(p),
             Call::SubscribeTranscript(p) => self.subscribe_transcript(p).await,
+            Call::SubscribeTerminal(p) => self.subscribe_terminal(p).await,
             other => methods::call(&self.hub, other).await,
         }
     }
@@ -385,6 +388,37 @@ impl Conn {
         self.subs.insert(id, task);
         Ok(
             serde_json::to_value(TranscriptSubscribed { subscription: id })
+                .expect("results serialise"),
+        )
+    }
+
+    /// Follows a terminal driver's terminal as `subscribe_transcript` follows a transcript: the
+    /// store replays and then follows under one lock, so no chunk is missed or repeated.
+    async fn subscribe_terminal(&mut self, p: SubscribeTerminal) -> Result<Value, RpcError> {
+        let store = methods::terminal_of(&self.hub, p.project, p.driver)?;
+        let (driver, after) = (p.driver, p.after);
+        let chunks = blocking(move || store.terminals.follow(driver, after))
+            .await
+            .map_err(|e| store_error(&e))?;
+        let (id, gate) = self.new_subscription();
+        let (out, active) = (self.out.clone(), Arc::clone(&self.active));
+        let task = tokio::spawn(forward(
+            chunks,
+            gate,
+            id,
+            out,
+            active,
+            move |(position, chunk)| {
+                Notice::TerminalChunk(TerminalNotice {
+                    subscription: id,
+                    position,
+                    chunk,
+                })
+            },
+        ));
+        self.subs.insert(id, task);
+        Ok(
+            serde_json::to_value(TerminalSubscribed { subscription: id })
                 .expect("results serialise"),
         )
     }

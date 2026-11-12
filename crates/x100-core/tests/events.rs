@@ -13,15 +13,15 @@ use x100_core::credential::{
 };
 use x100_core::driver::{
     Driver, DriverEvent, Failure, Handoff, HandoffCause, InFlight, Incompatible, Purpose,
-    StartReason, TakeoverCause, View,
+    RetireReason, StartReason, TakeoverCause, Unfit, View,
 };
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::{DaemonEvent, Envelope, ProjectEvent, Seq};
 use x100_core::file::{ContentHash, FileRef};
 use x100_core::git::CommitId;
 use x100_core::harness::{
-    CoolOff, Harness, HarnessKind, HarnessModel, Machine, ModelName, ModelOffer, OneOffCall,
-    OneOffPurpose, ProviderFailure, Support,
+    CoolOff, Harness, HarnessKind, HarnessModel, Login, Machine, ModelName, ModelOffer, OneOffCall,
+    OneOffPurpose, PassedOver, ProviderFailure, Support,
 };
 use x100_core::id::*;
 use x100_core::inbox::InboxItem;
@@ -128,6 +128,9 @@ fn project_events() -> Vec<ProjectEvent> {
             agent: agent(1),
             event: AgentEvent::NoDriver(vec![
                 Incompatible::CoolingOff(hm()),
+                Incompatible::LoginFull {
+                    login: Login("/home/b/.claude".into()),
+                },
                 Incompatible::Budget(BudgetReached::Lead(agent(1))),
             ]),
         },
@@ -155,6 +158,10 @@ fn project_events() -> Vec<ProjectEvent> {
             event: DriverEvent::TurnStarted {
                 given: vec![InboxItemId::from_u128(1)],
             },
+        },
+        P::Driver {
+            driver: DriverId::from_u128(2),
+            event: DriverEvent::Retired(RetireReason::Unfit(Unfit::CoolingOff)),
         },
         P::ProcessStarted(Process {
             agent: agent(1),
@@ -397,6 +404,7 @@ fn daemon_events() -> Vec<DaemonEvent> {
             cache_lifetime: Duration::from_secs(300),
             levels: vec![(Effort::Low, price)],
         }],
+        login: Some(Login("/home/b/.claude".into())),
     };
     let scope = CredentialScope {
         hosts: BTreeSet::from(["api.example.com".to_owned()]),
@@ -409,6 +417,7 @@ fn daemon_events() -> Vec<DaemonEvent> {
             name: "laptop".into(),
             harnesses: vec![HarnessId::from_u128(1)],
             cap: 8,
+            passed_over: Vec::new(),
         }),
         D::MachineCapSet {
             machine: MachineId::from_u128(1),
@@ -416,6 +425,14 @@ fn daemon_events() -> Vec<DaemonEvent> {
         },
         D::HarnessAdded(harness.clone()),
         D::HarnessUpdated(harness),
+        D::MachineHarnessesSet {
+            machine: MachineId::from_u128(1),
+            harnesses: vec![HarnessId::from_u128(1)],
+            passed_over: vec![PassedOver {
+                kind: HarnessKind::CodexTerminal,
+                why: "no login at /home/b/.codex".into(),
+            }],
+        },
         D::CoolOffStarted {
             cool_off: CoolOff {
                 of: hm(),
@@ -448,6 +465,7 @@ fn daemon_events() -> Vec<DaemonEvent> {
             path: "/home/b/fernleaf".into(),
         },
         D::SettingChanged(DaemonSetting::StallTimeout(Duration::from_secs(600))),
+        D::SettingChanged(DaemonSetting::TerminalDriversPerLogin(1)),
         D::JobScheduled(Job {
             id: JobId::from_u128(1),
             when: Schedule::Once { at: at(60_000) },
@@ -504,6 +522,7 @@ fn daemon_variant(e: &DaemonEvent) -> &'static str {
     match e {
         D::MachineAdded(_) => "MachineAdded",
         D::MachineCapSet { .. } => "MachineCapSet",
+        D::MachineHarnessesSet { .. } => "MachineHarnessesSet",
         D::HarnessAdded(_) => "HarnessAdded",
         D::HarnessUpdated(_) => "HarnessUpdated",
         D::CoolOffStarted { .. } => "CoolOffStarted",
@@ -545,5 +564,5 @@ fn every_project_event_round_trips() {
 
 #[test]
 fn every_daemon_event_round_trips() {
-    round_trip(&daemon_events(), daemon_variant, 14);
+    round_trip(&daemon_events(), daemon_variant, 15);
 }

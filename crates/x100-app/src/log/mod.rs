@@ -18,6 +18,7 @@ use x100_core::event::{Envelope, ProjectEvent, Seq};
 use x100_core::fold::ProjectPart;
 use x100_core::id::{FileId, ProjectId};
 
+pub(crate) use wording::unfit;
 pub use wording::{Line, Names, kind, line, request};
 
 use crate::notice::{self, Outcome};

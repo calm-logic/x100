@@ -1,7 +1,7 @@
-//! An agent's view of terminal drivers, against a scripted daemon on a socket, since the real
-//! daemon does not serve `terminal.subscribe` yet. The state is core's Fernleaf with Research's
-//! drivers made terminal drivers. Driver 1's terminal is a real `claude` recording; for driver 2
-//! the daemon says terminals are not available yet.
+//! An agent's view of terminal drivers, against a scripted daemon on a socket. The state is core's
+//! Fernleaf with Research's drivers made terminal drivers. Driver 1's terminal is a real `claude`
+//! recording; for driver 2 the daemon says it has no terminal. `real_terminal.rs` runs the same
+//! view against the real daemon.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -211,10 +211,10 @@ async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<Strin
                         );
                     }
                 }
-                Call::SubscribeTerminal(_) => send(err(
+                Call::SubscribeTerminal(s) => send(err(
                     id,
-                    ErrorCode::Unavailable,
-                    "terminal.subscribe is not available yet: it arrives with M3T",
+                    ErrorCode::NotFound,
+                    &format!("driver {} runs headless and has no terminal", s.driver),
                 )),
                 Call::Unsubscribe(_) => send(ok(id, serde_json::json!({}))),
                 _ => send(err(id, ErrorCode::NotFound, "not scripted")),
@@ -224,7 +224,7 @@ async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<Strin
 }
 
 #[test]
-fn terminal_drivers_replay_and_an_unserved_one_says_so() {
+fn terminal_drivers_replay_and_a_refused_one_says_so() {
     // As the window tests: a plain test, since the client wakes GPUI's tasks from Tokio's threads.
     let mut cx = TestAppContext::single();
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -284,14 +284,14 @@ fn terminal_drivers_replay_and_an_unserved_one_says_so() {
     assert!(first.starts_with("Driver 1 started: "), "{first}");
     assert!(!shown[0].text.contains("Shown on the screen"));
     // Driver 2: the change marked with why driver 1 ended, a plain line for the terminal the
-    // daemon cannot show, and its transcript in its place.
+    // daemon will not show, and its transcript in its place.
     let second = shown[1].marker.as_deref().unwrap();
     assert!(second.starts_with("Driver 2 took over: "), "{second}");
     assert!(second.contains("Driver 1 ended: "), "{second}");
     assert!(
         shown[1]
             .text
-            .contains("The daemon cannot show terminals yet. This driver's transcript follows.")
+            .contains("This driver has no terminal to show. Its transcript follows.")
     );
     assert!(!shown[1].text.contains("Shown on the screen"));
 

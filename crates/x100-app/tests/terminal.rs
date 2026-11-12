@@ -294,7 +294,12 @@ fn the_wheel_scrolls_back_and_a_selection_is_copied(cx: &mut TestAppContext) {
     vcx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
     vcx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
     vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
-    vcx.simulate_keystrokes("ctrl-c");
+    // The platform's own copy key: Cmd on macOS, Ctrl elsewhere.
+    vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-c"
+    } else {
+        "ctrl-c"
+    });
     let copied = vcx.read_from_clipboard().and_then(|c| c.text());
     assert_eq!(copied.as_deref(), Some("194 of"));
 }

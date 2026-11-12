@@ -1,14 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use x100_core::action::AskMeAbout;
-use x100_core::effort::EffortRange;
 use x100_core::event::{DaemonEvent, ProjectEvent};
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, ProjectId};
-use x100_core::money::{Money, Percent};
 use x100_core::party::Actor;
-use x100_core::project::{SettingChange, Settings};
+use x100_core::project::SettingChange;
 use x100_orch::new_id;
 use x100_proto::{
     ChangeProjectSetting, CreateProject, Done, ErrorCode, GetProject, ProjectCreated, ProjectList,
@@ -17,6 +14,7 @@ use x100_proto::{
 use x100_store::ProjectStore;
 
 use super::{blocking, project, store_error};
+use crate::defaults;
 use crate::hub::Hub;
 
 pub fn list(hub: &Hub) -> ProjectList {
@@ -49,27 +47,6 @@ pub fn get(hub: &Hub, p: GetProject) -> Result<ProjectState, RpcError> {
     Ok(project(hub, p.project)?.log.state())
 }
 
-/// The builder's defaults for a new project: ask about high risk only, fifty dollars, a tenth of
-/// it for the lab, and every model the daemon found.
-fn default_settings(hub: &Hub) -> Settings {
-    let allowed = hub.log.with_state(|d| {
-        d.harnesses()
-            .flat_map(|h| {
-                h.models.iter().map(|m| x100_core::harness::HarnessModel {
-                    harness: h.id,
-                    model: m.model.clone(),
-                })
-            })
-            .collect()
-    });
-    Settings {
-        ask_me_about: AskMeAbout::HighRiskOnly,
-        budget: Money::from_dollars(50),
-        lab_share: Percent::new(10).expect("a percentage"),
-        allowed,
-    }
-}
-
 pub async fn create(hub: &Hub, p: CreateProject) -> Result<ProjectCreated, RpcError> {
     let path = PathBuf::from(&p.path);
     if !path.is_absolute() {
@@ -82,8 +59,14 @@ pub async fn create(hub: &Hub, p: CreateProject) -> Result<ProjectCreated, RpcEr
         .name
         .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
         .ok_or_else(|| RpcError::new(ErrorCode::Rejected, "the project needs a name"))?;
-    let settings = p.settings.unwrap_or_else(|| default_settings(hub));
-    if hub.log.with_state(|d| d.harnesses().next().is_none()) {
+    let scripted = hub.config.scripts_dir.is_some();
+    let settings = p
+        .settings
+        .unwrap_or_else(|| hub.log.with_state(|d| defaults::settings(d, scripted)));
+    if hub
+        .log
+        .with_state(|d| d.machines().all(|m| m.harnesses.is_empty()))
+    {
         return Err(RpcError::new(
             ErrorCode::Unavailable,
             "no harness is available on this machine, so no agent could work",
@@ -131,7 +114,7 @@ pub async fn create(hub: &Hub, p: CreateProject) -> Result<ProjectCreated, RpcEr
         ceo: new_id(&*clock, AgentId::new),
         charter: "Own this project from the builder's brief to a result the builder accepts."
             .into(),
-        effort: EffortRange::FULL,
+        effort: defaults::ceo_effort(),
         settings,
     };
     let log = store.log.clone();

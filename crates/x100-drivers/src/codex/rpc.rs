@@ -40,6 +40,7 @@ pub(crate) struct CodexRpc {
     effort: &'static str,
     cwd: String,
     approval: &'static str,
+    sandbox: &'static str,
     expects_tools: bool,
     attached: bool,
     name: String,
@@ -84,9 +85,11 @@ impl CodexRpc {
             effort: effort_name(spec.effort),
             cwd: spec.dir.display().to_string(),
             approval: match spec.permissions {
-                Permissions::AllowAll => "never",
+                // A command its sandbox refuses fails, and the model is told so.
+                Permissions::AllowAll | Permissions::Worktree => "never",
                 Permissions::AskDaemon => "untrusted",
             },
+            sandbox: super::sandbox_mode(spec.permissions),
             expects_tools: spec.tools.is_some(),
             attached,
             name: format!("x100 driver {}", spec.driver),
@@ -145,7 +148,7 @@ impl CodexRpc {
                     "model": self.model,
                     "cwd": self.cwd,
                     "approvalPolicy": self.approval,
-                    "sandbox": "danger-full-access",
+                    "sandbox": self.sandbox,
                     "developerInstructions": self.start_pack,
                     "ephemeral": !self.attached,
                 });

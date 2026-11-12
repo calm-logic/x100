@@ -2,6 +2,8 @@
 //! way in.
 #![allow(dead_code)]
 
+pub mod real;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -116,7 +118,8 @@ impl Env {
         Client::connect(options).await.expect("the daemon answers")
     }
 
-    /// The driver processes the daemon has written down, by driver id.
+    /// The driver processes the daemon has written down, by driver id: one for most drivers,
+    /// two for Codex in a terminal.
     pub fn recorded_pids(&self) -> Vec<(String, u32)> {
         let Ok(text) = std::fs::read_to_string(self.data.join("drivers.json")) else {
             return Vec::new();
@@ -125,7 +128,12 @@ impl Env {
         map.as_object()
             .map(|m| {
                 m.iter()
-                    .map(|(k, v)| (k.clone(), v["pid"].as_u64().unwrap() as u32))
+                    .flat_map(|(k, v)| {
+                        let entries = v.as_array().cloned().unwrap_or_default();
+                        entries
+                            .into_iter()
+                            .map(move |e| (k.clone(), e["pid"].as_u64().unwrap() as u32))
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -140,6 +148,18 @@ impl DaemonProc {
     pub fn spawn(args: Vec<std::ffi::OsString>) -> DaemonProc {
         let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
             .args(args)
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("x100d starts");
+        DaemonProc { child: Some(child) }
+    }
+
+    /// A daemon with only the environment given, nothing of the test's own but what it names.
+    pub fn spawn_in(args: Vec<std::ffi::OsString>, env: &[(String, String)]) -> DaemonProc {
+        let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
+            .args(args)
+            .env_clear()
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");

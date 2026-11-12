@@ -38,6 +38,9 @@ pub struct DaemonSettings {
     pub turns_without_progress: u32,
     /// How long a harness and model are skipped after a failure that looks like the provider's.
     pub cool_off: Duration,
+    /// The most terminal drivers that may run at once on one provider login, across every
+    /// project. A subscription's limits assume one person's use.
+    pub terminal_drivers_per_login: u32,
 }
 
 const fn minutes(n: u64) -> Duration {
@@ -57,6 +60,7 @@ impl Default for DaemonSettings {
             last_turn_limit: minutes(3),
             turns_without_progress: 3,
             cool_off: minutes(10),
+            terminal_drivers_per_login: 4,
         }
     }
 }
@@ -79,6 +83,7 @@ pub enum DaemonSetting {
     LastTurnLimit(Duration),
     TurnsWithoutProgress(u32),
     CoolOff(Duration),
+    TerminalDriversPerLogin(u32),
 }
 
 impl DaemonSettings {
@@ -95,6 +100,7 @@ impl DaemonSettings {
             S::LastTurnLimit(v) => self.last_turn_limit = v,
             S::TurnsWithoutProgress(v) => self.turns_without_progress = v,
             S::CoolOff(v) => self.cool_off = v,
+            S::TerminalDriversPerLogin(v) => self.terminal_drivers_per_login = v,
         }
     }
 }

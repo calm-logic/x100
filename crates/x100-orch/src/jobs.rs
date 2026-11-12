@@ -73,10 +73,13 @@ pub(crate) fn fired(
                 out.push(deliver(clock, *to, InboxItem::Task { task: id }));
             }
         }
-        ProjectJob::Routine(ProjectRoutine::WaitDeadline { agent, wait }) => {
-            out.extend(route::deadline_passed(state, clock, *agent, *wait));
+        ProjectJob::Routine(ProjectRoutine::DriverWaitDeadline { agent }) => {
+            out.extend(route::deadline_passed(state, clock, *agent));
         }
-        ProjectJob::Routine(ProjectRoutine::EndWarmPeriod { .. }) => {}
+        // A wait's own deadline is closed by `settle`, like any other event that ends a wait.
+        ProjectJob::Routine(
+            ProjectRoutine::WaitDeadline { .. } | ProjectRoutine::EndWarmPeriod { .. },
+        ) => {}
     }
     out
 }

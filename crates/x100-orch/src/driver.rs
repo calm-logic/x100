@@ -6,7 +6,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
-use x100_core::driver::{Driver, DriverEvent, Failure, Purpose, StartReason, StopReason};
+use x100_core::driver::{
+    Driver, DriverEvent, Failure, Purpose, RetireReason, StartReason, StopReason, View,
+};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessModel, ModelOffer};
@@ -15,12 +17,10 @@ use x100_core::inbox::InboxItem;
 use x100_core::job::JobEvent;
 use x100_core::party::{Actor, Party};
 use x100_core::task::TaskState;
+use x100_core::terminal::Chunk;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
-use x100_drivers::{
-    Decision, DriverControl, DriverOutput, DriverSpec, Permissions, SpawnHook, Spent, StallPolicy,
-    StartError, TurnEnd,
-};
-use x100_router::{Choice, EndWhy};
+use x100_drivers::{Decision, DriverControl, DriverOutput, Spent, StartError, TurnEnd};
+use x100_router::Choice;
 
 use crate::Shared;
 use crate::branches::{self, Ready};
@@ -28,6 +28,7 @@ use crate::ctx::{Events, ProjectCtx};
 use crate::pack;
 use crate::project::Msg;
 use crate::route;
+use crate::spec;
 use crate::store::blocking;
 use crate::turns;
 
@@ -39,8 +40,8 @@ pub(crate) enum Cmd {
         carried: BTreeSet<TaskId>,
     },
     Stop(How, oneshot::Sender<()>),
-    /// The router ended it between turns: retired, or no longer fit for its agent's work.
-    End(EndWhy, oneshot::Sender<()>),
+    /// The router retired it between turns.
+    End(RetireReason, oneshot::Sender<()>),
     /// A task it carried was accepted and its harness can compact.
     Compact,
 }
@@ -150,7 +151,7 @@ impl Actor_ {
             effort: choice.effort,
             machine: choice.machine,
             purpose: Purpose::Work,
-            view: choice.view,
+            view: harness.as_ref().map_or(View::Headless, |h| h.view()),
             why: why.clone(),
         };
         self.record = Some(record.clone());
@@ -180,30 +181,7 @@ impl Actor_ {
         .await;
         self.transcript(Item::DriverChanged { from: previous })
             .await;
-        let dir = self.ctx.store.git.worktree_path(agent);
-        let spec = DriverSpec {
-            driver,
-            model: choice.model,
-            effort: choice.effort,
-            wrap: self.shared.sandbox.wrap(agent, &dir),
-            dir,
-            start_pack,
-            tools: Some(self.shared.desk.issue(driver, Arc::clone(&self.ctx))),
-            env: Vec::new(),
-            stall: StallPolicy::from_settings(&(self.shared.settings)()),
-            permissions: Permissions::AllowAll,
-            login: None,
-            // Written down before the handshake, since a daemon killed during it would otherwise
-            // leave a process nobody recorded. A blocking write, but a short one.
-            on_spawn: SpawnHook::new({
-                let processes = Arc::clone(&self.shared.processes);
-                move |pid| {
-                    if let Err(e) = processes.record(driver, pid) {
-                        eprintln!("x100: could not write down driver {driver}'s process: {e}");
-                    }
-                }
-            }),
-        };
+        let spec = spec::build(&self.shared, &self.ctx, agent, driver, &choice, start_pack);
         let mut handle = match harness.start(spec).await {
             Ok(h) => h,
             Err(e) => return self.fail(start_failure(e)).await,
@@ -234,7 +212,7 @@ impl Actor_ {
                         return None;
                     }
                     Some(Cmd::End(why, ack)) => {
-                        self.end(turns::end_events(why)).await;
+                        self.end(vec![DriverEvent::Retired(why)]).await;
                         control.stop().await;
                         let _ = ack.send(());
                         return None;
@@ -325,6 +303,14 @@ impl Actor_ {
         let (ctx, agent) = (Arc::clone(&self.ctx), self.agent);
         if let Err(e) = blocking(move || ctx.store.transcripts.append(agent, entry)).await {
             eprintln!("x100: transcript of {}: {e}", self.agent);
+        }
+    }
+
+    /// A piece of the driver's terminal, recorded as it arrives so a client follows it live.
+    async fn terminal(&self, chunk: Chunk) {
+        let (ctx, driver) = (Arc::clone(&self.ctx), self.driver);
+        if let Err(e) = blocking(move || ctx.store.terminals.append(driver, chunk)).await {
+            eprintln!("x100: terminal of {driver}: {e}");
         }
     }
 
@@ -421,8 +407,8 @@ impl Actor_ {
                     driver: self.driver,
                 });
             }
-            // Recording a terminal's chunks arrives with the wiring of terminal drivers.
-            DriverOutput::Warning(_) | DriverOutput::Failed(_) | DriverOutput::Terminal(_) => {}
+            DriverOutput::Terminal(chunk) => self.terminal(chunk).await,
+            DriverOutput::Warning(_) | DriverOutput::Failed(_) => {}
         }
         Ok(())
     }
