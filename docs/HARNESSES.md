@@ -100,6 +100,12 @@ The real binaries, run with a dummy key and their base URL on localhost. No prov
 Still unknown: the certificate-authority settings (they need M11's proxy), reaping of stdio MCP children (x100
 uses HTTP MCP), and everything on the paid list below.
 
+## MCP, as each harness speaks it (seen by M6b)
+
+Claude Code 2.1.322 speaks MCP `2026-07-28`, the version without `initialize`: it sends `server/discover`, then
+`tools/list` and `tools/call`. Codex 0.167.1 speaks `2025-06-18` with `initialize`. Both send the bearer token
+and accept plain JSON answers. The daemon serves both with the `rmcp` crate.
+
 ## Neither speaks ACP
 
 Adapters exist for both. Not needed for v1.

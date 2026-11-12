@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use x100_core::event::Envelope;
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::money::Usage;
+use x100_core::terminal::{Chunk, ChunkKind, TermPos};
 use x100_core::testing::{daemon_log, fernleaf};
 use x100_core::transcript::{Entry, Item, Pos, TurnEnd};
 use x100_proto::*;
@@ -175,6 +176,21 @@ fn every_notification_round_trips() {
             },
         }));
     }
+    let all: Vec<u8> = (0..=255).collect();
+    let chunks = [
+        ChunkKind::Resize { cols: 80, rows: 24 },
+        ChunkKind::Output { bytes: Bytes(all) },
+    ];
+    for (i, what) in chunks.into_iter().enumerate() {
+        notices.push(Notice::TerminalChunk(TerminalNotice {
+            subscription: sub,
+            position: TermPos(i as u64 + 1),
+            chunk: Chunk {
+                at: at(i as u64),
+                what,
+            },
+        }));
+    }
     for n in notices {
         assert_eq!(through_a_line(n.clone()), n);
     }
@@ -182,7 +198,12 @@ fn every_notification_round_trips() {
     let names: Vec<&str> = NOTICES.iter().map(|n| n.0).collect();
     assert_eq!(
         names,
-        ["events.event", "transcript.entry", "subscription.closed"]
+        [
+            "events.event",
+            "transcript.entry",
+            "terminal.chunk",
+            "subscription.closed"
+        ]
     );
 }
 

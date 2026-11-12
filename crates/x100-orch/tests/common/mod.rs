@@ -3,26 +3,31 @@
 //! one turn at a time so the log comes out the same on every run.
 #![allow(dead_code)]
 
+pub mod mcp;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use x100_core::driver::{DriverState, Incompatible};
 use x100_core::effort::EffortRange;
 use x100_core::event::{Envelope, ProjectEvent};
 use x100_core::fold::ProjectState;
-use x100_core::harness::{HarnessModel, ModelName};
-use x100_core::id::{AgentId, HarnessId, MachineId, ProjectId, TaskId};
+use x100_core::harness::{HarnessKind, HarnessModel, ModelName, ModelOffer, Support};
+use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, ProjectId, TaskId};
 use x100_core::money::{Money, Percent};
 use x100_core::party::Actor;
 use x100_core::project::Settings as ProjectSettings;
 use x100_core::settings::DaemonSettings;
 use x100_core::time::{Clock, FakeClock, Timestamp};
 use x100_drivers::fake::{DaemonTools, FakeHarness};
+use x100_drivers::{DriverHandle, DriverSpec, Harness, StartError, ToolEndpoint};
 use x100_jobs::Scheduler;
 use x100_orch::{
     AllowAll, Choice, Config, Desk, DriverChooser, NoSandbox, Orchestrator, ProcessRegistry,
+    ToolServer,
 };
 use x100_store::ProjectStore;
 
@@ -41,13 +46,22 @@ pub struct World {
     pub ceo: AgentId,
     pub orch: Orchestrator,
     pub scheduler: Scheduler<ProjectState>,
+    pub desk: Arc<Desk>,
+    /// Serving the tools over MCP, when the setup asked for it.
+    pub tools: Option<ToolServer>,
+    /// Where each driver was told to reach the tools, as its harness was given it.
+    pub endpoints: Endpoints,
 }
+
+pub type Endpoints = Arc<Mutex<HashMap<DriverId, ToolEndpoint>>>;
 
 /// One script; which model each role runs on, by default the one listed first.
 pub struct Setup<'a> {
     pub script: &'a str,
     pub models: &'a [(&'a str, &'a str)],
     pub settings: DaemonSettings,
+    /// Serve the tools over MCP as well as in-process.
+    pub serve: bool,
 }
 
 impl<'a> Setup<'a> {
@@ -61,6 +75,7 @@ impl<'a> Setup<'a> {
             script,
             models: &[],
             settings,
+            serve: false,
         }
     }
 }
@@ -106,13 +121,26 @@ impl World {
         let settings = setup.settings;
         let settings: x100_orch::Settings = Arc::new(move || settings);
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
-        let harness = FakeHarness::new(
+        let tools = match setup.serve {
+            true => Some(
+                ToolServer::start(Arc::clone(&desk))
+                    .await
+                    .expect("a tools server"),
+            ),
+            false => None,
+        };
+        let fake = FakeHarness::new(
             FAKE,
             &script,
             Arc::clone(&shared),
             Some(Arc::clone(&desk) as Arc<dyn DaemonTools>),
         )
         .expect("the fake harness");
+        let endpoints = Endpoints::default();
+        let harness = Recording {
+            inner: Arc::new(fake),
+            endpoints: Arc::clone(&endpoints),
+        };
         let default_model = models[0].model.clone();
         let by_role: HashMap<String, ModelName> = setup
             .models
@@ -133,7 +161,7 @@ impl World {
             }),
             settings,
             processes: Arc::new(processes),
-            desk,
+            desk: Arc::clone(&desk),
             sandbox: Arc::new(NoSandbox),
             serial: true,
         });
@@ -148,6 +176,9 @@ impl World {
             ceo,
             orch,
             scheduler,
+            desk,
+            tools,
+            endpoints,
         }
     }
 
@@ -331,4 +362,36 @@ impl DriverChooser for ByRole {
 
 pub fn read(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
+}
+
+/// A harness that notes the tools endpoint each driver is started with, as a test reading the
+/// harness's side of the wire would.
+pub struct Recording {
+    pub inner: Arc<dyn Harness>,
+    pub endpoints: Endpoints,
+}
+
+#[async_trait]
+impl Harness for Recording {
+    fn kind(&self) -> HarnessKind {
+        self.inner.kind()
+    }
+
+    fn models(&self) -> Vec<ModelOffer> {
+        self.inner.models()
+    }
+
+    fn supports(&self) -> Support {
+        self.inner.supports()
+    }
+
+    async fn start(&self, spec: DriverSpec) -> Result<DriverHandle, StartError> {
+        if let Some(endpoint) = &spec.tools {
+            self.endpoints
+                .lock()
+                .expect("endpoints lock")
+                .insert(spec.driver, endpoint.clone());
+        }
+        self.inner.start(spec).await
+    }
 }

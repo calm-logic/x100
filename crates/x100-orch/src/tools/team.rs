@@ -33,7 +33,6 @@ fn one(at: &At, event: ProjectEvent) -> Plan {
 }
 
 pub(super) fn form(at: &At, leads: &[LeadSpec]) -> Result<Plan, Refusal> {
-    ceo_only(at, "forms the team")?;
     let team = &at.project.team;
     if team
         .members()
@@ -92,7 +91,6 @@ pub(super) fn form(at: &At, leads: &[LeadSpec]) -> Result<Plan, Refusal> {
 }
 
 pub(super) fn set_effort(at: &At, agent: AgentId, range: EffortRange) -> Result<Plan, Refusal> {
-    ceo_only(at, "sets effort ranges")?;
     at.live_agent(agent)?;
     let event = ProjectEvent::Agent {
         agent,
@@ -102,7 +100,6 @@ pub(super) fn set_effort(at: &At, agent: AgentId, range: EffortRange) -> Result<
 }
 
 pub(super) fn set_budget(at: &At, lead: AgentId, budget: Money) -> Result<Plan, Refusal> {
-    ceo_only(at, "sets budgets")?;
     at.live_agent(lead)?;
     let shaped = at
         .project

@@ -23,7 +23,7 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use x100_core::time::Clock;
-use x100_orch::{AllowAll, Desk, NoSandbox, Orchestrator, ProcessRegistry};
+use x100_orch::{AllowAll, Desk, NoSandbox, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
@@ -38,6 +38,8 @@ use hub::Hub;
 
 pub struct Daemon {
     hub: Arc<Hub>,
+    /// The daemon's tools over MCP, for the real harnesses' drivers.
+    tools: ToolServer,
     listener: UnixListener,
     socket: PathBuf,
     pid_file: PathBuf,
@@ -94,8 +96,10 @@ impl Daemon {
         let settings_log = log.clone();
         let settings: x100_orch::Settings =
             Arc::new(move || settings_log.with_state(|s| *s.settings()));
-        // The harnesses reach the tools through the desk, so it exists before them.
+        // The harnesses reach the tools through the desk, so it exists before them, and so does
+        // the address every driver is given.
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
+        let tools = ToolServer::start(Arc::clone(&desk)).await?;
         let found = discover::discover(&config, &log, desk.clone())?;
         let chooser = FirstAllowed {
             log: log.clone(),
@@ -144,6 +148,7 @@ impl Daemon {
         let (stop, _) = watch::channel(false);
         Ok(Daemon {
             hub,
+            tools,
             listener,
             socket,
             pid_file,
@@ -153,6 +158,11 @@ impl Daemon {
 
     pub fn socket_path(&self) -> &Path {
         &self.socket
+    }
+
+    /// Where the daemon serves its tools over MCP, on loopback: `http://127.0.0.1:<port>`.
+    pub fn tools_url(&self) -> &str {
+        self.tools.url()
     }
 
     pub fn stop_handle(&self) -> Stop {
@@ -192,6 +202,8 @@ impl Daemon {
         .await;
         conns.abort_all();
         self.hub.orch.shutdown().await;
+        // No driver is left to call it.
+        self.tools.stop().await;
         self.hub.stop_tasks();
         let _ = std::fs::remove_file(&self.socket);
         let _ = std::fs::remove_file(&self.pid_file);

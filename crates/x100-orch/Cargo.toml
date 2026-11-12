@@ -21,15 +21,28 @@ x100-store = { path = "../x100-store" }
 x100-drivers = { path = "../x100-drivers" }
 x100-jobs = { path = "../x100-jobs" }
 async-trait = "0.1"
+bytes = "1"
+getrandom = "0.4"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["service", "tokio"] }
 nix = { version = "0.29", features = ["signal"] }
+# The official MCP SDK, for its streamable HTTP server: the protocol versions, sessionless
+# requests and JSON responses the harnesses' clients speak. Served by hyper, with no web framework.
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-streamable-http-server"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net"] }
 # Default features, for the randomness in an id: core builds ids from parts only.
 ulid = "3"
 
 [dev-dependencies]
 x100-core = { path = "../x100-core", features = ["testing"] }
+x100-drivers = { path = "../x100-drivers", features = ["testing"] }
+hyper = { version = "1", features = ["client", "http1"] }
+jsonschema = { version = "0.61", default-features = false }
+nix = { version = "0.29", features = ["fs", "signal"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

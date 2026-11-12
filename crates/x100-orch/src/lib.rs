@@ -3,7 +3,8 @@
 //!
 //! - Each project has a turn loop ([`project`]) that gives an agent's waiting inbox items to its
 //!   warm driver, or starts one, and a driver task per driver ([`driver`]) that records its turns.
-//! - Agents act through the daemon's tools, which arrive at the [`Desk`] whatever carries them.
+//! - Agents act through the daemon's tools, which arrive at the [`Desk`] whatever carries them:
+//!   MCP for the real harnesses ([`ToolServer`]), a callback for the fake one.
 //!   [`tools`] decides each call from the folded state alone; the desk records it as an action,
 //!   does the git work it needs, and appends what happened.
 //! - Every append goes through one writer per project, which closes the waits its events end
@@ -23,6 +24,7 @@ mod driver;
 mod gate;
 mod ids;
 mod jobs;
+mod mcp;
 pub mod pack;
 mod processes;
 mod project;
@@ -49,9 +51,10 @@ use x100_store::ProjectStore;
 
 pub use builder::Refused;
 pub use choose::{Choice, DriverChooser};
-pub use desk::Desk;
+pub use desk::{Desk, Refusal};
 pub use gate::{AllowAll, Gate, Ruling};
 pub use ids::new_id;
+pub use mcp::ToolServer;
 pub use processes::{ProcessRegistry, Reaped};
 pub use recover::recover;
 pub use sandbox::{NoSandbox, Sandbox};
@@ -248,7 +251,8 @@ impl Orchestrator {
     }
 
     /// Stops every driver, recording a warm one as ended and a running one as failed, both
-    /// because the daemon stopped, and returns when no driver process of ours is left.
+    /// because the daemon stopped, and returns when no driver process of ours is left and every
+    /// driver's task, a crashed one's included, has finished, so none is still on record.
     pub async fn shutdown(&self) {
         let handles: Vec<_> = self
             .projects
@@ -262,7 +266,8 @@ impl Orchestrator {
             if p.ctl.send(project::Ctl::Shutdown(ack)).is_ok() {
                 let _ = done.await;
             }
-            p.task.abort();
+            // The loop returns once it has acknowledged; waiting for it leaves nothing behind.
+            let _ = p.task.await;
         }
     }
 }

@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use x100_core::event::{DaemonEvent, Envelope, ProjectEvent, Seq};
 use x100_core::fold::{DaemonState, ProjectState};
-use x100_core::id::{AgentId, ProjectId};
-
+use x100_core::id::{AgentId, DriverId, ProjectId};
+use x100_core::terminal::{Chunk, TermPos};
 use x100_core::transcript::{Entry, Pos};
 
 /// Names one log: the daemon's, or one project's.
@@ -125,6 +125,39 @@ pub struct TranscriptSubscribed {
     pub subscription: SubscriptionId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadTerminal {
+    pub project: ProjectId,
+    pub driver: DriverId,
+    pub after: Option<TermPos>,
+    pub limit: u32,
+}
+
+/// A chunk and where it sits in its driver's terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PositionedChunk {
+    pub position: TermPos,
+    pub chunk: Chunk,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalPage {
+    pub chunks: Vec<PositionedChunk>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscribeTerminal {
+    pub project: ProjectId,
+    pub driver: DriverId,
+    /// The chunks after this position are notified first, then new ones as they are written.
+    pub after: Option<TermPos>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalSubscribed {
+    pub subscription: SubscriptionId,
+}
+
 /// Why a daemon ended a subscription on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -154,6 +187,13 @@ pub struct TranscriptNotice {
     pub subscription: SubscriptionId,
     pub position: Pos,
     pub entry: Entry,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalNotice {
+    pub subscription: SubscriptionId,
+    pub position: TermPos,
+    pub chunk: Chunk,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -118,7 +118,7 @@ fn only_the_ceo_forms_the_team_and_only_the_first_time() {
     };
     assert!(
         s.refused(s.f.tech, &call)
-            .contains("only the CEO forms the team")
+            .contains("only the CEO calls `form_team`")
     );
     assert!(s.refused(s.f.backend, &call).contains("only the CEO"));
     assert!(s.refused(s.f.ceo, &call).contains("formed already"));
@@ -133,7 +133,7 @@ fn only_the_ceo_sets_effort_and_budgets_and_budgets_stay_inside_the_total() {
     };
     assert!(
         s.refused(s.f.tech, &effort)
-            .contains("only the CEO sets effort")
+            .contains("only the CEO calls `set_effort`")
     );
     assert!(s.call(s.f.ceo, &effort).is_ok());
     let budget = |lead, dollars| ToolCall::SetBudget {
@@ -142,7 +142,7 @@ fn only_the_ceo_sets_effort_and_budgets_and_budgets_stay_inside_the_total() {
     };
     assert!(
         s.refused(s.f.tech, &budget(s.f.tech, 1))
-            .contains("only the CEO sets budgets")
+            .contains("only the CEO calls `set_budget`")
     );
     assert!(
         s.refused(s.f.ceo, &budget(s.f.tech, 500))

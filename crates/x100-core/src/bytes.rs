@@ -4,7 +4,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A file's bytes, which JSON carries as standard base64 text.
+/// Bytes that are not text: a file, or what a program wrote to its terminal. JSON carries them as
+/// standard base64 text, so every value 0 to 255 survives.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Bytes(pub Vec<u8>);
 

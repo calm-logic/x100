@@ -28,7 +28,19 @@ pub struct Driver {
     pub effort: Effort,
     pub machine: MachineId,
     pub purpose: Purpose,
+    /// How an interface shows this driver. Fixed at start, since it follows from how the harness is run.
+    pub view: View,
     pub why: StartReason,
+}
+
+/// What the builder opens to watch a driver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum View {
+    /// The harness's own program runs in a terminal of its own, recorded as a terminal log.
+    Terminal,
+    /// No terminal exists; the transcript rendered as text is all there is to show.
+    Headless,
 }
 
 /// A lab driver runs one arm of a trial in a throwaway sandbox. It does not act for its agent: its

@@ -80,7 +80,7 @@ The Log tab is a project's part of the stream, rendered. It opens at the newest 
 An agent's **transcript** is too large for the event log and has a subscription of its own,
 `transcript.subscribe`, opened when the agent's view is. The entries after `after` come first, then new ones
 as they are written, with none missed or repeated. Positions count from 1 per agent. `unsubscribe` ends
-either kind of subscription, and closing the connection ends all of them.
+any kind of subscription, and closing the connection ends all of them.
 
 An entry has `at`, the `driver` it came from, and an `item` whose `type` is one of `start_pack`,
 `turn_started`, `text`, `tool_call`, `tool_output`, `tool_result`, `usage`, `turn_ended` and `driver_changed`.
@@ -89,6 +89,23 @@ A `tool_output` is a
 piece of a running tool's terminal output, `chunk`, paired by `call` with its `tool_call`. It is how the
 Team tab shows a tool live; the `tool_result` that follows carries the whole output. The types are
 `x100_core::transcript::Entry` and `Item`.
+
+A **terminal driver** runs its harness's own program in a pseudo-terminal, and the daemon records that
+terminal per driver. `Driver.view` says which view to open: `terminal` for a driver with a terminal of its
+own, `headless` for one without, whose `terminal.read` and `terminal.subscribe` are `not_found`.
+`terminal.subscribe` follows a driver's terminal the way `transcript.subscribe` follows an agent's: the
+chunks after `after` first, then new ones as they are written, none missed or repeated, positions counting
+from 1 per driver, and the result arriving before the first `terminal.chunk`. `terminal.read` pages the same
+chunks. A chunk has `at` and a `what` whose `type` is `output`, with `bytes` as standard base64 text since
+terminal output is not text and may split a character, or `resize`, with `cols` and `rows`. The first chunk
+of every terminal is a `resize`: its starting size. The types are `x100_core::terminal::Chunk` and
+`ChunkKind`.
+
+A client **replays chunks from the start** into its own terminal emulator, at the size the recorded resizes
+give, since both programs draw on the alternate screen with absolute positions and only come out right at
+the size they drew at. It resizes its emulator where a `resize` chunk says so, and it must not answer the
+program's terminal queries (cursor position, device attributes and the like) while replaying or following:
+the daemon's own emulator answered them live, and a second answer would reach no one or confuse the program.
 
 ## Worked example
 
@@ -155,7 +172,6 @@ The view closes, and the client ends the transcript subscription.
 ```json daemon
 {"jsonrpc":"2.0","id":5,"result":{}}
 ```
-
 
 ## Methods
 
@@ -341,7 +357,7 @@ Errors: rejected
 
 ### `unsubscribe`
 
-Ends a subscription, of events or of a transcript.
+Ends a subscription, of events, of a transcript or of a terminal.
 
 Params type `Unsubscribe`, result type `Done`.
 
@@ -494,6 +510,73 @@ Errors: not_found
 }
 ```
 
+### `terminal.read`
+
+Reads a page of a terminal driver's terminal, after a position.
+
+Params type `ReadTerminal`, result type `TerminalPage`.
+
+Errors: not_found
+
+```json params
+{
+  "after": null,
+  "driver": "drv_01M74XBRM00000000000000004",
+  "limit": 100,
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{
+  "chunks": [
+    {
+      "chunk": {
+        "at": 1794387630000,
+        "what": {
+          "cols": 120,
+          "rows": 40,
+          "type": "resize"
+        }
+      },
+      "position": 1
+    },
+    {
+      "chunk": {
+        "at": 1794387630000,
+        "what": {
+          "bytes": "G1s/MTA0OWgbWzJKJCA=",
+          "type": "output"
+        }
+      },
+      "position": 2
+    }
+  ]
+}
+```
+
+### `terminal.subscribe`
+
+Follows a terminal driver's terminal: the chunks after `after` are notified first, then new ones as they are written, with none missed or repeated. A driver with no terminal is `not_found`.
+
+Params type `SubscribeTerminal`, result type `TerminalSubscribed`.
+
+Errors: not_found
+
+```json params
+{
+  "after": 2,
+  "driver": "drv_01M74XBRM00000000000000004",
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{
+  "subscription": 3
+}
+```
+
 ### `daemon.get`
 
 The daemon's state as a one-off read, for a command that does not subscribe.
@@ -573,10 +656,7 @@ Errors: rejected
 
 ### `daemon.set_clock`
 
-Moves the clock of a daemon started with `--fake-clock` to `at`, fires every job then due, and answers once
-each has been acted on. For tests and scripted runs, where a fake clock and one turn at a time make a run of
-fake-harness scripts the same every time. A daemon on the real clock answers `wrong_state`, and a time before
-the clock's is `rejected`.
+Moves the clock of a daemon started with `--fake-clock` to `at`, fires every job then due, and answers once each has been acted on. For tests and scripted runs: a daemon on the real clock answers `wrong_state`, and a time before the clock's is `rejected`.
 
 Params type `SetClock`, result type `Done`.
 
@@ -1282,7 +1362,7 @@ Errors: not_found, wrong_state
 
 ### `drivers.start_pack`
 
-The start pack a driver was given: the `start_pack` entry of its agent's transcript.
+The start pack a driver was given.
 
 Params type `ReadStartPack`, result type `StartPack`.
 
@@ -1431,6 +1511,24 @@ One entry of an agent's transcript, on a transcript subscription.
 }
 ```
 
+### `terminal.chunk`
+
+One chunk of a driver's terminal, on a terminal subscription.
+
+```json notice
+{
+  "chunk": {
+    "at": 1794387631000,
+    "what": {
+      "bytes": "Y2FyZ28gdGVzdA0K",
+      "type": "output"
+    }
+  },
+  "position": 3,
+  "subscription": 3
+}
+```
+
 ### `subscription.closed`
 
 The daemon ended a subscription itself.
@@ -1479,6 +1577,7 @@ which appends events; the client sees the result in the stream, not in the respo
 | `/agents/{id}/inbox` | `agents.inbox` | by the daemon |
 | `/agents/{id}/waits` | `agents.waits` | by the daemon |
 | `/agents/{id}/transcript` | `transcript.read`, `transcript.subscribe` | by the daemon |
+| `/drivers/{id}/terminal` | `terminal.read`, `terminal.subscribe` | by the daemon |
 | `/drivers/` | snapshot, `drivers.start_pack` | `drivers.stop` |
 | `/tasks/` | snapshot | `chat.brief`, `tasks.raise` |
 | `/messages/` | snapshot (the chat) | `chat.brief`, `chat.send` |

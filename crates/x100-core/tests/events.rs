@@ -13,7 +13,7 @@ use x100_core::credential::{
 };
 use x100_core::driver::{
     Driver, DriverEvent, Failure, Handoff, HandoffCause, InFlight, Incompatible, Purpose,
-    StartReason, TakeoverCause,
+    StartReason, TakeoverCause, View,
 };
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::{DaemonEvent, Envelope, ProjectEvent, Seq};
@@ -139,6 +139,7 @@ fn project_events() -> Vec<ProjectEvent> {
             effort: Effort::High,
             machine: MachineId::from_u128(1),
             purpose: Purpose::Work,
+            view: View::Terminal,
             why: StartReason::Handoff(Handoff {
                 replaces: DriverId::from_u128(1),
                 cause: HandoffCause::Takeover(TakeoverCause::Failed(Failure::Stalled {

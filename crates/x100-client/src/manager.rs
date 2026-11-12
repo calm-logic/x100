@@ -10,31 +10,21 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::UnixStream;
 use tokio::net::unix::OwnedReadHalf;
 use tokio::sync::{mpsc, oneshot};
-use x100_core::id::{AgentId, ProjectId};
-use x100_core::transcript::{Entry, Pos};
 use x100_proto::{
     Call, ClosedBecause, ErrorCode, EventNotice, Hello, Id, Message, Method, Notice,
-    PROTOCOL_VERSION, Request, Response, Subscribe, SubscribeTranscript, Subscribed,
-    SubscriptionId, Welcome,
+    PROTOCOL_VERSION, Request, Response, Subscribe, SubscribeTerminal, SubscribeTranscript,
+    Subscribed, SubscriptionId, Welcome,
 };
 
-use crate::{Change, ClientError, Cmd, Options, Shared};
+use crate::{Change, ClientError, Cmd, Options, Shared, Target};
 
 type Reply = oneshot::Sender<Result<Value, ClientError>>;
-
-struct Follower {
-    project: ProjectId,
-    agent: AgentId,
-    /// The last position handed on, which a new subscription continues after.
-    last: Option<Pos>,
-    entries: mpsc::UnboundedSender<(Pos, Entry)>,
-}
 
 struct Manager {
     options: Options,
     shared: std::sync::Arc<Shared>,
     cmds: mpsc::UnboundedReceiver<Cmd>,
-    followers: HashMap<u64, Follower>,
+    followers: HashMap<u64, Target>,
     next_follower: u64,
 }
 
@@ -45,15 +35,15 @@ struct Conn {
     pending: HashMap<u64, Reply>,
     next_id: u64,
     events: Option<SubscriptionId>,
-    /// Which follower each transcript subscription feeds.
-    transcripts: HashMap<SubscriptionId, u64>,
+    /// Which follower each transcript or terminal subscription feeds.
+    follows: HashMap<SubscriptionId, u64>,
     /// An event could not be applied: the state is wrong and a new snapshot must replace it.
     resync: bool,
     /// The daemon ended the event subscription because this client read too slowly.
     lagged: bool,
     /// The daemon is stopping.
     shutdown: bool,
-    lagged_transcripts: Vec<u64>,
+    lagged_follows: Vec<u64>,
 }
 
 enum End {
@@ -161,14 +151,8 @@ impl Manager {
             Cmd::Request(_, reply) => {
                 let _ = reply.send(Err(ClientError::Disconnected));
             }
-            Cmd::Follow {
-                project,
-                agent,
-                after,
-                entries,
-                reply,
-            } => {
-                let id = self.add_follower(project, agent, after, entries);
+            Cmd::Follow { target, reply } => {
+                let id = self.add_follower(target);
                 let _ = reply.send(Ok(id));
             }
             Cmd::Unfollow(id) => {
@@ -178,23 +162,9 @@ impl Manager {
         }
     }
 
-    fn add_follower(
-        &mut self,
-        project: ProjectId,
-        agent: AgentId,
-        after: Option<Pos>,
-        entries: mpsc::UnboundedSender<(Pos, Entry)>,
-    ) -> u64 {
+    fn add_follower(&mut self, target: Target) -> u64 {
         self.next_follower += 1;
-        self.followers.insert(
-            self.next_follower,
-            Follower {
-                project,
-                agent,
-                last: after,
-                entries,
-            },
-        );
+        self.followers.insert(self.next_follower, target);
         self.next_follower
     }
 
@@ -221,11 +191,11 @@ impl Manager {
             pending: HashMap::new(),
             next_id: 0,
             events: None,
-            transcripts: HashMap::new(),
+            follows: HashMap::new(),
             resync: false,
             lagged: false,
             shutdown: false,
-            lagged_transcripts: Vec::new(),
+            lagged_follows: Vec::new(),
         };
         if let Err(e) = self.handshake(&mut conn).await {
             if let Some(r) = ready.take() {
@@ -247,14 +217,14 @@ impl Manager {
                 cmd = self.cmds.recv() => match cmd {
                     None | Some(Cmd::Close) => return End::Closed,
                     Some(Cmd::Reconnect) => return conn.lose(),
-                    Some(Cmd::Follow { project, agent, after, entries, reply }) => {
-                        let id = self.add_follower(project, agent, after, entries);
+                    Some(Cmd::Follow { target, reply }) => {
+                        let id = self.add_follower(target);
                         let subscribed = self.subscribe_follower(&mut conn, id).await;
                         let _ = reply.send(match subscribed {
                             Ok(()) if self.followers.contains_key(&id) => Ok(id),
                             Ok(()) => Err(ClientError::Rpc(x100_proto::RpcError::new(
                                 ErrorCode::NotFound,
-                                "no such agent",
+                                "nothing to follow there",
                             ))),
                             Err(e) => Err(e),
                         });
@@ -285,8 +255,8 @@ impl Manager {
             conn.lagged = false;
             self.subscribe_events(conn).await?;
         }
-        for id in std::mem::take(&mut conn.lagged_transcripts) {
-            self.subscribe_follower(conn, id).await?;
+        for id in std::mem::take(&mut conn.lagged_follows) {
+            self.resubscribe(conn, id).await?;
         }
         Ok(())
     }
@@ -306,7 +276,7 @@ impl Manager {
         self.subscribe_events(conn).await?;
         let ids: Vec<u64> = self.followers.keys().copied().collect();
         for id in ids {
-            self.subscribe_follower(conn, id).await?;
+            self.resubscribe(conn, id).await?;
         }
         Ok(())
     }
@@ -335,25 +305,61 @@ impl Manager {
         Ok(())
     }
 
+    /// Follows again after a reconnect or a lag. A refusal has already ended that stream, and
+    /// is no reason to drop the connection.
+    async fn resubscribe(&mut self, conn: &mut Conn, id: u64) -> Result<(), ClientError> {
+        match self.subscribe_follower(conn, id).await {
+            Err(ClientError::Rpc(_)) => Ok(()),
+            other => other,
+        }
+    }
+
     async fn subscribe_follower(&mut self, conn: &mut Conn, id: u64) -> Result<(), ClientError> {
-        let Some(f) = self.followers.get(&id) else {
-            return Ok(());
+        conn.follows.retain(|_, local| *local != id);
+        let subscribed = match self.followers.get(&id) {
+            None => return Ok(()),
+            Some(Target::Transcript {
+                project,
+                agent,
+                last,
+                ..
+            }) => {
+                let request = SubscribeTranscript {
+                    project: *project,
+                    agent: *agent,
+                    after: *last,
+                };
+                self.rpc(conn, request).await.map(|done| done.subscription)
+            }
+            Some(Target::Terminal {
+                project,
+                driver,
+                last,
+                ..
+            }) => {
+                let request = SubscribeTerminal {
+                    project: *project,
+                    driver: *driver,
+                    after: *last,
+                };
+                self.rpc(conn, request).await.map(|done| done.subscription)
+            }
         };
-        let request = SubscribeTranscript {
-            project: f.project,
-            agent: f.agent,
-            after: f.last,
-        };
-        conn.transcripts.retain(|_, local| *local != id);
-        match self.rpc(conn, request).await {
-            Ok(done) => {
-                conn.transcripts.insert(done.subscription, id);
+        match subscribed {
+            Ok(subscription) => {
+                conn.follows.insert(subscription, id);
                 Ok(())
             }
-            // The agent is gone, so nothing will come: end its stream.
+            // The agent or the terminal is gone, so nothing will come: end its stream.
             Err(ClientError::Rpc(e)) if e.code == ErrorCode::NotFound => {
                 self.followers.remove(&id);
                 Ok(())
+            }
+            // Refused for another reason, such as a daemon that cannot serve it yet: the stream
+            // ends too, and the caller of a new follow is told why.
+            Err(ClientError::Rpc(e)) => {
+                self.followers.remove(&id);
+                Err(ClientError::Rpc(e))
             }
             Err(e) => Err(e),
         }
@@ -390,9 +396,9 @@ impl Manager {
             Cmd::Follow { .. } => unreachable!("the session loop follows"),
             Cmd::Unfollow(id) => {
                 self.followers.remove(&id);
-                if let Some((sub, _)) = conn.transcripts.iter().find(|(_, l)| **l == id) {
+                if let Some((sub, _)) = conn.follows.iter().find(|(_, l)| **l == id) {
                     let sub = *sub;
-                    conn.transcripts.remove(&sub);
+                    conn.follows.remove(&sub);
                     let (tx, _) = oneshot::channel();
                     conn.send(x100_proto::Unsubscribe { subscription: sub }.into(), tx);
                 }
@@ -466,14 +472,23 @@ impl Manager {
                 }
             }
             Notice::TranscriptEntry(t) => {
-                let Some(local) = conn.transcripts.get(&t.subscription) else {
-                    return;
-                };
-                if let Some(f) = self.followers.get_mut(local)
-                    && f.last.is_none_or(|last| t.position > last)
+                let local = conn.follows.get(&t.subscription);
+                if let Some(Target::Transcript { last, items, .. }) =
+                    local.and_then(|l| self.followers.get_mut(l))
+                    && last.is_none_or(|last| t.position > last)
                 {
-                    f.last = Some(t.position);
-                    let _ = f.entries.send((t.position, t.entry));
+                    *last = Some(t.position);
+                    let _ = items.send((t.position, t.entry));
+                }
+            }
+            Notice::TerminalChunk(t) => {
+                let local = conn.follows.get(&t.subscription);
+                if let Some(Target::Terminal { last, items, .. }) =
+                    local.and_then(|l| self.followers.get_mut(l))
+                    && last.is_none_or(|last| t.position > last)
+                {
+                    *last = Some(t.position);
+                    let _ = items.send((t.position, t.chunk));
                 }
             }
             Notice::Closed(closed) => {
@@ -483,9 +498,9 @@ impl Manager {
                         ClosedBecause::Lagged => conn.lagged = true,
                         ClosedBecause::Shutdown => conn.shutdown = true,
                     }
-                } else if let Some(local) = conn.transcripts.remove(&closed.subscription) {
+                } else if let Some(local) = conn.follows.remove(&closed.subscription) {
                     match closed.because {
-                        ClosedBecause::Lagged => conn.lagged_transcripts.push(local),
+                        ClosedBecause::Lagged => conn.lagged_follows.push(local),
                         ClosedBecause::Shutdown => conn.shutdown = true,
                     }
                 }

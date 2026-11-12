@@ -9,15 +9,17 @@ use crate::error::{Result, io};
 use crate::files::FileStore;
 use crate::git::Git;
 use crate::log::{DaemonLog, ProjectLog};
+use crate::terminal::Terminals;
 use crate::transcript::Transcripts;
 
 pub const DATABASE: &str = "store.sqlite";
 
-/// A project's event log, transcripts, files and git, opened together.
+/// A project's event log, transcripts, terminals, files and git, opened together.
 #[derive(Clone)]
 pub struct ProjectStore {
     pub log: ProjectLog,
     pub transcripts: Transcripts,
+    pub terminals: Terminals,
     pub files: FileStore,
     pub git: Git,
 }
@@ -33,6 +35,7 @@ impl ProjectStore {
         Ok(Self {
             log,
             transcripts: Transcripts::open(&db)?,
+            terminals: Terminals::open(&db)?,
             files: FileStore::open(dir.join("files"))?,
             git: Git::new(project),
         })

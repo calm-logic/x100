@@ -423,6 +423,16 @@ fn notice_sample(name: &str) -> Notice {
                 },
             },
         }),
+        "terminal.chunk" => Notice::TerminalChunk(TerminalNotice {
+            subscription: SubscriptionId(3),
+            position: x100_core::terminal::TermPos(3),
+            chunk: x100_core::terminal::Chunk {
+                at: crate::samples::at(31),
+                what: x100_core::terminal::ChunkKind::Output {
+                    bytes: Bytes(b"cargo test\r\n".to_vec()),
+                },
+            },
+        }),
         "subscription.closed" => Notice::Closed(SubscriptionClosed {
             subscription: sub,
             because: ClosedBecause::Lagged,

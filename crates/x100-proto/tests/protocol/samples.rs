@@ -22,6 +22,7 @@ use x100_core::money::{Money, Percent};
 use x100_core::party::Party;
 use x100_core::project::{SettingChange, Settings};
 use x100_core::settings::DaemonSetting;
+use x100_core::terminal::{Chunk, ChunkKind, TermPos};
 use x100_core::testing::fernleaf;
 use x100_core::time::Timestamp;
 use x100_core::transcript::{Entry, Item, Pos};
@@ -210,6 +211,47 @@ pub fn samples() -> Vec<Sample> {
             },
             TranscriptSubscribed {
                 subscription: SubscriptionId(2),
+            },
+        ),
+        s(
+            ReadTerminal {
+                project: prj,
+                driver: drv,
+                after: None,
+                limit: 100,
+            },
+            TerminalPage {
+                chunks: vec![
+                    PositionedChunk {
+                        position: TermPos(1),
+                        chunk: Chunk {
+                            at: at(30),
+                            what: ChunkKind::Resize {
+                                cols: 120,
+                                rows: 40,
+                            },
+                        },
+                    },
+                    PositionedChunk {
+                        position: TermPos(2),
+                        chunk: Chunk {
+                            at: at(30),
+                            what: ChunkKind::Output {
+                                bytes: Bytes(b"\x1b[?1049h\x1b[2J$ ".to_vec()),
+                            },
+                        },
+                    },
+                ],
+            },
+        ),
+        s(
+            SubscribeTerminal {
+                project: prj,
+                driver: drv,
+                after: Some(TermPos(2)),
+            },
+            TerminalSubscribed {
+                subscription: SubscriptionId(3),
             },
         ),
         s(GetDaemon {}, DaemonState::default()),

@@ -8,6 +8,7 @@
 
 pub mod action;
 pub mod agent;
+pub mod bytes;
 pub mod credential;
 pub mod driver;
 pub mod effort;
@@ -31,6 +32,7 @@ pub mod settings;
 pub mod spec;
 pub mod task;
 pub mod team;
+pub mod terminal;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod time;

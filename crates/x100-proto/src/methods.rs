@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::error::{ErrorCode, RpcError};
 use crate::types::*;
-use crate::{EventNotice, SubscriptionClosed, TranscriptNotice};
+use crate::{EventNotice, SubscriptionClosed, TerminalNotice, TranscriptNotice};
 
 /// Implemented by each params type: the method it is for and what comes back.
 pub trait Method: Serialize + DeserializeOwned {
@@ -115,7 +115,7 @@ methods! {
     /// snapshot. A project created later is followed from its first event.
     Subscribe, "events.subscribe", Subscribe => Subscribed, [Rejected];
 
-    /// Ends a subscription, of events or of a transcript.
+    /// Ends a subscription, of events, of a transcript or of a terminal.
     Unsubscribe, "unsubscribe", Unsubscribe => Done, [UnknownSubscription];
 
     /// Reads a page of the daemon's log or a project's: newest first for the Log tab, or oldest
@@ -128,6 +128,14 @@ methods! {
     /// Follows an agent's transcript: the entries after `after` are notified first, then new ones as
     /// they are written, with none missed or repeated.
     SubscribeTranscript, "transcript.subscribe", SubscribeTranscript => TranscriptSubscribed, [NotFound];
+
+    /// Reads a page of a terminal driver's terminal, after a position.
+    ReadTerminal, "terminal.read", ReadTerminal => TerminalPage, [NotFound];
+
+    /// Follows a terminal driver's terminal: the chunks after `after` are notified first, then new
+    /// ones as they are written, with none missed or repeated. A driver with no terminal is
+    /// `not_found`.
+    SubscribeTerminal, "terminal.subscribe", SubscribeTerminal => TerminalSubscribed, [NotFound];
 
     /// The daemon's state as a one-off read, for a command that does not subscribe.
     GetDaemon, "daemon.get", GetDaemon => x100_core::fold::DaemonState, [];
@@ -280,6 +288,9 @@ notices! {
 
     /// One entry of an agent's transcript, on a transcript subscription.
     TranscriptEntry, "transcript.entry", TranscriptNotice;
+
+    /// One chunk of a driver's terminal, on a terminal subscription.
+    TerminalChunk, "terminal.chunk", TerminalNotice;
 
     /// The daemon ended a subscription itself.
     Closed, "subscription.closed", SubscriptionClosed;

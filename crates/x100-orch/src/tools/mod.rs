@@ -7,7 +7,9 @@
 //! and appends the events. [`reply`] turns the events into what the driver reads, so the start
 //! pack can rebuild a call's result from the log.
 
+mod catalogue;
 mod later;
+mod schema;
 mod talk;
 mod team;
 mod work;
@@ -26,7 +28,8 @@ use x100_core::tool::ToolCall;
 use crate::branches::Target;
 use crate::ctx::Events;
 
-pub(crate) use later::arrives_with;
+pub(crate) use catalogue::{END_THE_TURN, Tool};
+pub(crate) use schema::schema;
 pub(crate) use work::{merged, report_failed};
 
 /// Who is calling, and what the call may assume about the world outside the log.
@@ -64,10 +67,11 @@ pub(crate) type Refusal = String;
 
 /// Decides a call. The caller's driver is assumed to be the agent's current one; the desk checks.
 pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<Plan, Refusal> {
-    if let Some(milestone) = arrives_with(call) {
+    let tool = Tool::of(call);
+    if let Some(milestone) = later::arrives_with(tool) {
         return Err(format!(
             "`{}` is not available yet: it arrives with {milestone}",
-            name(call)
+            tool.name()
         ));
     }
     let project = state.project().ok_or("the project is not created yet")?;
@@ -83,6 +87,9 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
         me,
         ctx,
     };
+    if tool.ceo_only() && !at.is_ceo() {
+        return Err(format!("only the CEO calls `{}`", tool.name()));
+    }
     match call {
         ToolCall::Delegate { to, task, effort } => work::delegate(&at, to, task, *effort),
         ToolCall::Review { task, verdict } => work::review(&at, *task, verdict),
@@ -133,7 +140,7 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
         | ToolCall::Remember { .. }
         | ToolCall::ReadLog { .. }
         | ToolCall::ReadMemories { .. }
-        | ToolCall::ProposeChange(_) => unreachable!("answered by arrives_with"),
+        | ToolCall::ProposeChange(_) => unreachable!("answered by later::arrives_with"),
     }
 }
 
@@ -188,18 +195,6 @@ impl At<'_> {
             other => Err(format!("task {task} is {}, not in progress", other.name())),
         }
     }
-}
-
-/// The tool's name as agents call it.
-pub(crate) fn name(call: &ToolCall) -> String {
-    serde_json::to_value(call)
-        .ok()
-        .and_then(|v| match v {
-            Value::Object(m) => m.keys().next().cloned(),
-            Value::String(s) => Some(s),
-            _ => None,
-        })
-        .unwrap_or_else(|| "tool".into())
 }
 
 /// What a carried-out call tells the driver: the records it made, as JSON so a script can pick a

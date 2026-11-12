@@ -14,7 +14,7 @@ use x100_core::money::Money;
 use x100_core::project::{SettingChange, Settings};
 use x100_core::wait::Wait;
 
-use crate::bytes::Bytes;
+use x100_core::bytes::Bytes;
 
 /// Lists the projects with the sidebar's line for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

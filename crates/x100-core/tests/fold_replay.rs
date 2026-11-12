@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use x100_core::agent::{AgentEvent, Position};
-use x100_core::driver::{Driver, DriverEvent, Purpose, StartReason};
+use x100_core::driver::{Driver, DriverEvent, Purpose, StartReason, View};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::{DaemonEvent, Envelope, ProjectEvent, Seq};
 use x100_core::fold::{Corrupt, DaemonState, FoldError, ProjectState, Record};
@@ -216,6 +216,7 @@ fn a_second_driver_acting_for_an_agent_is_an_error() {
         effort: Effort::High,
         machine: MACHINE,
         purpose: Purpose::Work,
+        view: View::Headless,
         why: StartReason::Wake,
     };
     let (mut state, e) = appended(

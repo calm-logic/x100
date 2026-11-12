@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use x100_core::agent::{AgentEvent, AgentState};
 use x100_core::driver::{FAILURES_BEFORE_GIVING_UP, Failure, Incompatible};
 use x100_core::event::ProjectEvent;
@@ -71,6 +71,9 @@ struct Loop {
     /// Where in the log each inbox item arrived, so items go out in the order they came.
     arrived: HashMap<InboxItemId, u64>,
     msgs: mpsc::UnboundedSender<Msg>,
+    /// Every driver's task, the ended ones until they are reaped. A task still runs its last
+    /// lines after its driver has ended, so shutdown waits on these, not on the drivers.
+    drivers: JoinSet<()>,
 }
 
 pub(crate) fn spawn(
@@ -88,6 +91,7 @@ pub(crate) fn spawn(
         failures: HashMap::new(),
         arrived: HashMap::new(),
         msgs,
+        drivers: JoinSet::new(),
     };
     (ctl_tx, tokio::spawn(lp.run(events, ctl_rx, msgs_rx)))
 }
@@ -125,6 +129,7 @@ impl Loop {
                         }
                     }
                 },
+                Some(_) = self.drivers.join_next(), if !self.drivers.is_empty() => {}
                 Some(c) = ctl.recv() => match c {
                     Ctl::Stop { driver, ack } => self.stop(driver, ack),
                     Ctl::Fired { job, at, ack } => {
@@ -226,6 +231,9 @@ impl Loop {
         for rx in stopped {
             let _ = rx.await;
         }
+        // Drivers that crashed or were just stopped may still be finishing, their process still
+        // on record. Once every task has returned, nothing of this project's runs.
+        while self.drivers.join_next().await.is_some() {}
     }
 
     /// For every agent with items waiting: give them to its warm driver, or start one. One at a
@@ -309,7 +317,7 @@ impl Loop {
             choice,
             first: items,
         };
-        tokio::spawn(driver::run(
+        self.drivers.spawn(driver::run(
             Arc::clone(&self.shared),
             Arc::clone(&self.ctx),
             start,

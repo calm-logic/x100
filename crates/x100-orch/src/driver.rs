@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 use x100_core::driver::{
-    Driver, DriverEvent, Failure, Purpose, RetireReason, StartReason, StopReason,
+    Driver, DriverEvent, Failure, Purpose, RetireReason, StartReason, StopReason, View,
 };
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
@@ -86,7 +86,6 @@ pub(crate) async fn run(
     msgs: mpsc::UnboundedSender<Msg>,
 ) {
     let (agent, driver) = (start.agent, start.driver);
-    shared.desk.seat(driver, Arc::clone(&ctx), agent);
     let mut actor = Actor_ {
         shared,
         ctx,
@@ -96,8 +95,11 @@ pub(crate) async fn run(
         turn: None,
     };
     let failure = actor.drive(start, &mut cmds, &msgs).await;
-    actor.shared.desk.unseat(driver);
-    let _ = actor.shared.processes.forget(driver);
+    // A file write, so on the blocking pool like the store's, where it holds up no other task.
+    let processes = Arc::clone(&actor.shared.processes);
+    if let Err(e) = blocking(move || processes.forget(driver)).await {
+        eprintln!("x100: could not cross driver {driver}'s process off the list: {e}");
+    }
     let _ = msgs.send(Msg::Exited { agent, failure });
 }
 
@@ -135,6 +137,7 @@ impl Actor_ {
             effort: choice.effort,
             machine: choice.machine,
             purpose: Purpose::Work,
+            view: View::Headless,
             why: why.clone(),
         };
         if let Err(e) = self
@@ -171,9 +174,7 @@ impl Actor_ {
             wrap: self.shared.sandbox.wrap(agent, &dir),
             dir,
             start_pack,
-            // The fake harness reaches the tools through the desk directly. Serving them to the
-            // real harnesses over MCP is M6b.
-            tools: None,
+            tools: Some(self.shared.desk.issue(driver, Arc::clone(&self.ctx))),
             env: Vec::new(),
             stall: StallPolicy::from_settings(&(self.shared.settings)()),
             permissions: Permissions::AllowAll,
@@ -208,22 +209,24 @@ impl Actor_ {
                             return self.abort(&control, detail).await;
                         }
                     }
+                    // The end is recorded before the process is stopped, so a call it makes while it
+                    // dies is refused.
                     Some(Cmd::Stop(how, ack)) => {
-                        control.stop().await;
                         self.stopped(how).await;
+                        control.stop().await;
                         let _ = ack.send(());
                         return None;
                     }
                     Some(Cmd::Retire(ack)) => {
-                        control.stop().await;
                         self.end(DriverEvent::Retired(RetireReason::WarmTooLong)).await;
+                        control.stop().await;
                         let _ = ack.send(());
                         return None;
                     }
                     // The loop that owns this driver is gone, so nothing can use it.
                     None => {
-                        control.stop().await;
                         self.stopped(How::Shutdown).await;
+                        control.stop().await;
                         return None;
                     }
                 },
@@ -300,10 +303,11 @@ impl Actor_ {
         }
     }
 
-    /// The driver is healthy but the log would not take what it did: stop it and record why.
+    /// The driver is healthy but the log would not take what it did: record why and stop it.
     async fn abort(&mut self, control: &DriverControl, detail: String) -> Option<Failure> {
+        let failure = self.fail(error(detail)).await;
         control.stop().await;
-        self.fail(error(detail)).await
+        failure
     }
 
     /// Records the turn and gives it to the driver.

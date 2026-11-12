@@ -19,7 +19,7 @@ use crate::action::{
     Action, ActionEvent, ActionKind, Classification, ClassifiedBy, Decision, Request, Risk,
 };
 use crate::agent::AgentEvent;
-use crate::driver::{ContextFill, Driver, DriverEvent, Purpose, StartReason};
+use crate::driver::{ContextFill, Driver, DriverEvent, Purpose, StartReason, View};
 use crate::effort::Effort;
 use crate::event::{Envelope, ProjectEvent, Seq};
 use crate::fold::ProjectState;
@@ -156,6 +156,7 @@ impl LogBuilder {
             effort,
             machine: MACHINE,
             purpose,
+            view: View::Headless,
             why,
         };
         self.push(Actor::Daemon, ProjectEvent::DriverStarted(driver));

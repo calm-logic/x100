@@ -67,13 +67,28 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   three crashes or three turns without progress report the task failed. The run's event kinds are identical
   over ten runs. **Limit:** scripts reach ids through a test adapter, see in progress. Real harnesses have no
   tools until M6b.
+- **M6b, the tools over MCP, which completes M6.** The orchestrator's run, twice, with the in-progress
+  `x100-app` excluded: 270 tests pass, 0 fail, clippy and fmt clean. Against the fake provider, the real Claude
+  Code and Codex binaries, each started by the orchestrator as the CEO's driver, call `write_spec` and `report`
+  over MCP, and the log shows the BRD and the report. Each driver has its own address and token. A call is
+  accepted only from the agent's current live driver, judged on the folded log under the writer's lock: a
+  replaced driver's call and a made-up token are refused and change nothing. A CEO-only tool is not in a lead's
+  list, and later milestones' tools are not listed. Every tool's schema is held to its serde form by tests.
+  Shutdown now waits for every driver task, which fixes the race CI found on macOS, with a test that fails
+  without the fix. The MCP server is `rmcp` 3.9.0.
+- **The terminal stream in the contract.** Core has the chunk type and `Driver.view` (terminal or headless),
+  the store records and follows a terminal per driver, and the protocol has `terminal.read`,
+  `terminal.subscribe` and the `terminal.chunk` notice. Served from M3T on.
 
 ## In progress
 
-- M6b: the daemon's tools served to real harnesses over MCP. Opus subagent, owns `crates/x100-orch` and
-  `crates/x100d`. It also fixes a race CI found on macOS: shutdown did not wait for a crashed driver's task,
-  so its pid could still be on record when a test looked (`x100-orch` test `failures`, run of 585032e).
-- The terminal stream in the contract (core, store, proto), for M3T and the interfaces. Sonnet subagent.
+- M15a, the desktop app's shell, chat and Team tab. Opus subagent, owns `crates/x100-app` and
+  `crates/x100-client`. M15b follows with the agent's live terminal view.
+- M3T, terminal drivers on local logins. Opus subagent, owns `crates/x100-drivers`.
+- M8, router and budgets. Opus subagent, owns `crates/x100-router`.
+- Owed when `x100-app` joins the workspace: GPUI turns on `serde_json`'s `preserve_order` for the whole build,
+  and two tests that compare exact JSON text then fail (`x100-drivers` `the_fake_replays_a_script_deterministically`,
+  `x100-proto` `the_worked_example_is_a_valid_conversation`). They must compare values, not text.
 
 ## Waiting on the owner
 

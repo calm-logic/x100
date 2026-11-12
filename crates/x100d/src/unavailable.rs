@@ -10,6 +10,7 @@ pub fn arrives_with(call: &Call) -> Option<&'static str> {
         | Call::RescanHarnesses(_)
         | Call::SetLeadBudget(_)
         | Call::SetEffortRange(_) => "M8",
+        Call::ReadTerminal(_) | Call::SubscribeTerminal(_) => "M3T",
         Call::ReplaceDriver(_) => "M9",
         Call::AddCredential(_)
         | Call::ReplaceCredential(_)

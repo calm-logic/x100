@@ -9,7 +9,7 @@ use x100_core::task::TaskEvent;
 use x100_core::tool::ToolCall;
 use x100_store::ProjectStore;
 
-use crate::tools::{name, reply};
+use crate::tools::{Tool, reply};
 
 const PAGE: usize = 500;
 
@@ -28,7 +28,7 @@ impl Call {
             Some(Err(e)) => format!("-> refused: {e}"),
             None => "-> still in flight when the last driver stopped".to_owned(),
         };
-        format!("- {} {input}\n  {result}", name(&self.call))
+        format!("- {} {input}\n  {result}", Tool::of(&self.call).name())
     }
 }
 

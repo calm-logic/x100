@@ -18,12 +18,17 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
+use x100_core::file::FileRef;
 use x100_core::fold::{Changes, DaemonPart, ProjectPart, ProjectState};
-use x100_core::id::{AgentId, ProjectId};
-use x100_core::transcript::Pos;
-use x100_proto::{Call, Method, RpcError, Snapshot};
+use x100_core::id::{AgentId, DriverId, FileId, MessageId, ProjectId};
+use x100_core::terminal::{Chunk, TermPos};
+use x100_core::transcript::{Entry, Pos};
+use x100_proto::{
+    BriefSent, Bytes, Call, CreateProject, Method, ReadFile, RpcError, SendBrief, SendChat,
+    Snapshot, UploadFile,
+};
 
-pub use stream::TranscriptStream;
+pub use stream::{Follow, TerminalStream, TranscriptStream};
 
 /// How to start the daemon when nothing answers on the socket.
 #[derive(Debug, Clone)]
@@ -119,15 +124,28 @@ pub(crate) enum Cmd {
         oneshot::Sender<Result<serde_json::Value, ClientError>>,
     ),
     Follow {
-        project: ProjectId,
-        agent: AgentId,
-        after: Option<Pos>,
-        entries: mpsc::UnboundedSender<(Pos, x100_core::transcript::Entry)>,
+        target: Target,
         reply: oneshot::Sender<Result<u64, ClientError>>,
     },
     Unfollow(u64),
     Reconnect,
     Close,
+}
+
+/// What a [`Follow`] follows, how far it has been handed on, and where its items go.
+pub(crate) enum Target {
+    Transcript {
+        project: ProjectId,
+        agent: AgentId,
+        last: Option<Pos>,
+        items: mpsc::UnboundedSender<(Pos, Entry)>,
+    },
+    Terminal {
+        project: ProjectId,
+        driver: DriverId,
+        last: Option<TermPos>,
+        items: mpsc::UnboundedSender<(TermPos, Chunk)>,
+    },
 }
 
 struct Inner {
@@ -230,20 +248,123 @@ impl Client {
         agent: AgentId,
         after: Option<Pos>,
     ) -> Result<TranscriptStream, ClientError> {
-        let (entries_tx, entries) = mpsc::unbounded_channel();
+        let (items, rx) = mpsc::unbounded_channel();
+        let target = Target::Transcript {
+            project,
+            agent,
+            last: after,
+            items,
+        };
+        let id = self.follow(target).await?;
+        Ok(Follow::new(id, rx, self.inner.cmds.clone()))
+    }
+
+    /// Follows a terminal driver's terminal from after `after`, across reconnects, each chunk
+    /// once. A driver without a terminal is `not_found`.
+    pub async fn follow_terminal(
+        &self,
+        project: ProjectId,
+        driver: DriverId,
+        after: Option<TermPos>,
+    ) -> Result<TerminalStream, ClientError> {
+        let (items, rx) = mpsc::unbounded_channel();
+        let target = Target::Terminal {
+            project,
+            driver,
+            last: after,
+            items,
+        };
+        let id = self.follow(target).await?;
+        Ok(Follow::new(id, rx, self.inner.cmds.clone()))
+    }
+
+    async fn follow(&self, target: Target) -> Result<u64, ClientError> {
         let (reply, answer) = oneshot::channel();
         self.inner
             .cmds
-            .send(Cmd::Follow {
-                project,
-                agent,
-                after,
-                entries: entries_tx,
-                reply,
-            })
+            .send(Cmd::Follow { target, reply })
             .map_err(|_| ClientError::Closed)?;
-        let id = answer.await.map_err(|_| ClientError::Closed)??;
-        Ok(TranscriptStream::new(id, entries, self.inner.cmds.clone()))
+        answer.await.map_err(|_| ClientError::Closed)?
+    }
+
+    /// Creates a project in `path`, named after the directory unless `name` is given, with the
+    /// daemon's default settings.
+    pub async fn create_project(
+        &self,
+        path: impl Into<String>,
+        name: Option<String>,
+    ) -> Result<ProjectId, ClientError> {
+        let created = self
+            .request(CreateProject {
+                path: path.into(),
+                name,
+                settings: None,
+            })
+            .await?;
+        Ok(created.project)
+    }
+
+    /// Sends a project's first message, which the CEO takes as a task.
+    pub async fn send_brief(
+        &self,
+        project: ProjectId,
+        body: impl Into<String>,
+        attachments: Vec<FileId>,
+    ) -> Result<BriefSent, ClientError> {
+        self.request(SendBrief {
+            project,
+            body: body.into(),
+            attachments,
+        })
+        .await
+    }
+
+    /// Sends a message to the CEO, answering `in_reply_to` if it is one of its questions.
+    pub async fn send_chat(
+        &self,
+        project: ProjectId,
+        body: impl Into<String>,
+        attachments: Vec<FileId>,
+        in_reply_to: Option<MessageId>,
+    ) -> Result<MessageId, ClientError> {
+        let sent = self
+            .request(SendChat {
+                project,
+                body: body.into(),
+                attachments,
+                in_reply_to,
+            })
+            .await?;
+        Ok(sent.message)
+    }
+
+    /// Uploads a file's bytes to the project, to attach to a message.
+    pub async fn upload_file(
+        &self,
+        project: ProjectId,
+        name: impl Into<String>,
+        media_type: impl Into<String>,
+        data: Vec<u8>,
+    ) -> Result<FileRef, ClientError> {
+        let uploaded = self
+            .request(UploadFile {
+                project,
+                name: name.into(),
+                media_type: media_type.into(),
+                data: Bytes(data),
+            })
+            .await?;
+        Ok(uploaded.file)
+    }
+
+    /// Reads a file's bytes.
+    pub async fn read_file(
+        &self,
+        project: ProjectId,
+        file: FileId,
+    ) -> Result<(FileRef, Vec<u8>), ClientError> {
+        let content = self.request(ReadFile { project, file }).await?;
+        Ok((content.file, content.data.0))
     }
 
     /// Drops the connection. The client connects again by itself and resumes where it was.
