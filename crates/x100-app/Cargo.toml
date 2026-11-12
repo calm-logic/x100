@@ -26,6 +26,9 @@ x100-proto = { path = "../x100-proto" }
 gpui = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["wayland", "x11"] }
 pulldown-cmark = { version = "0.13", default-features = false }
+# The terminal emulator behind an agent's live output (Apache-2.0), as spike S1 used it.
+alacritty_terminal = "0.26"
+serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 log = "0.4"
 env_logger = "0.11"
@@ -33,3 +36,4 @@ env_logger = "0.11"
 [dev-dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["test-support"] }
 tempfile = "3"
+x100-core = { path = "../x100-core", features = ["testing"] }

@@ -1,9 +1,7 @@
 //! The main panel: the tab bar and the open tab. A tab shows a dot when something in it changed
 //! while it was not open, from the parts core's `Changes` names.
 //!
-//! **The seam for M16.** Each tab's view is made in [`MainPanel::make`]. Team has its view; every
-//! other tab is a [`Placeholder`] naming it. M16 gives a tab its view by adding a module and
-//! changing that tab's arm there, and nothing else here.
+//! Each tab's view is made in [`MainPanel::make`], the first time the tab is opened, and kept.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -12,7 +10,15 @@ use x100_client::Change;
 use x100_core::fold::ProjectPart;
 use x100_core::id::ProjectId;
 
+use crate::budget::BudgetTab;
+use crate::files::FilesView;
+use crate::infra::InfraView;
+use crate::log::LogView;
+use crate::preview::PreviewView;
 use crate::session::{Session, SessionEvent};
+use crate::settings::SettingsView;
+use crate::specs::SpecsView;
+use crate::tasks::TasksView;
 use crate::team::TeamView;
 use crate::{theme, widgets};
 
@@ -74,23 +80,8 @@ impl Tab {
     }
 }
 
-/// A tab with no view yet, until M16 gives it one.
-pub struct Placeholder(Tab);
-
-impl Render for Placeholder {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(theme::TEXT))
-            .text_color(theme::dim())
-            .child(self.0.name())
-    }
-}
-
 pub struct MainPanel {
+    session: Entity<Session>,
     project: ProjectId,
     open: Tab,
     unseen: BTreeSet<Tab>,
@@ -106,8 +97,9 @@ impl MainPanel {
                 this.changed(change, cx);
             }
         });
-        let team = cx.new(|cx| TeamView::new(session, project, cx));
+        let team = cx.new(|cx| TeamView::new(session.clone(), project, cx));
         Self {
+            session,
             project,
             open: Tab::Team,
             unseen: BTreeSet::new(),
@@ -136,17 +128,23 @@ impl MainPanel {
         cx.notify();
     }
 
+    /// The view of a tab that has been opened, as its own type.
+    pub fn tab_view<V: 'static>(&self, tab: Tab) -> Option<Entity<V>> {
+        self.others.get(&tab)?.clone().downcast().ok()
+    }
+
     fn make(&self, tab: Tab, cx: &mut Context<Self>) -> AnyView {
+        let (session, project) = (self.session.clone(), self.project);
         match tab {
             Tab::Team => self.team.clone().into(),
-            Tab::Specs
-            | Tab::Tasks
-            | Tab::Files
-            | Tab::Budget
-            | Tab::Log
-            | Tab::Preview
-            | Tab::Infra
-            | Tab::Settings => cx.new(|_| Placeholder(tab)).into(),
+            Tab::Specs => cx.new(|cx| SpecsView::new(session, project, cx)).into(),
+            Tab::Tasks => cx.new(|cx| TasksView::new(session, project, cx)).into(),
+            Tab::Files => cx.new(|cx| FilesView::new(session, project, cx)).into(),
+            Tab::Budget => cx.new(|cx| BudgetTab::new(session, project, cx)).into(),
+            Tab::Log => cx.new(|cx| LogView::new(session, project, cx)).into(),
+            Tab::Preview => cx.new(|cx| PreviewView::new(session, project, cx)).into(),
+            Tab::Infra => cx.new(|_| InfraView).into(),
+            Tab::Settings => cx.new(|cx| SettingsView::new(session, project, cx)).into(),
         }
     }
 

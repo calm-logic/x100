@@ -108,7 +108,11 @@ pub fn dot(size: f32, colour: Rgba) -> Div {
 }
 
 /// A button in a segmented switch, rimmed when on.
-pub fn segment(id: impl Into<ElementId>, label: &'static str, on: bool) -> Stateful<Div> {
+pub fn segment(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on: bool,
+) -> Stateful<Div> {
     div()
         .id(id)
         .px(px(10.))
@@ -121,7 +125,7 @@ pub fn segment(id: impl Into<ElementId>, label: &'static str, on: bool) -> State
         .when(on, |d| d.border_1().border_color(gpui::rgba(0xffffff99)))
         .when(!on, |d| d.border_1().border_color(gpui::rgba(0x00000000)))
         .hover(|s| s.text_color(theme::text()))
-        .child(label)
+        .child(label.into())
 }
 
 /// The segments' frame.

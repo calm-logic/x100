@@ -8,7 +8,7 @@ use std::sync::Arc;
 use gpui::{Context, EventEmitter, Image, ImageFormat, Task};
 use tokio::sync::broadcast::error::RecvError;
 use x100_client::{Change, Client};
-use x100_core::fold::{DaemonState, ProjectState};
+use x100_core::fold::{DaemonState, ProjectPart, ProjectState};
 use x100_core::id::{FileId, ProjectId};
 
 pub enum SessionEvent {
@@ -31,6 +31,9 @@ pub struct Session {
     selected: Option<ProjectId>,
     connected: bool,
     previews: HashMap<FileId, Preview>,
+    /// Every file's name as long as the window has been open, so the Log can say which file was
+    /// removed after the state has forgotten it.
+    file_names: HashMap<FileId, String>,
     _pump: Task<()>,
 }
 
@@ -58,8 +61,10 @@ impl Session {
             selected: None,
             connected: true,
             previews: HashMap::new(),
+            file_names: HashMap::new(),
             _pump: pump,
         };
+        session.learn_file_names();
         session.select_any();
         session
     }
@@ -74,6 +79,11 @@ impl Session {
 
     pub fn selected(&self) -> Option<ProjectId> {
         self.selected
+    }
+
+    /// The names of the files seen so far, removed ones included.
+    pub fn file_names(&self) -> &HashMap<FileId, String> {
+        &self.file_names
     }
 
     pub fn select(&mut self, project: ProjectId, cx: &mut Context<Self>) {
@@ -97,10 +107,27 @@ impl Session {
         if let Change::Connection { connected } = change {
             self.connected = connected;
         }
+        let files_changed = match &change {
+            Change::Reset => true,
+            Change::Project { changes, .. } => changes.parts.contains(&ProjectPart::Files),
+            _ => false,
+        };
+        if files_changed {
+            self.learn_file_names();
+        }
         if self.selected.is_none() && self.select_any() {
             cx.emit(SessionEvent::Selected);
         }
         cx.emit(SessionEvent::Changed(change));
+    }
+
+    fn learn_file_names(&mut self) {
+        let names = &mut self.file_names;
+        self.client.with_state(|s| {
+            for p in s.projects.values() {
+                names.extend(p.files().map(|f| (f.file.id, f.file.name.clone())));
+            }
+        });
     }
 
     /// Selects the first project, if there is one and none is selected.

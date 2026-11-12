@@ -22,6 +22,7 @@ use x100_core::task::Outcome;
 
 pub use composer::Composer;
 
+use crate::held::HeldStrip;
 use crate::markdown::Markdown;
 use crate::session::{Session, SessionEvent};
 use crate::theme;
@@ -72,6 +73,8 @@ pub struct ChatView {
     session: Entity<Session>,
     project: ProjectId,
     composer: Entity<Composer>,
+    /// Actions waiting for the builder, above the composer.
+    held: Entity<HeldStrip>,
     /// The CEO's replies and reports, parsed once.
     parsed: HashMap<Seq, Markdown>,
     scroll: ScrollHandle,
@@ -88,6 +91,7 @@ impl ChatView {
     ) -> Self {
         let composer = cx.new(|cx| Composer::new(session.clone(), project, cx));
         composer.update(cx, |c, cx| c.focus(window, cx));
+        let held = cx.new(|cx| HeldStrip::new(session.clone(), project, cx));
         let subscription = cx.subscribe(&session, |this, _, event, cx| match event {
             SessionEvent::Changed(change) => this.changed(change, cx),
             SessionEvent::Preview => cx.notify(),
@@ -97,6 +101,7 @@ impl ChatView {
             session,
             project,
             composer,
+            held,
             parsed: HashMap::new(),
             scroll: ScrollHandle::new(),
             lines: 0,
@@ -106,6 +111,10 @@ impl ChatView {
 
     pub fn composer(&self) -> &Entity<Composer> {
         &self.composer
+    }
+
+    pub fn held(&self) -> &Entity<HeldStrip> {
+        &self.held
     }
 
     fn changed(&mut self, change: &Change, cx: &mut Context<Self>) {
@@ -422,6 +431,7 @@ impl Render for ChatView {
                     .children(elements)
                     .when(working, |d| d.child(typing())),
             )
+            .child(self.held.clone())
             .child(
                 div()
                     .flex_none()

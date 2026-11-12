@@ -8,6 +8,8 @@
 //! progress never redraws another's row.
 
 mod drivers;
+mod facts;
+mod log;
 mod output;
 mod row;
 
@@ -22,7 +24,8 @@ use x100_core::fold::{ProjectPart, ProjectState};
 use x100_core::id::{AgentId, DriverId, ProjectId};
 
 pub use drivers::{DriverModel, DriverRow};
-pub use output::AgentOutput;
+pub use facts::{AgentFacts, FactsModel};
+pub use output::{AgentOutput, SegmentShown};
 pub use row::{AgentHeader, AgentModel, AgentRow, RowEvent};
 
 use crate::session::{Session, SessionEvent};

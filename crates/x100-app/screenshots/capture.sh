@@ -31,7 +31,7 @@ app=$!
 
 window() { xwininfo -root -tree | grep '"x100' | head -1 | awk '{print $1}'; }
 until [[ -n $(window) ]]; do sleep 0.2; done
-sleep 3
+sleep 6
 id=$(window)
 drive() { python3 -I "$here/xtest.py" "$id" "$@"; }
 shot() {
@@ -68,5 +68,33 @@ shot drivers
 # The builder answers the CEO's question; Marketing gets its first task.
 drive click 1287 80 sleep 0.5 click 380 815 type "Forest greens." key Return sleep 6
 shot answered
+
+# The other tabs, left to right. A tab's centre is where its label is on the 1400x900 window.
+drive click 686 21 sleep 1
+shot specs
+drive click 740 21 sleep 1
+shot tasks
+# Raising a task: the form opens above the list.
+drive click 1339 74 sleep 0.5 type "Add a pricing FAQ" click 700 175 type "Answer what people ask before they subscribe." sleep 0.5
+shot tasks-raise
+drive click 1339 74 sleep 0.5
+drive click 792 21 sleep 1.5
+shot files
+# The cross asks before it removes.
+drive click 757 119 sleep 0.7
+shot files-confirm
+drive click 848 21 sleep 1
+shot budget
+drive click 957 21 sleep 1
+shot preview
+drive click 1015 21 sleep 1
+shot infra
+# Settings: change Ask me about, which reaches the daemon and the Log; then the Credentials part.
+drive click 1073 21 sleep 1 click 1331 78 sleep 1
+shot settings
+drive click 1000 851 sleep 0.7 scroll 1000 500 40 sleep 0.7
+shot credentials
+drive click 901 21 sleep 1.5
+shot log
 
 grep -m1 "Selected GPU adapter" "$work/app.log" || true

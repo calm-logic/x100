@@ -9,18 +9,34 @@
 //! - [`chat`]: the first-run brief, then the chat with the CEO and attachments.
 //! - [`tabs`]: the main panel's tab bar and dots, and where each tab's view is made.
 //! - [`team`]: the Team tab, its rows, the drivers list and an agent's view.
+//! - One module per other tab: [`specs`], [`tasks`], [`files`], [`budget`], [`log`], [`preview`],
+//!   [`infra`] and [`settings`]; [`held`] for actions waiting for the builder, and [`reflection`]
+//!   for an agent's memories, skills and trials. [`notice`] is what a control says beside itself.
+//! - [`term`]: the terminal an agent's live output is drawn in.
 //!
 //! [`session`] is the one connection, shared by all of them.
 
+pub mod budget;
 pub mod chat;
+pub mod files;
+pub mod held;
+pub mod infra;
 pub mod input;
+pub mod log;
 pub mod markdown;
+pub mod notice;
 pub mod platform;
+pub mod preview;
+pub mod reflection;
 pub mod session;
+pub mod settings;
 pub mod shell;
 pub mod sidebar;
+pub mod specs;
 pub mod tabs;
+pub mod tasks;
 pub mod team;
+pub mod term;
 pub mod theme;
 pub mod widgets;
 pub mod words;

@@ -9,6 +9,7 @@
 //!
 //! The client holds no logic beyond that. Requests are the protocol's own typed params.
 
+mod calls;
 mod manager;
 mod stream;
 

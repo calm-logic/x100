@@ -51,6 +51,8 @@ pub struct TextInput {
     marked: Option<Range<usize>>,
     placeholder: SharedString,
     multiline: bool,
+    /// Drawn as dots, for a credential's value.
+    masked: bool,
 }
 
 impl EventEmitter<InputEvent> for TextInput {}
@@ -74,7 +76,14 @@ impl TextInput {
             marked: None,
             placeholder: placeholder.into(),
             multiline,
+            masked: false,
         }
+    }
+
+    /// Draws what is typed as dots. The text is still held and returned by [`Self::text`].
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
     }
 
     pub fn text(&self) -> &str {
@@ -296,12 +305,19 @@ impl Render for TextInput {
                     Vec::new()
                 },
             )
-        } else if focused {
-            let mut shown = self.text.clone();
-            shown.insert(self.cursor, '|');
-            (shown, vec![(self.cursor..self.cursor + 1, caret())])
         } else {
-            (self.text.clone(), Vec::new())
+            let (mut shown, at) = if self.masked {
+                let before = self.text[..self.cursor].chars().count();
+                ("\u{2022}".repeat(self.text.chars().count()), before * 3)
+            } else {
+                (self.text.clone(), self.cursor)
+            };
+            if focused {
+                shown.insert(at, '|');
+                (shown, vec![(at..at + 1, caret())])
+            } else {
+                (shown, Vec::new())
+            }
         };
         let entity = cx.entity();
         let focus = self.focus.clone();

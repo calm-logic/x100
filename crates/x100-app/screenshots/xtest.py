@@ -3,6 +3,7 @@ input for the window check where no input tool such as xdotool is installed.
 
 Usage: xtest.py WINDOW_ID command...
   click X Y         click at window-relative coordinates
+  scroll X Y N      N wheel notches down (up if negative) at a point
   type TEXT         type text (letters, digits, punctuation, spaces)
   key NAME          press a key, e.g. Return or shift+Return
   sleep SECONDS
@@ -73,6 +74,19 @@ def main():
             xtst.XTestFakeButtonEvent(d, 1, 0, 0)
             x11.XFlush(d)
             time.sleep(0.2)
+        elif cmd == "scroll":
+            # scroll X Y N: the wheel N notches down at a point.
+            x, y, n, args = int(args[0]), int(args[1]), int(args[2]), args[3:]
+            xtst.XTestFakeMotionEvent(d, -1, ox + x, oy + y, 0)
+            x11.XFlush(d)
+            time.sleep(0.1)
+            for _ in range(abs(n)):
+                button = 5 if n > 0 else 4
+                xtst.XTestFakeButtonEvent(d, button, 1, 0)
+                xtst.XTestFakeButtonEvent(d, button, 0, 0)
+                x11.XFlush(d)
+                time.sleep(0.08)
+            time.sleep(0.3)
         elif cmd == "type":
             for ch in args[0]:
                 press(NAMES.get(ch, ch))

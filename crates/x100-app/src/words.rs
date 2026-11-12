@@ -1,5 +1,6 @@
 //! How records read on screen, in the words `PRODUCT.md` uses.
 
+use x100_core::action::{AskMeAbout, Risk};
 use x100_core::agent::{AgentState, Waiting};
 use x100_core::driver::{ContextFill, DriverState};
 use x100_core::effort::Effort;
@@ -7,6 +8,8 @@ use x100_core::fold::DaemonState;
 use x100_core::harness::HarnessKind;
 use x100_core::id::{HarnessId, MachineId};
 use x100_core::money::Money;
+use x100_core::spec::SpecKind;
+use x100_core::time::Timestamp;
 
 pub fn effort(e: Effort) -> &'static str {
     match e {
@@ -121,6 +124,109 @@ pub fn agents(n: usize) -> String {
     }
 }
 
+/// The three specs, as the Specs tab names them.
+pub fn spec_name(kind: SpecKind) -> &'static str {
+    match kind {
+        SpecKind::Brd => "Business requirements",
+        SpecKind::Prd => "Product requirements",
+        SpecKind::Add => "Architecture design",
+    }
+}
+
+pub fn spec_short(kind: SpecKind) -> &'static str {
+    match kind {
+        SpecKind::Brd => "Business",
+        SpecKind::Prd => "Product",
+        SpecKind::Add => "Tech",
+    }
+}
+
+pub fn spec_abbreviation(kind: SpecKind) -> &'static str {
+    match kind {
+        SpecKind::Brd => "BRD",
+        SpecKind::Prd => "PRD",
+        SpecKind::Add => "ADD",
+    }
+}
+
+pub fn ask_me_about(level: AskMeAbout) -> &'static str {
+    match level {
+        AskMeAbout::Nothing => "Nothing",
+        AskMeAbout::HighRiskOnly => "High risk only",
+        AskMeAbout::MediumAndUp => "Medium and up",
+        AskMeAbout::EveryDecision => "Every decision",
+    }
+}
+
+pub fn risk(risk: Risk) -> &'static str {
+    match risk {
+        Risk::Low => "Low risk",
+        Risk::Medium => "Medium risk",
+        Risk::High => "High risk",
+    }
+}
+
+/// An amount the builder typed, in dollars: `50`, `12.5`, `$12.50`.
+pub fn parse_money(text: &str) -> Option<Money> {
+    let text = text.trim().trim_start_matches('$').replace(',', "");
+    let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+    if whole.is_empty() && fraction.is_empty() || fraction.len() > 6 {
+        return None;
+    }
+    let digits = |s: &str| s.chars().all(|c| c.is_ascii_digit());
+    if !digits(whole) || !digits(fraction) {
+        return None;
+    }
+    let dollars: u64 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse().ok()?
+    };
+    let micros: u64 = if fraction.is_empty() {
+        0
+    } else {
+        format!("{fraction:0<6}").parse().ok()?
+    };
+    dollars
+        .checked_mul(1_000_000)?
+        .checked_add(micros)
+        .map(Money::from_micros)
+}
+
+/// Tokens in thousands and millions.
+pub fn tokens(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => format!("{:.1}k", n as f64 / 1e3),
+        _ => format!("{:.2}M", n as f64 / 1e6),
+    }
+}
+
+/// A moment as `12 Nov 09:00:03`, in UTC: the log's clock is the daemon's, and a machine's time
+/// zone is not known to it.
+pub fn moment(at: Timestamp) -> String {
+    let secs = at.as_millis() / 1000;
+    let (days, rest) = (secs / 86_400, secs % 86_400);
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let z = days as i64 + 719_468;
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    format!(
+        "{day} {} {:02}:{:02}:{:02}",
+        MONTHS[(month - 1) as usize],
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +237,22 @@ mod tests {
         assert_eq!(money(Money::from_micros(42_000)), "$0.04");
         assert_eq!(money(Money::from_micros(45_000)), "$0.05");
         assert_eq!(money(Money::from_dollars(15)), "$15.00");
+    }
+
+    #[test]
+    fn typed_amounts_and_moments() {
+        assert_eq!(parse_money("$12.50"), Some(Money::from_micros(12_500_000)));
+        assert_eq!(parse_money("50"), Some(Money::from_dollars(50)));
+        assert_eq!(parse_money("0.000001"), Some(Money::from_micros(1)));
+        assert_eq!(parse_money("1,000"), Some(Money::from_dollars(1000)));
+        assert_eq!(parse_money(""), None);
+        assert_eq!(parse_money("ten"), None);
+        assert_eq!(parse_money("1.2.3"), None);
+        assert_eq!(
+            moment(Timestamp::from_millis(1_794_387_603_000)),
+            "11 Nov 09:00:03"
+        );
+        assert_eq!(moment(Timestamp::EPOCH), "1 Jan 00:00:00");
     }
 
     #[test]
