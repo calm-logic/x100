@@ -229,6 +229,9 @@ invent any role with a charter, and team changes need the builder's agreement.
     x100, kept in the vault. A proper Homebox command line replaces it later.
   - GitHub must be connected to x100 before x100 creates and pushes a repository for a project. Until then a
     project's repository stays local, with commits as now, and cannot be deployed through Homebox.
+  - GitHub also has a "use local" way, the default when the `gh` command line is installed and logged in:
+    the daemon runs `gh` and never holds its token. GitHub's own OAuth is the other way, and needs an OAuth
+    app registered for x100, which only an account owner can do in GitHub's settings.
   - A public address on Homebox's primary domain is acceptable for the test. x100 finds the primary domain
     and the GitHub account through Homebox's API. The same GitHub account is the one to connect to x100.
   - The orchestrator may change Homebox's repository. Its uncommitted static-site support is committed
