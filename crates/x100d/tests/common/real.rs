@@ -115,6 +115,10 @@ impl Real {
         if !installed(name) {
             return None;
         }
+        // These are about drivers contained in a sandbox and what reaches out through the proxy.
+        if super::available::skip_without_sandbox() {
+            return None;
+        }
         // Not under /tmp: Codex refuses to set up its sandbox's helpers in a home there, as it
         // would in the builder's data directory.
         let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();

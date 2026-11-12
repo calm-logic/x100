@@ -230,6 +230,9 @@ async fn uses(client: &Client, project: ProjectId) -> Vec<(String, UseOutcome)> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reference_works_only_where_allowed_and_the_value_is_found_nowhere() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let env = Env::new();
     std::fs::write(env.scripts.join("fake.toml"), SCRIPT).unwrap();
     let (port, seen) = server().await;

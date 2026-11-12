@@ -42,46 +42,10 @@ macro_rules! on_both {
     };
 }
 
-/// Whether a backend's tests should be passed over on this machine. A machine without the tools
-/// (a Mac, a runner with no container runtime) says so and passes. With `X100_REQUIRE_SANDBOX`
-/// set, as CI sets it on Linux, a missing backend is a failure, so the tests cannot go quiet.
-pub fn unusable(backend: &str, works: bool) -> bool {
-    if works {
-        return false;
-    }
-    assert!(
-        std::env::var_os("X100_REQUIRE_SANDBOX").is_none(),
-        "{backend} is required here and does not work"
-    );
-    eprintln!("SKIPPED: {backend} does not work on this machine");
-    true
-}
-
-fn succeeds(program: &str, args: &[&str]) -> bool {
-    std::process::Command::new(program)
-        .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
-/// The bubblewrap backend needs Linux, `bwrap`, and user namespaces an ordinary user may make.
-pub fn bubblewrap_works() -> bool {
-    cfg!(target_os = "linux")
-        && succeeds("bwrap", &["--version"])
-        && succeeds("unshare", &["--user", "--map-root-user", "true"])
-}
-
-/// The container tests run host programs inside the container, so they need Linux as well as
-/// a runtime that answers.
-pub fn containers_work() -> bool {
-    let runtime = match std::env::var("X100_CONTAINER_RUNTIME").as_deref() {
-        Ok("podman") => "podman",
-        _ => "docker",
-    };
-    cfg!(target_os = "linux") && succeeds(runtime, &["info"])
-}
+#[path = "available.rs"]
+mod available;
+#[allow(unused_imports)]
+pub use available::{bubblewrap_works, containers_work, unusable};
 
 pub fn bubblewrap() -> Bubblewrap {
     Bubblewrap::new(HELPER)

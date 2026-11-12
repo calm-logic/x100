@@ -160,6 +160,9 @@ fn processes_with(needle: &str) -> Vec<u32> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_driver_runs_contained_in_its_agents_sandbox() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let env = env();
     let mut daemon = env.spawn();
     let client = env.client().await;

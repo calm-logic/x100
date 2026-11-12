@@ -43,7 +43,9 @@ impl Local {
     async fn client(&self) -> Client {
         let mut o = Options::new(self.env.socket(), "test");
         o.startup_timeout = WAIT;
-        Client::connect(o).await.unwrap()
+        let client = Client::connect(o).await.unwrap();
+        common::uncontained_if_no_sandbox(&client).await;
+        client
     }
 
     async fn finish(mut self) {

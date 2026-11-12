@@ -102,6 +102,9 @@ async fn a_message_to_the_ceo_is_answered_as_events() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn killing_the_daemon_mid_turn_fails_that_driver_and_ends_the_warm_ones() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let env = Env::new();
     let mut daemon = env.spawn();
     let client = env.client().await;
@@ -659,6 +662,7 @@ async fn a_client_that_finds_no_daemon_starts_one() {
     let client = x100_client::Client::connect(options)
         .await
         .expect("a daemon was started");
+    uncontained_if_no_sandbox(&client).await;
     let project = create_project(&client, &env, "auto").await;
     drop(client);
     // The daemon outlives the client that started it.

@@ -217,8 +217,7 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-A fix so the tests pass on a machine that cannot make a sandbox (macOS CI). Sonnet subagent.
-Then M12D, decision models for the classifier, then M12I, integrations with Homebox and GitHub.
+M12D, decision models for the classifier. Opus subagent. Then M12I, integrations with Homebox and GitHub.
 
 Queued, in this order:
 
@@ -418,6 +417,12 @@ From the wiring of terminal drivers:
   see "The sandbox and vault, wired in" above.
 ## Could not be verified, and why
 
+- Tests on a machine that cannot make a sandbox (macOS CI), 2026-11-12: containment tests print SKIPPED and
+  the rest run with `run_without_sandbox` on, by one rule in `x100-sandbox/tests/common/available.rs`.
+  Simulated here by hiding `bwrap` from the path: every daemon and app test passed. Three Docker tests of the
+  sandbox crate failed in that simulation only ("Permission denied" removing the sandbox directory), cause
+  not found. `real_e2e::the_same_run_goes_through_on_the_fake_provider` hangs when run uncontained, so it
+  skips there; the hang itself is not fixed.
 - CI, 2026-11-12: Linux and the licence check are green on 8877094. macOS failed one app test that pressed
   Ctrl+C to copy where macOS uses Cmd+C. Fixed in the test.
 - macOS by hosted CI only. First run, 2026-11-12, of commit 2c3a3e3: Linux and macOS both green, which covers

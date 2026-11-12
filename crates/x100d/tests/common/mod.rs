@@ -4,6 +4,10 @@
 
 pub mod real;
 
+// One rule for every package that starts a daemon: see the file.
+#[path = "../../../x100-sandbox/tests/common/available.rs"]
+pub mod available;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -153,7 +157,9 @@ impl Env {
     pub async fn client(&self) -> Client {
         let mut options = Options::new(self.socket(), "test");
         options.startup_timeout = WAIT;
-        Client::connect(options).await.expect("the daemon answers")
+        let client = Client::connect(options).await.expect("the daemon answers");
+        uncontained_if_no_sandbox(&client).await;
+        client
     }
 
     /// The driver processes the daemon has written down, by driver id: one for most drivers,
@@ -191,6 +197,21 @@ impl Env {
             })
             .unwrap_or_default()
     }
+}
+
+/// On a machine that cannot make a sandbox, lets the daemon run drivers without one, so the
+/// tests that are not about containment still run. Where one can be made, nothing changes and
+/// the drivers stay contained. Tests about containment do not call this: they skip instead.
+pub async fn uncontained_if_no_sandbox(client: &Client) {
+    if available::sandbox_works() {
+        return;
+    }
+    client
+        .request(x100_proto::SetDaemonSetting {
+            setting: x100_core::settings::DaemonSetting::RunWithoutSandbox(true),
+        })
+        .await
+        .expect("the setting is taken");
 }
 
 pub struct DaemonProc {

@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+// One rule for every package that starts a daemon: see the file.
+#[path = "../../../x100-sandbox/tests/common/available.rs"]
+pub mod available;
+
 use gpui::{Bounds, Modifiers, Pixels, TestAppContext, VisualTestContext, WindowHandle};
 use x100_app::shell::Shell;
 use x100_client::{Client, Options};
@@ -127,9 +131,19 @@ impl Run {
     pub fn client(&self) -> Client {
         let mut options = Options::new(self.daemon.socket(), "test");
         options.startup_timeout = WAIT;
-        self.rt
+        let client = self
+            .rt
             .block_on(Client::connect(options))
-            .expect("the daemon answers")
+            .expect("the daemon answers");
+        // Where no sandbox can be made, drivers run without one so these tests can run at all.
+        if !available::sandbox_works() {
+            self.rt
+                .block_on(client.request(SetDaemonSetting {
+                    setting: DaemonSetting::RunWithoutSandbox(true),
+                }))
+                .expect("the setting is taken");
+        }
+        client
     }
 
     /// Waits long enough not to expire when the clock moves, as the daemon's Fernleaf test does.

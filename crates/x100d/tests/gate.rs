@@ -292,6 +292,9 @@ async fn said(client: &Client, p: &Project, needle: &str) -> (DriverId, String) 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn at_high_risk_only_a_deploy_waits_for_the_builder_and_the_rest_goes_through() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let env = Env::new();
     let (port, seen) = server().await;
     let mut daemon = spawn(&env);
@@ -456,6 +459,9 @@ async fn at_high_risk_only_a_deploy_waits_for_the_builder_and_the_rest_goes_thro
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_level_decides_what_waits() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let env = Env::new();
     let (port, seen) = server().await;
     let mut daemon = spawn(&env);
@@ -517,6 +523,9 @@ async fn the_level_decides_what_waits() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_held_action_survives_a_restart_and_can_be_decided() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let env = Env::new();
     let (port, seen) = server().await;
     let mut daemon = spawn(&env);

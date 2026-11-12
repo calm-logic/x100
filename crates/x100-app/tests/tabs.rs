@@ -587,6 +587,10 @@ fn credentials_are_added_with_a_value_and_a_scope() {
 /// again from Settings.
 #[test]
 fn running_without_a_sandbox_is_shown_and_set_from_settings() {
+    // Where no sandbox can be made, these tests' daemon already runs drivers without one.
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let mut o = script();
     let settings = o.open::<SettingsView>(Tab::Settings);
     let part = vcx_read(&o.vcx, |cx| settings.read(cx).sandbox().clone());

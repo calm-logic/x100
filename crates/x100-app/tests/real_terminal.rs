@@ -116,7 +116,7 @@ async fn read_all(client: &Client, project: ProjectId, driver: DriverId) -> Vec<
 
 #[test]
 fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
-    if !claude_installed() {
+    if !claude_installed() || common::available::skip_without_sandbox() {
         return;
     }
     let mut cx = TestAppContext::single();

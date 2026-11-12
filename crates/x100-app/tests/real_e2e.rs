@@ -232,6 +232,10 @@ fn the_same_run_goes_through_on_the_fake_provider() {
         eprintln!("SKIPPED: claude is not installed on this machine");
         return;
     }
+    // The fake provider is reached through the sandbox's proxy, which is the point of the run.
+    if common::available::skip_without_sandbox() {
+        return;
+    }
     let rt = tokio::runtime::Runtime::new().unwrap();
     let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (home, login) = (dir.path().join("home"), dir.path().join("claude-login"));
