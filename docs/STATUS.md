@@ -14,12 +14,20 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   The orchestrator's own 20 second run on X11: GPU adapter selected, 642 frames, 2014 row renders for 1824
   updates with 100 unprompted (the start-up refresh), 25% of one core, 218 MiB, exit 0. Report and rules for
   M15 in `spikes/gpui/REPORT.md`. The spike stays in the tree until M15 has taken what it needs.
+- **M1a, core types, events, machines and proofs** (M1 is split in two: it is the contract and large). The
+  orchestrator's run: 67 tests pass, clippy and fmt clean. Stateright 0.31.0 proves seven models, the largest
+  (takeover) over 431,299 states, and ten deliberately broken transitions are each refuted with a
+  counterexample. 86 accepted transitions and 204 rejected pairs are table-tested. Invariants this crate
+  cannot state, and who must check them: fencing (M9), allow-lists, cool-offs and caps (M8), waits closed by
+  the orchestrator (M6), jobs on the real clock (M4), merges only on a committed trial (M13, M14), lab
+  isolation (M10, M11, M14).
 
 ## In progress
 
-- M1, split in two because it is the contract and large. M1a: ids, domain types, events, the six state
-  machines, the clock, and the Stateright proofs. M1b, after it: the folds into tab state. Opus subagent, owns
+- M1b: the folds into tab state, plus the small changes to M1a listed under decisions. Opus subagent, owns
   `crates/x100-core`.
+- M3 first task: the report on how Claude Code and Codex run headless, from documentation and help output
+  only. No model is called.
 
 ## Waiting on the owner
 
@@ -81,6 +89,16 @@ All in **proposed** parts, made in the review before M0. Reasons in brief.
   `x100-orch` so its check needs no throwaway code.
 - **"Still missing" list.** Its four items are settled into the design and the list is removed.
 - **M16 to M17** for where thresholds are tuned.
+
+From M1a, where the documents were silent:
+
+- **Agent machine.** Planned to Retired, for a planned lead a team change removes. Waiting to Idle when the
+  wait for a driver ends in a failed task.
+- **Task effort.** Changed by the delegator when sending back, or asked for by the assignee in `update_task`.
+- **Lead budgets** together never exceed the project's total.
+- **Thresholds** are the daemon's settings, in the daemon's log.
+- **Repeats** are fixed intervals, not calendar rules.
+- **Lab drivers** are not counted in "one driver acts for an agent".
 
 ## Could not be verified, and why
 

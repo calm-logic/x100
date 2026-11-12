@@ -99,7 +99,9 @@ State machines to make explicit and verify:
 - **Agent**: Planned → Working when its first inbox item arrives. Working → Waiting when it waits, or when no
   driver can be found for it; Waiting → Working when anything reaches its inbox, or, for an agent waiting for a
   driver, when one can be found. Working → Idle when it has no open task and nothing to wait for; Idle → Working
-  when anything reaches its inbox. Idle → Retired. An agent has no Failed state: its drivers fail, and its tasks
+  when anything reaches its inbox. Waiting → Idle when the wait for a driver reaches its deadline and its
+  task is reported failed. Idle → Retired, and Planned → Retired for a lead a team change removes before any
+  work reached it. An agent has no Failed state: its drivers fail, and its tasks
   can end in a failure report.
 - **Driver**: Starting → Running → Warm → Running again, or Warm → Compacting → Warm. A driver is Running during
   a turn and Warm between turns. Warm → Handing off → Ended for a planned handoff: the turn in progress ends
@@ -125,6 +127,7 @@ Invariants worth proving:
   already running.
 - An agent has exactly one parent and the tree has one root.
 - At most one driver acts for an agent at any time, and a driver acts for one agent only, for its whole life.
+  A lab driver does not act for its agent, since nothing it does reaches the project, so it is not counted.
 - Every driver is compatible when it starts: inside its agent's effort range, at or above its task's effort, on
   a harness and model the builder allows.
 - Nothing delivered to an agent is lost: every inbox item is handled by a turn that completed.
@@ -264,7 +267,9 @@ agent's work when all of these hold:
 Every turn needs a compatible driver, a further turn on a warm one included, so a budget that is reached stops
 the next turn, not only the next driver.
 
-**proposed** A worker has its parent's effort range unless the CEO sets one for it.
+**proposed** A worker has its parent's effort range unless the CEO sets one for it. A task's effort changes
+in two ways: its delegator sends it back asking for more, or its assignee says in `update_task` that it needs
+more. Either is clamped into the agent's range.
 
 The router first tries to find one: the agent's warm driver, if it is compatible. Failing that, it allocates
 one: it starts the cheapest compatible harness, model and effort level. The choice and its cost go in the log
@@ -279,7 +284,8 @@ cool-off is a job.
 **decided (owner, 2026-11-11)** Budgets are per lead inside a project total. The ledger holds the project's
 budget and one budget per lead, set by the CEO or by the builder. A driver's cost is charged to the lead at the
 top of its agent's branch of the tree, and the CEO's own drivers to the project. Before a driver starts, the
-router checks both the lead's budget and the project's.
+router checks both the lead's budget and the project's. The leads' budgets together never exceed the
+project's total: a `form_team`, `set_budget` or builder's change that would pass it is refused.
 
 **proposed** A worker the CEO runs directly, with no lead above it, is charged to the project like the CEO.
 The cost of a turn is what its harness reports, or the tokens it reports at the model's listed price. Under a
@@ -311,7 +317,9 @@ total the daemon posts the notice in the chat itself, since a CEO turn to say so
   retiring loses nothing. A warm driver needs no extra turn for this: an idle agent has reported its task, and a
   waiting one wrote its progress note when it called `wait`.
 
-The thresholds are settings with defaults, measured and tuned in M17.
+The thresholds are settings with defaults, measured and tuned in M17. They, the stall timeout, the default
+wait deadline, the minimum repeat, the start pack's share and the limit on turns that neither report nor wait
+are the daemon's settings, the same for every project, and changing one is an event in the daemon's log.
 
 ## Handoff
 
@@ -439,7 +447,8 @@ delay, or on a repeat), and what it does then. It does one of three things:
 
 **proposed** An agent schedules jobs with `schedule`, for itself and for its own children, the agents it may
 delegate to. The builder asks the CEO for one, and can cancel any job an agent scheduled. The daemon schedules
-its own routines. A repeat shorter than a set minimum is refused, and a repeating job that wakes agents is an
+its own routines. A repeat is a fixed interval from a first time, not a calendar rule. A repeat shorter than
+a set minimum is refused, and a repeating job that wakes agents is an
 action the gate classifies as spend.
 
 **proposed** One clock in the daemon fires every job, so everything time-based in x100 takes one path: it is in
