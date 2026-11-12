@@ -620,6 +620,23 @@ git history plus a `version` field. Reflect now gives the CEO a reflection task:
 work and the repositories, with tools to rewrite memories, edit skills and propose a new `team.toml`. A proposed
 team change is a held action, which the builder approves or denies.
 
+**proposed** Memory is layered, after Anthropic's "The components of agent memory" (2026-11-06):
+
+- **The log is the ground truth.** Agents can search the project's event log and transcripts with a tool.
+  Notes sit on top of that search and do not replace it.
+- **Notes cite their source.** A note's front matter names the events it was drawn from, so reflection can
+  check it against what happened.
+- **A small index is what a start pack carries.** Each agent's memory has an index of bounded size that links
+  to its notes. Reflection keeps it small by moving detail down into notes and leaving links.
+- **One writer per note.** An agent's notes are its own. Nothing shared is written by two agents at once.
+- **Reads are events.** Which notes a driver opened is recorded, so reflection knows what is used and what
+  is not.
+- **Guidance says what memory is for, not what to record.** Fixed rules such as "record only failures" made
+  stronger models worse in that study. Cheaper models are told to read their memory before they act.
+- **Reflection checks before it rewrites.** It tests each note against the log, corrects what is wrong,
+  merges duplicates, prunes what is unused, and quotes decisions and terms word for word instead of
+  summarising them. Its own instructions are a skill, so trials can improve them.
+
 **decided (owner, 2026-11-11)** Markdown, git and folders are the base engine and stay supported. In V2 there
 will also be a custom storage engine: a special-purpose database, fast in the way DuckDB or SQLite is, that
 supports several simultaneous writers with concurrency controls.

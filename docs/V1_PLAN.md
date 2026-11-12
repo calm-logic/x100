@@ -315,7 +315,12 @@ Memories and skills as Markdown in folders under git, with a main branch that ag
 for changes on trial. `remember` and `load_skill`. No other crate reads or writes these files: they go through
 this crate's interface, which is what a later storage engine will stand behind.
 
-Check: an agent's `remember` and `load_skill` calls round-trip through the files. A driver started after a
+Notes cite the events they came from, a bounded index is what a start pack carries, agents can search the
+log, and each note read is an event (see "Memory, skills and reflection").
+
+Check: an agent's `remember` and `load_skill` calls round-trip through the files. A start pack holds the
+index and not the notes, and stays under its size limit however many notes exist. A search of the log finds a
+past message. A driver started after a
 skill changes on the main branch receives the new skill, and one started while a change is only on a trial
 branch does not. Every change is a git commit and an event.
 
@@ -328,7 +333,9 @@ rule for committing, and merging or deleting the trial branch.
 
 Check, with the fake harness scripted so that one skill change helps and another does not: the helpful change
 is committed and the other is discarded, each after both arms ran three times, and both trials are in the log
-with their scores. A memory compaction is committed only when every probe question is still answered. After
+with their scores. A memory compaction is committed only when every probe question is still answered. A note
+that contradicts the log is corrected and cites the events that show it. A compaction that leaves the memory
+larger than it was, or the index over its limit, is discarded. After
 the trials, the project's worktree, files and non-lab ledger lines are byte-for-byte what they were. A lab
 driver's attempt to use a credential or write outbound is refused. A trial that would pass the lab's cap is
 stopped and recorded as such. A proposed team change arrives as a held action with its telemetry attached.
