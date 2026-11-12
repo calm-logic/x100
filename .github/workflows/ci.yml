@@ -41,4 +41,3 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses bans
-          command-arguments: --config crates/x100-app/deny.toml
