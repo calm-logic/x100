@@ -125,7 +125,9 @@ async fn the_named_command_gets_the_value_and_its_output_comes_back_redacted() {
     assert_eq!(lines[2], reference, "hex");
     assert_eq!(lines[3], format!("split:{reference}"));
     assert_eq!(lines[4], "args:deploy --app site");
-    assert_eq!(lines[5], format!("dir:{}", s.worktree.display()));
+    // The shell prints the resolved path, which on macOS is under /private.
+    let dir = std::fs::canonicalize(&s.worktree).unwrap();
+    assert_eq!(lines[5], format!("dir:{}", dir.display()));
     assert_eq!(stderr, format!("err:{reference}\n"));
     assert_no_leak("stdout", &out.stdout);
     assert_no_leak("stderr", &out.stderr);
