@@ -234,14 +234,13 @@ own models and prices:
   for Codex, the key held by reference and swapped in by the proxy. Its output is structured, so the agent's
   view shows the transcript rendered as a terminal.
 
-**proposed, needs the owner** A harness on a local login reads its own login, and rewrites it when the token
+**decided (owner, 2026-11-12)** A harness on a local login reads its own login, and rewrites it when the token
 refreshes, so it must be reachable and writable inside the agent's sandbox. Commands the agent runs there
 could read it. This is an exception to "agents never hold credential values", for the provider login only.
 Every other credential still goes through the vault. x100 itself never reads, copies or stores the login,
 which the providers' terms also require. What limits the exception: nothing else of the builder's home is
 visible, the harness is told to refuse reads of the login, and anything a driver emits is scanned for it. How
-one login is shared among many drivers is open until M3T tries it on a real login. The owner chose local
-logins, and this follows from that choice, so it is built this way unless the owner says otherwise.
+one login is shared among many drivers is open until M3T tries it on a real login. The owner accepted this exception.
 
 **proposed** Several drivers at once on one subscription is what the providers' terms leave unclear, and
 their limits assume one person's use. So the builder sets how many terminal drivers may run at once on each

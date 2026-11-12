@@ -78,17 +78,19 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## Waiting on the owner
 
-1. **The login file inside the sandbox.** Running a harness on a local subscription means its login file is
-   readable inside that agent's sandbox, an exception to "agents never hold credential values" for the
-   provider login only. Built that way, with the limits in ARCHITECTURE "Harnesses", unless the owner objects.
-2. **Typing into an agent's terminal.** PRODUCT says opening an agent is for watching only. Kept. Say if the
-   builder should be able to take the keyboard.
-3. **Real-provider runs.** None made yet. M3's check has a part that must run against the real providers:
-   each real harness makes a one-file edit and takes a second turn. It is written and has not run, because
-   real runs need the owner's say-so. With local logins now wanted, it runs on those once M3T exists, and
-   uses a little of each subscription's allowance: about four short turns per harness. Needs a yes.
-4. **Open questions 1 and 2 in `PRODUCT.md`.** The build uses the recommended answers: the CEO may invent any
-   role with a charter, and team changes need the builder's agreement.
+Nothing blocks. Open questions 1 and 2 in `PRODUCT.md` are built on their recommended answers: the CEO may
+invent any role with a charter, and team changes need the builder's agreement.
+
+## The current goal
+
+Set by the owner on 2026-11-12: carry on without stopping until the GPUI desktop app builds, matches the
+demo, and an end-to-end test works in full on a simple project, such as "create a todo app as a proof of
+concept". The orchestrator reads this as the say-so for real runs on the builder's local logins where that
+goal needs them (M3T's check and the end-to-end run), on the cheapest models, kept few and counted here.
+
+Order to get there: the contract fixes, M6b, then M3T, M7, M8 and M15 side by side on their own crates, then
+M16 and the end-to-end run. M15 starts beside M7 rather than after it, to reach the goal sooner. M9 to M14
+follow, and none of them is needed for the first end-to-end run.
 
 ## Owner's decisions during the build
 
@@ -97,6 +99,8 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   as Orca, herdr and T3 Code do, each in a dedicated terminal reachable from the Team tab by drilldown. This
   replaced "API keys only". It added milestone M3T and the two ways of running a harness in ARCHITECTURE.
 - **2026-11-12. Cap per login.** At most 4 terminal drivers at once on one login, by default.
+- **2026-11-12. The login inside the sandbox** may be writable. No objection.
+- **2026-11-12. An agent's terminal** is for watching only, for now.
 
 ## Toolchain, checked 2026-11-11
 
