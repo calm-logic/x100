@@ -47,11 +47,20 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   one-file edit" against a real provider. The tests exist and are ignored by default.
 - **Whole workspace after M3 and M4**, the orchestrator's run, twice: 197 tests pass, 0 fail. Build, clippy
   with warnings denied and fmt are clean. No harness process was left running.
+- **M5, daemon and client library.** The orchestrator's run, three times: 219 tests pass, 0 fail, clippy and
+  fmt clean, no daemon or harness process left. With the daemon as a real child process and the client library
+  the only way in: a brief to the CEO is answered as events on the fake harness. Killing the daemon with
+  SIGKILL while one driver is mid-turn and another is warm, then restarting: the first is Failed with
+  DaemonRestarted, the second Ended, none live, the leftover process group is gone, and new messages get
+  replies on new drivers. Also: two clients agree, a reconnect resumes with no gap or repeat, closing every
+  client stops nothing, a second message reuses the warm driver. 21 protocol methods are real. The other 16
+  answer "not available yet" with their milestone, from one table a test keeps complete.
 
 ## In progress
 
-- M5, daemon and client library. Sonnet subagent, owns `crates/x100d`, `crates/x100-client` and the turn
-  loop in `crates/x100-orch`.
+- Contract fixes M5 asked for, before M6: an append of several events at once in the store, the store's
+  error boxed, a hook in the driver spec that gives the child's pid at spawn, and one ordering rule written
+  into PROTOCOL.md. Sonnet subagent.
 
 ## Waiting on the owner
 
@@ -132,6 +141,17 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From M5:
+
+- **Protocol limits.** A line is at most 16 MiB. A subscriber whose queue has no room for 10 seconds is cut
+  off with `subscription.closed` and resumes from its cursor. A project created later reaches every
+  subscriber from its first event.
+- **Two bugs the subagent found under load and fixed**: the client dropped a notice read in the same pass as
+  its subscribe result, and a lag test that did not guarantee the cut-off.
+- **Leftover drivers.** Each driver's pid and start time are written down. On start the daemon kills every
+  recorded process group whose leader is the same process or is gone.
+- **Open for M6:** `chat.send` opens no task yet. Stall detection in the daemon runs on the real clock only.
 
 From M2 to M4:
 

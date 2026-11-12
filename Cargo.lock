@@ -1170,6 +1170,13 @@ version = "0.0.0"
 [[package]]
 name = "x100-client"
 version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "x100-core",
+ "x100-proto",
+]
 
 [[package]]
 name = "x100-core"
@@ -1228,6 +1235,18 @@ version = "0.0.0"
 [[package]]
 name = "x100-orch"
 version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "nix",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "ulid",
+ "x100-core",
+ "x100-drivers",
+ "x100-store",
+]
 
 [[package]]
 name = "x100-proto"
@@ -1273,6 +1292,23 @@ version = "0.0.0"
 [[package]]
 name = "x100d"
 version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "nix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "ulid",
+ "x100-client",
+ "x100-core",
+ "x100-drivers",
+ "x100-jobs",
+ "x100-orch",
+ "x100-proto",
+ "x100-store",
+]
 
 [[package]]
 name = "zerocopy"

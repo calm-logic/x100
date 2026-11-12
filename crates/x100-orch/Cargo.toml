@@ -7,3 +7,16 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+x100-core = { path = "../x100-core" }
+x100-store = { path = "../x100-store" }
+x100-drivers = { path = "../x100-drivers" }
+async-trait = "0.1"
+nix = { version = "0.29", features = ["signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+# Default features, for the randomness in an id: core builds ids from parts only.
+ulid = "3"

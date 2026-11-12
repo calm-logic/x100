@@ -1,0 +1,239 @@
+//! A daemon as a child process on a socket in a temporary directory, and the client library as the
+//! way in.
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
+
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::Pid;
+use x100_client::{Client, Options};
+use x100_core::fold::{DriverRecord, ProjectState};
+use x100_core::id::{DriverId, ProjectId};
+use x100_proto::{CreateProject, Snapshot};
+
+pub const WAIT: Duration = Duration::from_secs(30);
+
+pub const SCRIPT: &str = r#"
+[harness]
+name = "fake-anthropic"
+
+[[model]]
+model = "fake-small"
+context_window = 200000
+efforts = ["low", "medium"]
+price = { input = 1.0, output = 5.0, cache_read = 0.1 }
+
+# A turn that is still going when a test kills or stops the daemon.
+[[turn]]
+when = { input_contains = "SLEEP" }
+repeat = true
+# The background process stands for whatever a harness started and left running: it stays in the
+# driver's process group when the driver itself is gone.
+steps = [
+  { run = "sleep 300 >/dev/null 2>&1 &" },
+  { text = "going to sleep" },
+  { sleep_ms = 120000 },
+]
+
+[[turn]]
+when = { input_contains = "CRASH" }
+repeat = true
+steps = [{ text = "about to crash" }, { crash = 3 }]
+
+[[turn]]
+when = { input_contains = "TOOL" }
+repeat = true
+steps = [
+  { call = { set_preview = { url = "http://localhost:1" } } },
+  { text = "tried a tool" },
+]
+
+[[turn]]
+when = { input_contains = "SLOW" }
+repeat = true
+steps = [{ text = "thinking" }, { sleep_ms = 700 }, { text = "done thinking" }]
+
+[[turn]]
+repeat = true
+steps = [
+  { text = "heard: {{input}}" },
+  { write = "notes/seen.md", content = "seen" },
+  { usage = { input = 100, output = 20, cost_micros = 1234 } },
+  { context = 5000 },
+]
+"#;
+
+pub struct Env {
+    pub dir: tempfile::TempDir,
+    pub data: PathBuf,
+    pub scripts: PathBuf,
+}
+
+impl Env {
+    pub fn new() -> Env {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let data = dir.path().join("data");
+        let scripts = dir.path().join("scripts");
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(scripts.join("fake.toml"), SCRIPT).unwrap();
+        Env { dir, data, scripts }
+    }
+
+    pub fn socket(&self) -> PathBuf {
+        self.data.join("x100d.sock")
+    }
+
+    pub fn project_dir(&self, name: &str) -> String {
+        self.dir.path().join(name).to_string_lossy().into_owned()
+    }
+
+    pub fn daemon_args(&self) -> Vec<std::ffi::OsString> {
+        vec![
+            "--data-dir".into(),
+            self.data.clone().into(),
+            "--scripts-dir".into(),
+            self.scripts.clone().into(),
+            "--fake-harness".into(),
+            env!("CARGO_BIN_EXE_x100d-fake-harness").into(),
+        ]
+    }
+
+    pub fn spawn(&self) -> DaemonProc {
+        let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
+            .args(self.daemon_args())
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("x100d starts");
+        DaemonProc { child: Some(child) }
+    }
+
+    pub async fn client(&self) -> Client {
+        let mut options = Options::new(self.socket(), "test");
+        options.startup_timeout = WAIT;
+        Client::connect(options).await.expect("the daemon answers")
+    }
+
+    /// The driver processes the daemon has written down, by driver id.
+    pub fn recorded_pids(&self) -> Vec<(String, u32)> {
+        let Ok(text) = std::fs::read_to_string(self.data.join("drivers.json")) else {
+            return Vec::new();
+        };
+        let map: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+        map.as_object()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.clone(), v["pid"].as_u64().unwrap() as u32))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+pub struct DaemonProc {
+    child: Option<Child>,
+}
+
+impl DaemonProc {
+    pub fn pid(&self) -> u32 {
+        self.child.as_ref().expect("running").id()
+    }
+
+    /// SIGKILL: the daemon can clean up nothing.
+    pub fn kill9(&mut self) {
+        let mut child = self.child.take().expect("running");
+        child.kill().expect("a signal");
+        child.wait().expect("reaped");
+    }
+
+    /// SIGTERM, and waits for a clean exit.
+    pub fn terminate(&mut self) {
+        let mut child = self.child.take().expect("running");
+        kill(Pid::from_raw(child.id() as i32), Signal::SIGTERM).expect("a signal");
+        let status = child.wait().expect("reaped");
+        assert!(status.success(), "the daemon exited with {status}");
+    }
+}
+
+impl Drop for DaemonProc {
+    fn drop(&mut self) {
+        // A test that failed halfway must not leave the daemon running.
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Whether the process is alive. A zombie waiting for its parent to collect it is not.
+pub fn running(pid: u32) -> bool {
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps");
+    let stat = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    !stat.is_empty() && !stat.starts_with('Z')
+}
+
+/// The live processes in a process group.
+pub fn group_members(pgid: u32) -> Vec<u32> {
+    let out = Command::new("ps")
+        .args(["-eo", "pid=,pgid=,stat="])
+        .output()
+        .expect("ps");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split_whitespace();
+            let (pid, group, stat) = (f.next()?, f.next()?, f.next()?);
+            (group.parse() == Ok(pgid) && !stat.starts_with('Z')).then(|| pid.parse().ok())?
+        })
+        .collect()
+}
+
+pub async fn gone(pids: &[u32]) {
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while pids.iter().any(|p| running(*p)) {
+        assert!(std::time::Instant::now() < until, "still running: {pids:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Creates a project and waits for the client to hold it.
+pub async fn create_project(client: &Client, env: &Env, name: &str) -> ProjectId {
+    let project = client
+        .request(CreateProject {
+            path: env.project_dir(name),
+            name: None,
+            settings: None,
+        })
+        .await
+        .expect("the project is created")
+        .project;
+    client
+        .wait_for(WAIT, |s| s.projects.get(&project)?.project().map(|_| ()))
+        .await
+        .expect("the client follows the new project");
+    project
+}
+
+pub fn drivers(s: &Snapshot, project: ProjectId) -> Vec<DriverRecord> {
+    s.projects
+        .get(&project)
+        .map(|p| p.drivers().cloned().collect())
+        .unwrap_or_default()
+}
+
+pub fn ceo_driver(p: &ProjectState) -> Option<&DriverRecord> {
+    let ceo = p.project()?.ceo;
+    p.agent(ceo)?.drivers.last().and_then(|d| p.driver(*d))
+}
+
+pub fn only_driver(s: &Snapshot, project: ProjectId) -> Option<DriverId> {
+    drivers(s, project).first().map(|d| d.driver.id)
+}
+
+pub fn path(p: &str) -> &Path {
+    Path::new(p)
+}

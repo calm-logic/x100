@@ -7,3 +7,10 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+x100-core = { path = "../x100-core" }
+x100-proto = { path = "../x100-proto" }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }

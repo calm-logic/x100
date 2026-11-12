@@ -1,0 +1,194 @@
+//! The daemon. It owns the data directory, opens the logs, runs each project's turn loop and job
+//! clock, and serves the client protocol on a Unix socket. It is a library so that a test can
+//! start one in its own process; the `x100d` program is a few lines around it.
+//!
+//! Clients come and go without stopping anything: a closed connection ends only its own
+//! subscriptions. The daemon starts again from the store: drivers do not outlive it, so what the
+//! log shows as live is settled first, and a process a killed daemon left behind is stopped.
+
+// x100_store::Error is over 128 bytes and every store call returns it; boxing it is the store's change.
+#![allow(clippy::result_large_err)]
+
+mod chooser;
+mod config;
+mod conn;
+mod discover;
+mod error;
+mod hub;
+mod methods;
+mod unavailable;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::net::UnixListener;
+use tokio::sync::watch;
+use tokio::task::JoinSet;
+use x100_core::time::Clock;
+use x100_orch::{Orchestrator, ProcessRegistry, tools::NoTools};
+use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
+
+pub use config::{
+    Config, DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, QUEUE_CAPACITY, SCRIPTS_ENV,
+    default_data_dir,
+};
+pub use error::Error;
+pub use unavailable::arrives_with;
+
+use chooser::FirstAllowed;
+use hub::Hub;
+
+pub struct Daemon {
+    hub: Arc<Hub>,
+    listener: UnixListener,
+    socket: PathBuf,
+    pid_file: PathBuf,
+    stop: watch::Sender<bool>,
+}
+
+/// Asks a running daemon to stop, from anywhere.
+#[derive(Clone)]
+pub struct Stop(watch::Sender<bool>);
+
+impl Stop {
+    pub fn now(&self) {
+        let _ = self.0.send(true);
+    }
+}
+
+#[derive(Clone)]
+pub struct Handle(Arc<Hub>);
+
+impl Handle {
+    pub fn project_log(&self, id: x100_core::id::ProjectId) -> Option<ProjectLog> {
+        self.0.project(id).map(|s| s.log)
+    }
+
+    /// The scheduler whose clock fires the project's jobs.
+    pub fn scheduler(
+        &self,
+        id: x100_core::id::ProjectId,
+    ) -> Option<x100_jobs::Scheduler<x100_core::fold::ProjectState>> {
+        self.0.scheduler(id)
+    }
+}
+
+impl Daemon {
+    /// Opens the data directory and gets ready to serve. Fails if another daemon holds it.
+    pub async fn start(config: Config) -> Result<Daemon, Error> {
+        std::fs::create_dir_all(&config.data_dir)?;
+        let clock = Arc::clone(&config.clock);
+        let log = open_daemon_log(&config.data_dir, Arc::clone(&clock)).map_err(|e| match e {
+            x100_store::Error::Locked(_) => Error::AlreadyRunning(config.data_dir.clone()),
+            other => Error::Store(other),
+        })?;
+
+        // Before anything starts: what a daemon that was killed left running must not act.
+        let (processes, reaped) =
+            ProcessRegistry::open_and_reap(config.data_dir.join("drivers.json"))?;
+        for r in reaped {
+            eprintln!(
+                "x100d: stopped driver {}, left running by a daemon that died (pid {})",
+                r.driver, r.pid
+            );
+        }
+
+        let found = discover::discover(&config, &log, Arc::new(NoTools))?;
+        let chooser = FirstAllowed {
+            log: log.clone(),
+            machine: found.machine,
+            available: found.harnesses.keys().copied().collect(),
+        };
+        let settings_log = log.clone();
+        let orch = Orchestrator::new(x100_orch::Config {
+            clock: Arc::clone(&clock),
+            harnesses: found.harnesses,
+            chooser: Arc::new(chooser),
+            settings: Arc::new(move || settings_log.with_state(|s| *s.settings())),
+            processes: Arc::new(processes),
+        });
+        let hub = Arc::new(Hub::new(config.clone(), log, orch));
+
+        let projects: Vec<_> = hub
+            .log
+            .with_state(|d| d.projects().map(|(id, e)| (id, e.path.clone())).collect());
+        for (id, path) in projects {
+            let path = PathBuf::from(path);
+            if !path.is_dir() {
+                eprintln!("x100d: project {id} is gone from {}", path.display());
+                continue;
+            }
+            let store = ProjectStore::open(&path, Arc::clone(&clock))?;
+            // A project whose creation was cut short has nothing to settle or serve yet.
+            if store.log.last().is_none() {
+                continue;
+            }
+            x100_orch::recover(&store, &*clock)?;
+            hub.open_project(id, store.clone());
+            hub.start_project(id, store);
+        }
+        hub.start_daemon_jobs();
+
+        // The log's lock says no other daemon is alive, so a socket file is a dead one's.
+        let socket = config.socket_path();
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket)?;
+        let pid_file = config.data_dir.join("x100d.pid");
+        std::fs::write(&pid_file, std::process::id().to_string())?;
+        let (stop, _) = watch::channel(false);
+        Ok(Daemon {
+            hub,
+            listener,
+            socket,
+            pid_file,
+            stop,
+        })
+    }
+
+    pub fn socket_path(&self) -> &Path {
+        &self.socket
+    }
+
+    pub fn stop_handle(&self) -> Stop {
+        Stop(self.stop.clone())
+    }
+
+    /// A way into the running daemon's projects, for a test that must put something in a log
+    /// that the protocol cannot yet.
+    pub fn handle(&self) -> Handle {
+        Handle(Arc::clone(&self.hub))
+    }
+
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        Arc::clone(&self.hub.clock)
+    }
+
+    /// Serves until [`Stop::now`], then stops every driver and leaves the data directory tidy.
+    pub async fn run(self) {
+        let mut conns = JoinSet::new();
+        let mut stop = self.stop.subscribe();
+        loop {
+            tokio::select! {
+                biased;
+                _ = stop.changed() => break,
+                accepted = self.listener.accept() => match accepted {
+                    Ok((stream, _)) => {
+                        conns.spawn(conn::serve(Arc::clone(&self.hub), stream, self.stop.subscribe()));
+                    }
+                    Err(e) => eprintln!("x100d: could not accept a connection: {e}"),
+                },
+                Some(_) = conns.join_next(), if !conns.is_empty() => {}
+            }
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            while conns.join_next().await.is_some() {}
+        })
+        .await;
+        conns.abort_all();
+        self.hub.orch.shutdown().await;
+        self.hub.stop_tasks();
+        let _ = std::fs::remove_file(&self.socket);
+        let _ = std::fs::remove_file(&self.pid_file);
+    }
+}
