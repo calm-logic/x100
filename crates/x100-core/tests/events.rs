@@ -11,6 +11,7 @@ use x100_core::agent::{Agent, AgentEvent, Position};
 use x100_core::credential::{
     Credential, CredentialScope, CredentialUse, Projects, Refusal, UseOutcome, Via,
 };
+use x100_core::decision::{DecisionModel, DecisionProvider};
 use x100_core::driver::{
     Driver, DriverEvent, Failure, Handoff, HandoffCause, InFlight, Incompatible, Purpose,
     RetireReason, StartReason, TakeoverCause, Unfit, View,
@@ -202,8 +203,8 @@ fn project_events() -> Vec<ProjectEvent> {
             purpose: OneOffPurpose::Classify {
                 action: ActionId::from_u128(1),
             },
-            harness: HarnessId::from_u128(1),
-            model: ModelName("model-a".into()),
+            provider: DecisionProvider::Jev,
+            model: ModelName("jev-1.14.0".into()),
         }),
         P::Charged(Charge {
             payer: Payer::Lead(agent(1)),
@@ -480,6 +481,12 @@ fn daemon_events() -> Vec<DaemonEvent> {
         D::SettingChanged(DaemonSetting::StallTimeout(Duration::from_secs(600))),
         D::SettingChanged(DaemonSetting::TerminalDriversPerLogin(1)),
         D::SettingChanged(DaemonSetting::ProjectsRoot("/home/b/code".into())),
+        D::SettingChanged(DaemonSetting::DecisionModel(Some(DecisionModel {
+            provider: DecisionProvider::OpenAi,
+            credential: CredentialRef::from_u128(2),
+        }))),
+        D::SettingChanged(DaemonSetting::DecisionModel(None)),
+        D::SettingChanged(DaemonSetting::DecisionThreshold(Percent::new(80).unwrap())),
         D::JobScheduled(Job {
             id: JobId::from_u128(1),
             when: Schedule::Once { at: at(60_000) },

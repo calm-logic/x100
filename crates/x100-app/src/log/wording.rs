@@ -203,7 +203,7 @@ fn text(event: &ProjectEvent, n: &Names) -> String {
             n.payer(c.payer),
             match c.source {
                 ChargeSource::Turn { agent, .. } => format!("a turn of {}", n.agent(agent)),
-                ChargeSource::OneOff { .. } => "a one-off call".to_owned(),
+                ChargeSource::OneOff { .. } => "a call to the decision model".to_owned(),
             }
         ),
         P::BudgetReached(b) => match b {

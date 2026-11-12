@@ -173,6 +173,19 @@ impl Vault {
         Ok(Arc::clone(&entry.value))
     }
 
+    /// The value for a request the daemon makes itself to `host`. Only [`crate::Proxy::call`]
+    /// calls this.
+    pub(crate) fn take_for_daemon(
+        &self,
+        reference: CredentialRef,
+        host: &str,
+    ) -> Result<Arc<SecretValue>, Denied> {
+        let entries = self.read();
+        let entry = entries.get(&reference).ok_or(Denied::Unknown)?;
+        scope::check_daemon(&entry.credential, host).map_err(Denied::Refused)?;
+        Ok(Arc::clone(&entry.value))
+    }
+
     fn read(&self) -> std::sync::RwLockReadGuard<'_, BTreeMap<CredentialRef, Entry>> {
         self.inner.entries.read().expect("vault lock")
     }

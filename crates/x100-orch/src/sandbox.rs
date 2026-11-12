@@ -84,6 +84,11 @@ impl Sandboxes {
         }
     }
 
+    /// The vault's proxy, the daemon's only way out, when there is a vault.
+    pub fn proxy(&self) -> Option<&Proxy> {
+        self.containment.proxy.as_ref().map(|(proxy, _)| proxy)
+    }
+
     pub fn set_programs(&self, programs: Vec<PathBuf>) {
         *self.programs.write().expect("programs lock") = programs;
     }

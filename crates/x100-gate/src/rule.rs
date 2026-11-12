@@ -472,4 +472,18 @@ table! {
         Low,
         "No rule covers it, and the builder asked to be asked about nothing, so the classifier was not called.",
     );
+    NOT_CONNECTED_READ = row(
+        "classifier.not_connected.read",
+        "no row covers it, it only reads, and no decision model is connected",
+        Other,
+        Low,
+        "No rule covers it and no decision model is connected to judge it. It only reads, so it goes at the lowest risk a read can have.",
+    );
+    NOT_CONNECTED_WRITE = row(
+        "classifier.not_connected.write",
+        "no row covers it, it may change something, and no decision model is connected",
+        Other,
+        High,
+        "No rule covers it and no decision model is connected to judge it, so it waits for the builder. Connect one in Settings to have such actions judged.",
+    );
 }

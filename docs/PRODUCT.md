@@ -194,6 +194,9 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 - **v1** An effort range per lead, set by the CEO and adjustable by the builder.
 - **v1** Credentials: add one, limit the hosts it may reach and the commands that may receive it, and choose
   which projects may use it. A value can be entered and replaced, never read back.
+- **v1** Decision model: connect Gemini Decision 1, OpenAI's Decisions API or TypeSafe AI's Jev with an API
+  key. It rates the risk of actions no rule covers. With none connected, such a read goes through and such a
+  write is held.
 - **later** Reflection schedule: every 6 hours, daily, or off.
 
 ### Bring your own tools, agents, stack, O/S

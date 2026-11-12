@@ -5,8 +5,9 @@
 //!
 //! The daemon's proxy sends two made-up hosts to a test server on loopback and refuses every
 //! other host. The server lets in only a request that carries the value, and echoes what it was
-//! sent. The fake harness's driver runs `curl` in its sandbox with the reference. The gate's
-//! classifier, scripted, lets reads from both hosts through.
+//! sent. The fake harness's driver runs `curl` in its sandbox with the reference. No rule knows
+//! either host and no decision model is connected, so the gate lets both reads through at the
+//! lowest risk a read can have.
 
 mod common;
 
@@ -43,12 +44,6 @@ model = "fake-small"
 context_window = 200000
 efforts = ["low", "medium", "high"]
 price = { input = 1.0, output = 5.0 }
-
-# The gate's classifier, for the two hosts no rule knows: a read from either is let through.
-[[turn]]
-when = { start_pack_contains = "You label one action" }
-repeat = true
-steps = [{ text = "kind=other risk=low" }]
 
 [[turn]]
 when = { input_contains = "CALL" }

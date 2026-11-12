@@ -390,6 +390,13 @@ fn a_credential_value_is_redacted_everywhere_but_the_one_wire_field() {
     for s in samples() {
         assert!(!s.result.to_string().contains("hunter2"));
     }
+    // The same for a decision model's key.
+    let call = Call::from(ConnectDecisionModel {
+        provider: x100_core::decision::DecisionProvider::Gemini,
+        key: Secret::new("AIza_hunter3"),
+    });
+    assert!(!format!("{call:?}").contains("hunter3"));
+    assert_eq!(call.params()["key"], "AIza_hunter3");
 }
 
 #[test]

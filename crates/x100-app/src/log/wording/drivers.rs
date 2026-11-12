@@ -123,7 +123,7 @@ pub(super) fn driver_event(n: &Names, driver: DriverId, event: &DriverEvent) -> 
 pub(super) fn one_off(n: &Names, c: &OneOffCall) -> String {
     let by = format!(
         "{} \u{b7} {}",
-        words::harness(n.daemon, c.harness),
+        words::decision_provider(c.provider),
         c.model.0
     );
     match c.purpose {

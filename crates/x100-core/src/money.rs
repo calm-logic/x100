@@ -41,8 +41,8 @@ impl AddAssign for Money {
     }
 }
 
-/// Tokens a turn or a one-off call used, as its harness reports them, in the classes providers
-/// charge for.
+/// Tokens a turn or a one-off call used, as its harness or provider reports them, in the classes
+/// providers charge for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Usage {
     /// Input read fresh, neither from nor into the cache.

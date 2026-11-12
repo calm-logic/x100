@@ -15,7 +15,7 @@ use x100_vault::{SecretValue, VaultError};
 use super::{blocking, store_error};
 use crate::hub::Hub;
 
-fn vault_error(e: VaultError) -> RpcError {
+pub(super) fn vault_error(e: VaultError) -> RpcError {
     match e {
         VaultError::Unknown(r) => RpcError::new(ErrorCode::NotFound, format!("no credential {r}")),
         VaultError::TooShort(_) | VaultError::Exists(_) => {
@@ -94,15 +94,17 @@ pub async fn set_scope(hub: &Hub, p: ScopeCredential) -> Result<Done, RpcError> 
 }
 
 /// A removed value cannot be put back if the log refuses the removal; the daemon's next start
-/// records it removed.
+/// records it removed. Removing the decision model's key disconnects it.
 pub async fn remove(hub: &Hub, p: RemoveCredential) -> Result<Done, RpcError> {
     let (vault, log) = (hub.vault.clone(), hub.log.clone());
     blocking(move || {
         vault.remove(p.credential).map_err(vault_error)?;
+        super::decision::removed(&log, p.credential)?;
         let event = DaemonEvent::CredentialRemoved {
             credential: p.credential,
         };
         log.append(Actor::Builder, event)
+            .map(drop)
             .map_err(|e| store_error(&e))
     })
     .await?;

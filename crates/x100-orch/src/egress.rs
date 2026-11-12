@@ -10,7 +10,7 @@ use x100_core::id::{ActionId, AgentId, ProjectId};
 use x100_core::party::Actor;
 
 use crate::store::blocking;
-use crate::{Orchestrator, admit, ctx, gate, new_id, oneoff};
+use crate::{Orchestrator, admit, ctx, gate, new_id};
 
 impl Orchestrator {
     /// What the vault's proxy asks before a request goes out: the gate, for this daemon's
@@ -118,12 +118,6 @@ impl x100_vault::Admission for Gatekeeper {
         host: &str,
     ) -> x100_vault::Admit {
         let shared = &self.0.shared;
-        if oneoff::is_one_off(shared, requester.driver) {
-            return x100_vault::Admit::Refuse {
-                action: None,
-                why: "x100 refused this: a one-off call reaches its model and nothing else".into(),
-            };
-        }
         let Ok(ctx) = self.0.ctx(requester.project) else {
             return x100_vault::Admit::Refuse {
                 action: None,

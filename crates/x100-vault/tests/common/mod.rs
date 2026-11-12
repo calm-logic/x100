@@ -362,7 +362,7 @@ pub fn setup_with(hosts: &[&str], projects: Projects, upstream: Option<UpstreamT
         upstream: upstream.unwrap_or_else(|| UpstreamTrust::Only(vec![ca.cert.clone()])),
         resolve: [ALLOWED, OTHER, PROVIDER]
             .into_iter()
-            .map(|h| (h.to_owned(), local))
+            .map(|h| (h.to_owned(), local.into()))
             .collect(),
         closed: false,
     };

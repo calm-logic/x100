@@ -7880,6 +7880,7 @@ name = "x100-gate"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "serde",
  "serde_json",
  "x100-core",
 ]
@@ -8027,11 +8028,14 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "nix",
+ "rcgen",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-rustls",
  "ulid",
  "x100-client",
  "x100-core",

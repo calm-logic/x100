@@ -209,11 +209,7 @@ async fn relay(req: Request<Incoming>, target: Target, ctx: &Arc<RouteCtx>) -> R
 }
 
 async fn tcp(target: &Target, ctx: &RouteCtx) -> Result<TcpStream, String> {
-    match ctx.shared.resolve.get(&target.host.to_ascii_lowercase()) {
-        Some(ip) => TcpStream::connect((*ip, target.port)).await,
-        None => TcpStream::connect((target.host.as_str(), target.port)).await,
-    }
-    .map_err(|e| format!("connecting to {}:{}: {e}", target.host, target.port))
+    ctx.shared.tcp(&target.host, target.port).await
 }
 
 async fn tunnel(upgraded: hyper::upgrade::Upgraded, target: Target, ctx: Arc<RouteCtx>) {
@@ -399,7 +395,7 @@ async fn send(
 }
 
 /// A host that never answers fails the request after this, rather than holding the driver.
-const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(super) const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 async fn connect(target: &Target, ctx: &RouteCtx) -> Result<SendRequest<Body>, String> {
     tokio::time::timeout(CONNECT_TIMEOUT, connect_now(target, ctx))
@@ -435,7 +431,7 @@ where
 }
 
 /// Headers that belong to one connection and are not forwarded, by RFC 9110.
-fn strip_hop_by_hop(headers: &mut HeaderMap) {
+pub(super) fn strip_hop_by_hop(headers: &mut HeaderMap) {
     let named: Vec<HeaderName> = headers
         .get_all(header::CONNECTION)
         .iter()

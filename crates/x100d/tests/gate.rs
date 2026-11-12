@@ -3,13 +3,13 @@
 //! The daemon's proxy sends a few hosts to a test server on loopback and refuses every other one.
 //! The CEO's driver tries requests out with `curl` in its sandbox, and calls `write_spec`, x100's
 //! own tool for a file the builder reads. A production deploy is a POST to a hosting service's
-//! API; the gate's rules rate it High. A request to a host no rule knows goes to the classifier,
-//! which is the fake harness too, scripted.
+//! API; the gate's rules rate it High. No decision model is connected here, so a write to a host
+//! no rule knows is held without asking anything; `decision.rs` connects one.
 //!
 //! - At "High risk only", a read from a registry and `write_spec` are carried out, the deploy is
 //!   held and nothing reaches the host. Approve, sent after the agent's driver was replaced,
 //!   reaches the new driver, whose retry goes through once and whose second retry is held again.
-//!   Deny drops the next deploy and the agent is told. The classifier holds an unknown host.
+//!   Deny drops the next deploy and the agent is told. A write to an unknown host is held.
 //! - At "Nothing" neither is held; at "Every decision" both are, and an approved `write_spec` is
 //!   carried out by the daemon.
 //! - A held action is still held after the daemon restarts, and can be decided.
@@ -30,9 +30,7 @@ use x100_core::action::{
 };
 use x100_core::event::ProjectEvent;
 use x100_core::fold::{ActionRecord, ProjectState};
-use x100_core::harness::OneOffPurpose;
 use x100_core::id::{ActionId, AgentId, DriverId, ProjectId};
-use x100_core::ledger::ChargeSource;
 use x100_core::project::SettingChange;
 use x100_core::spec::SpecKind;
 use x100_core::transcript::Item;
@@ -54,12 +52,6 @@ model = "fake-small"
 context_window = 200000
 efforts = ["low", "medium", "high"]
 price = { input = 1.0, output = 5.0 }
-
-# The gate's classifier, asked through a one-off call: its question is the start pack.
-[[turn]]
-when = { start_pack_contains = "You label one action" }
-repeat = true
-steps = [{ text = "kind=send_outside risk=high" }, { usage = { input = 300, output = 8 } }]
 
 [[turn]]
 when = { input_contains = "DEPLOY" }
@@ -431,28 +423,30 @@ async fn at_high_risk_only_a_deploy_waits_for_the_builder_and_the_rest_goes_thro
         "{missing:?}"
     );
 
-    // A host no rule knows goes to the classifier, a one-off call charged to the project, which
-    // holds it here.
+    // A write to a host no rule knows, with no decision model connected, is held by the rules,
+    // and nothing is asked.
     say(&client, &p, &format!("MAIL\nPort: {port}")).await;
     assert_eq!(lines(&p.work, "mail.txt", 1).await, ["403"]);
     assert_eq!(sent(&seen, UNKNOWN_HOST), 0);
     let mail = action(&client, &p, |s| egress_to(s, UNKNOWN_HOST).next().cloned()).await;
     assert_eq!(mail.state, ActionState::Held);
     let c = mail.classification.unwrap();
-    assert_eq!((c.kind, c.risk), (ActionKind::SendOutside, Risk::High));
-    let ClassifiedBy::Classifier(call) = c.by else {
-        panic!("{c:?}")
-    };
-    let events = log(&client, p.id).await;
-    let called = events.iter().any(|e| {
-        matches!(e, ProjectEvent::OneOffCalled(o)
-            if o.id == call && o.purpose == OneOffPurpose::Classify { action: mail.action.id })
-    });
-    assert!(called, "the one-off call is in the log");
-    let charged = events.iter().any(
-        |e| matches!(e, ProjectEvent::Charged(c) if c.source == ChargeSource::OneOff { call }),
+    assert_eq!(
+        (c.kind, c.risk, c.by),
+        (ActionKind::Other, Risk::High, ClassifiedBy::Rules)
     );
-    assert!(charged, "and so is its charge");
+    assert!(
+        c.why.contains("classifier.not_connected.write"),
+        "{}",
+        c.why
+    );
+    let events = log(&client, p.id).await;
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ProjectEvent::OneOffCalled(_))),
+        "nothing was asked"
+    );
 
     daemon.terminate();
 }

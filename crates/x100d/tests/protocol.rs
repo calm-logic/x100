@@ -417,6 +417,8 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "credentials.replace",
         "credentials.set_scope",
         "credentials.remove",
+        "decision_model.connect",
+        "decision_model.disconnect",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);

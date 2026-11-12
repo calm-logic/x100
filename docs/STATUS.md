@@ -208,16 +208,31 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   decision" both. A held action survives a daemon restart and can then be decided. In-process: a merge into
   main is held at Medium and up, Approve merges, Deny sends the task back. In the app against a real daemon,
   Approve and Deny work from the strip. `AllowAll` is deleted. `InboxItem::Decision` gained a result.
-  - **Limits:** one-off calls are outside the caps and budgets. With default settings the classifier starts
-    a whole terminal program on the builder's subscription for each request to a host no rule knows. At
+  - **Limit:** at
     "Every decision" every tool call is held, `wait` and `report` included.
   - **Not run:** the permission-hook path (unreachable with harness prompts off), the classifier on a real
     program, a crash between Approve and the carry-out (recovery code exists, untested).
   - A turn cut off by a restart is replayed on the next driver, and can use a grant approved meanwhile.
 
+- **M12D, decision models for the classifier.** The orchestrator's run: 532 tests pass, 0 fail, 13 ignored,
+  clippy and fmt clean, nothing left running. `x100d/tests/decision.rs`, daemon as a child process, with a
+  stand-in HTTPS server speaking all three APIs: for Gemini, OpenAI and Jev, an unruled write is held or
+  allowed by the answer, never below the floor; an answer under 70% confidence is raised a level; an error,
+  a refusal and a hang-up each hold the action; each call is charged at the provider's price; a spent budget
+  holds without a call; the stand-in got the key in the right header and a search of the data directory,
+  both logs and every reply finds it nowhere. With none connected a read goes through, a write is held, and
+  no driver starts. Settings has a Decision model part, tested against a real daemon. `oneoff.rs` is
+  deleted.
+  - **Not run:** any real call to a provider (three ignored tests, `X100_REAL_DECISIONS=1`), so each
+    adapter's request shape is unconfirmed, Gemini's most of all. `cargo-deny` locally. The 20 second
+    timeout and the retries end to end.
+  - **Flake seen once by the subagent, not by the orchestrator:** `x100-app/tests/window.rs`
+    `the_first_message_creates_the_project...` at line 254 under load.
+  - Also fixed here: `program_paths` compared a resolved path with an unresolved one, which failed on macOS.
+
 ## In progress
 
-M12D, decision models for the classifier. Opus subagent. Then M12I, integrations with Homebox and GitHub.
+M12I, integrations with Homebox and GitHub. Opus subagent.
 
 Queued, in this order:
 
@@ -258,8 +273,7 @@ invent any role with a charter, and team changes need the builder's agreement.
 
 - **2026-11-12. The gate's classifier is a decision model**: Gemini Decision 1, OpenAI's Decisions API or
   TypeSafe AI's Jev, not a language model run in a harness. Research in `docs/DECISION_MODELS.md`, design in
-  ARCHITECTURE's Gate section, milestone M12D in the plan. Until it is built the classifier still starts a
-  harness.
+  ARCHITECTURE's Gate section, milestone M12D in the plan.
 - **2026-11-12. Trials are a toggle, off by default.** After Anthropic's post on agent memory, reflection
   commits its changes directly unless the project's "trial before commit" setting is on. Corrections of notes
   against the log are never put on trial. This changed the decided line in ARCHITECTURE's "Evals, trials and

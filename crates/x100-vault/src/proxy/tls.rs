@@ -171,6 +171,23 @@ pub enum UpstreamTrust {
     Only(Vec<CertificateDer<'static>>),
 }
 
+impl UpstreamTrust {
+    /// Only the certificates in a PEM file, for a test's daemon talking to its own servers.
+    pub fn from_pem_file(path: &Path) -> Result<UpstreamTrust, VaultError> {
+        use rustls::pki_types::pem::PemObject;
+        let certs = CertificateDer::pem_file_iter(path)
+            .and_then(|certs| certs.collect::<Result<Vec<_>, _>>())
+            .map_err(|e| VaultError::Certificate(format!("{}: {e}", path.display())))?;
+        if certs.is_empty() {
+            return Err(VaultError::Certificate(format!(
+                "{} holds no certificate",
+                path.display()
+            )));
+        }
+        Ok(UpstreamTrust::Only(certs))
+    }
+}
+
 pub(crate) fn client_config(trust: &UpstreamTrust) -> Result<Arc<ClientConfig>, VaultError> {
     let mut roots = RootCertStore::empty();
     match trust {

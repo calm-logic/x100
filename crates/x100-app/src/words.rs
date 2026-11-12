@@ -2,6 +2,7 @@
 
 use x100_core::action::{AskMeAbout, Risk};
 use x100_core::agent::{AgentState, Waiting};
+use x100_core::decision::DecisionProvider;
 use x100_core::driver::{ContextFill, DriverState};
 use x100_core::effort::Effort;
 use x100_core::fold::DaemonState;
@@ -28,6 +29,14 @@ pub fn harness(daemon: &DaemonState, id: HarnessId) -> String {
         Some(HarnessKind::CodexTerminal) => "Codex, terminal".into(),
         Some(HarnessKind::Custom { name }) => name.clone(),
         None => "Unknown harness".into(),
+    }
+}
+
+pub fn decision_provider(provider: DecisionProvider) -> &'static str {
+    match provider {
+        DecisionProvider::Gemini => "Gemini Decision 1",
+        DecisionProvider::OpenAi => "OpenAI Decisions",
+        DecisionProvider::Jev => "Jev, by TypeSafe AI",
     }
 }
 

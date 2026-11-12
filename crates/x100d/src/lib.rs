@@ -35,8 +35,8 @@ use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 pub use config::{
     CLAUDE_BASE_URL_ENV, CLAUDE_LOGIN_ENV, CODEX_BASE_URL_ENV, CODEX_LOGIN_ENV, Config,
     DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, NO_KEYCHAIN_ENV, PROJECTS_ROOT_ENV,
-    PROXY_RESOLVE_ENV, QUEUE_CAPACITY, SANDBOX_ENV, SANDBOX_HELPER_ENV, SCRIPTS_ENV, SandboxKind,
-    default_data_dir,
+    PROXY_RESOLVE_ENV, PROXY_UPSTREAM_CA_ENV, QUEUE_CAPACITY, SANDBOX_ENV, SANDBOX_HELPER_ENV,
+    SCRIPTS_ENV, SandboxKind, default_data_dir,
 };
 pub use error::Error;
 pub use unavailable::arrives_with;

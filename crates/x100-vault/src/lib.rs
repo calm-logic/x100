@@ -12,6 +12,8 @@
 //! - [`Proxy`]: the only route out of a sandbox. It ends TLS with the vault's [`Authority`],
 //!   swaps references for values in headers, the query and the body when the request's host,
 //!   project and driver allow it, redacts responses, and reports every request.
+//! - [`Proxy::call`]: a request the daemon makes itself, such as the gate's call to a decision
+//!   model, with one named credential's reference swapped in its headers.
 //! - [`Wrapper`]: runs one named command with a value in its environment and redacts its output.
 //! - [`Redactor`]: replaces known values, raw or encoded, with their references.
 //!
@@ -65,8 +67,8 @@ use x100_core::id::CredentialRef;
 
 pub use keychain::{Keychain, NoKeychain, OsKeychain, Unavailable};
 pub use proxy::{
-    Admission, Admit, Authority, EgressOutcome, EgressReport, Proxy, ProxyConfig, Route,
-    UpstreamTrust, sandbox_env,
+    Admission, Admit, Authority, Called, DaemonCall, EgressOutcome, EgressReport, Proxy,
+    ProxyConfig, Resolved, Route, UpstreamTrust, sandbox_env,
 };
 pub use redact::{RedactStream, Redactor};
 pub use scope::Requester;

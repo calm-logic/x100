@@ -4,8 +4,8 @@
 //! held for the builder by the project's "Ask me about" level.
 //!
 //! Tool calls and merges are always settled by the rules, so the desk rules on them under the
-//! project's lock. Egress and commands may need the classifier, a one-off model call, which
-//! [`crate::admit`] makes outside the lock.
+//! project's lock. Egress and commands may need the classifier, a call to a decision model,
+//! which [`crate::admit`] makes outside the lock.
 
 use x100_core::action::{Action, ActionEvent, Request};
 use x100_core::event::ProjectEvent;
@@ -22,7 +22,14 @@ pub(crate) fn rule(state: &ProjectState, action: &Action) -> Ruling {
     let workspace = workspace(state, action.agent);
     match x100_gate::assess(state, action, workspace.as_deref()) {
         Verdict::Ruled(ruling) => ruling,
-        Verdict::Ask(pending) => pending.resolve(None),
+        Verdict::Ask(pending) => {
+            let why = "a tool call or a merge is never put to the decision model".into();
+            let asked = x100_gate::Asked::NoAnswer { call: None, why };
+            pending.resolve(
+                asked,
+                x100_core::money::Percent::new(100).expect("a percentage"),
+            )
+        }
     }
 }
 

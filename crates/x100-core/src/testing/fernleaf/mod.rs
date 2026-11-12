@@ -23,13 +23,14 @@ use super::{LogBuilder, commit, gpt, opus, sonnet};
 use crate::action::{ActionEvent, ActionKind, ClassifiedBy, Decision, Request, Risk};
 use crate::agent::AgentEvent;
 use crate::credential::{CredentialUse, UseOutcome, Via};
+use crate::decision::DecisionProvider;
 use crate::driver::{
     DriverEvent, Failure, Handoff, HandoffCause, InFlight, PlannedReason, RetireReason,
     StartReason, TakeoverCause,
 };
 use crate::effort::{Effort, EffortRange};
 use crate::event::{Envelope, ProjectEvent};
-use crate::harness::{OneOffCall, OneOffPurpose};
+use crate::harness::{ModelName, OneOffCall, OneOffPurpose};
 use crate::id::{
     ActionId, AgentId, CredentialRef, DriverId, FileId, JobId, MessageId, OneOffCallId, TaskId,
     TrialId,
@@ -391,8 +392,8 @@ pub fn fernleaf() -> Fernleaf {
             ProjectEvent::OneOffCalled(OneOffCall {
                 id: call,
                 purpose: OneOffPurpose::Classify { action: email },
-                harness: super::CLAUDE,
-                model: sonnet().model,
+                provider: DecisionProvider::Gemini,
+                model: ModelName("gemini-decision-1".into()),
             }),
         );
         b.push(
@@ -402,11 +403,10 @@ pub fn fernleaf() -> Fernleaf {
                 source: ChargeSource::OneOff { call },
                 usage: Usage {
                     input: 900,
-                    output: 40,
                     ..Usage::default()
                 },
-                cost: Money::from_micros(3_300),
-                basis: CostBasis::Reported,
+                cost: Money::from_micros(90),
+                basis: CostBasis::Listed,
             }),
         );
         let by = ClassifiedBy::Classifier(call);

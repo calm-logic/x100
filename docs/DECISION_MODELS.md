@@ -36,6 +36,12 @@ Details that matter to a client:
   2609.26758) reports that it can follow an option's name over the description bound to it, so name options
   for what they mean.
 
+Where each puts its answers and its token count, as the adapters read them: OpenAI's answers are an array in
+question order with `name`, and usage is `usage.input_tokens`. Gemini's are keyed by question, usage is
+`usage.total_input_tokens`, and a blocked input is `prompt_feedback.block_reason` with no answers. Jev's are
+keyed by name and usage is `usage.input_tokens`. Gemini's request body is inferred from its reference pages;
+no real call has confirmed any of the three.
+
 Not stated by any of them: a latency guarantee, or how `confidence` is computed. Google claims 150 to 250 ms
 end to end; that is the vendor's figure.
 

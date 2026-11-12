@@ -7,7 +7,7 @@ use common::*;
 use proptest::prelude::*;
 use x100_core::action::{ActionKind, AskMeAbout, Classification, ClassifiedBy, Risk};
 use x100_core::id::{ActionId, AgentId, TaskId};
-use x100_gate::{AllowedOnce, Ruling, holds, judge};
+use x100_gate::{AllowedOnce, Asked, Ruling, holds, judge};
 
 fn any_kind() -> impl Strategy<Value = ActionKind> {
     prop::sample::select(vec![
@@ -65,16 +65,21 @@ const HOSTS: &[&str] = &[
 const METHODS: &[&str] = &[
     "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "get", "post",
 ];
-const ANSWERS: &[Option<&str>] = &[
-    None,
-    Some("kind=other risk=low"),
-    Some("kind=other risk=medium"),
-    Some("kind=send_outside risk=high"),
-    Some("kind=spend risk=low"),
-    Some("garbage"),
-    Some(""),
-    Some("kind=other risk=low\nkind=other risk=high"),
-];
+fn answers() -> Vec<Asked> {
+    vec![
+        Asked::NotConnected,
+        no_answer(),
+        Asked::NoAnswer {
+            call: None,
+            why: "the budget is spent".into(),
+        },
+        answered(ActionKind::Other, Risk::Low, 0.95),
+        answered(ActionKind::Other, Risk::Medium, 0.9),
+        answered(ActionKind::SendOutside, Risk::High, 0.99),
+        answered(ActionKind::Spend, Risk::Low, 0.5),
+        answered(ActionKind::Other, Risk::Medium, 0.1),
+    ]
+}
 
 fn any_action() -> impl Strategy<Value = x100_core::action::Action> {
     let (_, f) = fixtures();
@@ -94,17 +99,13 @@ fn any_action() -> impl Strategy<Value = x100_core::action::Action> {
     ]
 }
 
-fn held_at(
-    level: AskMeAbout,
-    action: &x100_core::action::Action,
-    said: Option<&'static str>,
-) -> Ruling {
+fn held_at(level: AskMeAbout, action: &x100_core::action::Action, said: Asked) -> Ruling {
     let (states, _) = fixtures();
     let (_, state) = states
         .iter()
         .find(|(l, _)| *l == level)
         .expect("a state per level");
-    judge(state, action, Some("/work/ws"), &Says(said))
+    judge(state, action, Some("/work/ws"), &Says(said), threshold())
 }
 
 proptest! {
@@ -125,9 +126,9 @@ proptest! {
 
     #[test]
     fn raising_the_level_never_releases_what_a_lower_level_held(
-        action in any_action(), said in prop::sample::select(ANSWERS.to_vec()),
+        action in any_action(), said in prop::sample::select(answers()),
     ) {
-        let held: Vec<bool> = LEVELS.iter().map(|l| held_at(*l, &action, said).is_held()).collect();
+        let held: Vec<bool> = LEVELS.iter().map(|l| held_at(*l, &action, said.clone()).is_held()).collect();
         for lower in 0..LEVELS.len() {
             for higher in lower..LEVELS.len() {
                 prop_assert!(!held[lower] || held[higher], "{:?}: {:?} held but {:?} not", action.request, LEVELS[lower], LEVELS[higher]);
@@ -140,9 +141,20 @@ proptest! {
         level in any_level(), host in prop::sample::select(HOSTS.to_vec()), method in prop::sample::select(METHODS.to_vec()),
     ) {
         let (_, f) = fixtures();
-        let r = held_at(level, &egress(f.backend, host, method), None);
+        let r = held_at(level, &egress(f.backend, host, method), no_answer());
         let c = r.classification();
-        if c.by == ClassifiedBy::Rules && c.risk == Risk::High && c.why.contains("no answer") {
+        if c.by == ClassifiedBy::Classifier(CALL) && c.risk == Risk::High && c.why.contains("no answer") {
+            prop_assert_eq!(r.is_held(), level != AskMeAbout::Nothing);
+        }
+    }
+
+    #[test]
+    fn with_no_decision_model_a_write_no_rule_covers_is_never_allowed_above_nothing(
+        level in any_level(), host in prop::sample::select(HOSTS.to_vec()), method in prop::sample::select(METHODS.to_vec()),
+    ) {
+        let (_, f) = fixtures();
+        let r = held_at(level, &egress(f.backend, host, method), Asked::NotConnected);
+        if r.classification().why.contains("classifier.not_connected.write") {
             prop_assert_eq!(r.is_held(), level != AskMeAbout::Nothing);
         }
     }

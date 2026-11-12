@@ -148,7 +148,8 @@ methods! {
     /// The daemon's state as a one-off read, for a command that does not subscribe.
     GetDaemon, "daemon.get", GetDaemon => x100_core::fold::DaemonState, [];
 
-    /// Changes one of the daemon's settings.
+    /// Changes one of the daemon's settings. Which decision model classifies is changed with
+    /// `decision_model.connect` and `.disconnect` only, and is `rejected` here.
     SetDaemonSetting, "daemon.set_setting", SetDaemonSetting => Done, [Rejected];
 
     /// Moves the clock of a daemon started with `--fake-clock` to `at`, fires every job then due,
@@ -171,8 +172,18 @@ methods! {
     /// Sets the hosts, commands and projects a credential may be used for.
     ScopeCredential, "credentials.set_scope", ScopeCredential => Done, [NotFound];
 
-    /// Removes a credential and its value.
+    /// Removes a credential and its value. Removing the decision model's key disconnects it.
     RemoveCredential, "credentials.remove", RemoveCredential => Done, [NotFound];
+
+    /// Connects a decision model to classify the actions no rule covers. The key goes to the
+    /// vault, scoped to the provider's host alone and to no project, so no agent can use it, and
+    /// is never returned by any method. A decision model already connected is replaced and its
+    /// key removed. A key too short to tell apart in output is `rejected`.
+    ConnectDecisionModel, "decision_model.connect", ConnectDecisionModel => DecisionModelConnected, [Rejected];
+
+    /// Disconnects the decision model and removes its key. With none connected, nothing is
+    /// classified: an unruled read goes through and an unruled write waits for the builder.
+    DisconnectDecisionModel, "decision_model.disconnect", DisconnectDecisionModel => Done, [];
 
     /// Lists projects with the sidebar's line for each.
     ListProjects, "projects.list", ListProjects => ProjectList, [];

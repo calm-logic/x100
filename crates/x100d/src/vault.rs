@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use x100_core::event::DaemonEvent;
 use x100_core::party::Actor;
+use x100_core::settings::DaemonSetting;
 use x100_orch::{EgressEnd, Orchestrator};
 use x100_store::DaemonLog;
 use x100_vault::{
@@ -36,8 +37,12 @@ pub fn open(config: &Config) -> Result<Opened, Error> {
     let vault = Vault::open(&config.data_dir.join("vault"), &*keychain)?;
     let authority = vault.authority()?;
     let certificate = authority.certificate_path().to_path_buf();
+    let upstream = match &config.proxy_upstream_ca {
+        Some(pem) => UpstreamTrust::from_pem_file(pem)?,
+        None => UpstreamTrust::System,
+    };
     let proxy_config = ProxyConfig {
-        upstream: UpstreamTrust::System,
+        upstream,
         resolve: config.proxy_resolve.clone(),
         closed: !config.proxy_resolve.is_empty(),
     };
@@ -53,8 +58,8 @@ pub fn open(config: &Config) -> Result<Opened, Error> {
 /// The log is the record of what credentials exist and where they may go; the vault holds the
 /// values. A change is written to the vault first and then to the log, and undone in the vault if
 /// the log refuses it, so they disagree only after a crash between the two: a value the log never
-/// recorded is removed, a credential whose value is gone is recorded removed, and a scope is set
-/// to the log's. Blocks.
+/// recorded is removed, a credential whose value is gone is recorded removed (and the decision
+/// model disconnected if it was its key), and a scope is set to the log's. Blocks.
 pub fn reconcile(vault: &Vault, log: &DaemonLog) -> Result<(), Error> {
     let logged: Vec<_> =
         log.with_state(|d| d.credentials().map(|r| r.credential.clone()).collect());
@@ -89,6 +94,15 @@ pub fn reconcile(vault: &Vault, log: &DaemonLog) -> Result<(), Error> {
                     credential: c.reference,
                 },
             )?;
+            // The decision model's key is gone with it, so it is not connected.
+            if log.with_state(|d| {
+                d.settings()
+                    .decision_model
+                    .is_some_and(|m| m.credential == c.reference)
+            }) {
+                let none = DaemonSetting::DecisionModel(None);
+                log.append(Actor::Daemon, DaemonEvent::SettingChanged(none))?;
+            }
         }
     }
     Ok(())

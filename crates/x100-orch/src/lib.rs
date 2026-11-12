@@ -20,11 +20,13 @@
 //!
 //! - Every tool call, merge, request out through the proxy and command a permission hook stops
 //!   is an action the gate of `x100-gate` allows or holds for the builder ([`gate`], [`admit`]),
-//!   and the builder's decision is carried out and told to the agent ([`decide`]).
+//!   with the connected decision model asked about what no rule covers ([`classify`]), and the
+//!   builder's decision is carried out and told to the agent ([`decide`]).
 
 mod admit;
 mod branches;
 mod builder;
+mod classify;
 mod ctx;
 mod decide;
 mod desk;
@@ -35,7 +37,6 @@ mod gate;
 mod ids;
 mod jobs;
 mod mcp;
-mod oneoff;
 pub mod pack;
 mod processes;
 mod project;
@@ -159,8 +160,6 @@ pub(crate) struct Shared {
     pub serial: bool,
     /// Approved requests out that a request now going through is using, until its report.
     pub in_flight: Mutex<HashSet<ActionId>>,
-    /// The drivers of one-off calls under way, whose routes reach their provider alone.
-    pub one_offs: Mutex<HashSet<DriverId>>,
 }
 
 impl Shared {
@@ -231,7 +230,6 @@ impl Orchestrator {
                 redactor: config.redactor,
                 serial: config.serial,
                 in_flight: Mutex::new(HashSet::new()),
-                one_offs: Mutex::new(HashSet::new()),
             }),
             projects: Arc::new(Mutex::new(HashMap::new())),
         }

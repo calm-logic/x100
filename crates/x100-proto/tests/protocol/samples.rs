@@ -320,6 +320,16 @@ pub fn samples() -> Vec<Sample> {
             Done {},
         ),
         s(
+            ConnectDecisionModel {
+                provider: x100_core::decision::DecisionProvider::Jev,
+                key: Secret::new("ts_not_a_real_key_0000"),
+            },
+            DecisionModelConnected {
+                credential: reference,
+            },
+        ),
+        s(DisconnectDecisionModel {}, Done {}),
+        s(
             ListProjects {},
             ProjectList {
                 projects: vec![ProjectSummary {

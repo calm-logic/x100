@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::decision::DecisionProvider;
 use crate::effort::Effort;
 use crate::id::{ActionId, HarnessId, MachineId, OneOffCallId, TrialId};
 use crate::money::Price;
@@ -124,12 +125,12 @@ pub enum OneOffPurpose {
     Judge { trial: TrialId },
 }
 
-/// A single turn with no tools, through the cheapest allowed harness and model at Low effort. It is
-/// not a driver and belongs to no agent.
+/// One request to a decision model, made by the daemon over HTTPS with the key's reference. It
+/// is not a driver and belongs to no agent; the acting agent's payer is charged for it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OneOffCall {
     pub id: OneOffCallId,
     pub purpose: OneOffPurpose,
-    pub harness: HarnessId,
+    pub provider: DecisionProvider,
     pub model: ModelName,
 }

@@ -4,6 +4,7 @@ mod agents;
 mod chat;
 mod credentials;
 mod daemon;
+mod decision;
 mod files;
 mod projects;
 
@@ -87,6 +88,8 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ReplaceCredential(p) => out(credentials::replace(hub, p).await),
         Call::ScopeCredential(p) => out(credentials::set_scope(hub, p).await),
         Call::RemoveCredential(p) => out(credentials::remove(hub, p).await),
+        Call::ConnectDecisionModel(p) => out(decision::connect(hub, p).await),
+        Call::DisconnectDecisionModel(p) => out(decision::disconnect(hub, p).await),
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)

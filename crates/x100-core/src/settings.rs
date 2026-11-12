@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::decision::DecisionModel;
 use crate::job::Interval;
 use crate::money::Percent;
 
@@ -53,6 +54,12 @@ pub struct DaemonSettings {
     /// Directories or files a sandbox shows read-only besides the programs the daemon finds on
     /// its search path: a toolchain installed somewhere unusual.
     pub sandbox_programs: Vec<PathBuf>,
+    /// The decision model that classifies actions no rule covers. `None`: nothing is classified,
+    /// so an unruled read goes through and an unruled write waits for the builder.
+    pub decision_model: Option<DecisionModel>,
+    /// A decision model's answer whose confidence is below this share has its risk raised one
+    /// level.
+    pub decision_threshold: Percent,
 }
 
 const fn minutes(n: u64) -> Duration {
@@ -76,6 +83,8 @@ impl Default for DaemonSettings {
             projects_root: None,
             run_without_sandbox: false,
             sandbox_programs: Vec::new(),
+            decision_model: None,
+            decision_threshold: percent(70),
         }
     }
 }
@@ -102,6 +111,8 @@ pub enum DaemonSetting {
     ProjectsRoot(PathBuf),
     RunWithoutSandbox(bool),
     SandboxPrograms(Vec<PathBuf>),
+    DecisionModel(Option<DecisionModel>),
+    DecisionThreshold(Percent),
 }
 
 impl DaemonSettings {
@@ -122,6 +133,8 @@ impl DaemonSettings {
             S::ProjectsRoot(v) => self.projects_root = Some(v),
             S::RunWithoutSandbox(v) => self.run_without_sandbox = v,
             S::SandboxPrograms(v) => self.sandbox_programs = v,
+            S::DecisionModel(v) => self.decision_model = v,
+            S::DecisionThreshold(v) => self.decision_threshold = v,
         }
     }
 }

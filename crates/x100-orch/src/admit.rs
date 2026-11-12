@@ -2,23 +2,22 @@
 //!
 //! Each is an action. An approved one the agent has not used yet lets exactly the same request
 //! through once ("allowed once", rebuilt from the log, so it survives a restart). Otherwise the
-//! rules rule on it, or, for what they do not cover, the classifier through a one-off call made
-//! outside the project's lock, since a model takes its time. Either way the requester is answered
-//! at once: a held action never holds up a driver.
+//! rules rule on it, or, for what they do not cover, the decision model, asked outside the
+//! project's lock since a call takes its time. Either way the requester is answered at once: a
+//! held action never holds up a driver.
 
 use std::sync::Arc;
 
 use x100_core::action::{Action, Request};
 use x100_core::id::{ActionId, AgentId, DriverId};
 use x100_drivers::{Decision, PermissionRequest};
-use x100_gate::{AllowedOnce, Pending, Ruling, Verdict};
+use x100_gate::{AllowedOnce, Asked, Pending, Ruling, Verdict};
 
 use crate::Shared;
 use crate::ctx::ProjectCtx;
-use crate::gate;
 use crate::ids::new_id;
-use crate::oneoff;
 use crate::store::blocking;
+use crate::{classify, gate};
 
 /// The gate's answer to the requester.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +53,17 @@ pub(crate) async fn admit(
         Ok(First::Ask(asked)) => *asked,
         Err(e) => return unrecorded(e),
     };
-    let (answer, mut events) = oneoff::classify(shared, ctx, pending.question()).await;
-    let ruling = pending.resolve(answer);
+    let (asked, mut events) = match action.request {
+        Request::Egress { driver, .. } | Request::Command { driver, .. } => {
+            classify::classify(shared, ctx, pending.question(), driver).await
+        }
+        // The rules settle these; one that ever reached here is held.
+        Request::Tool { .. } | Request::Merge { .. } => {
+            let why = "only requests out and commands are put to the decision model".into();
+            (Asked::NoAnswer { call: None, why }, Vec::new())
+        }
+    };
+    let ruling = pending.resolve(asked, (shared.settings)().decision_threshold);
     events.extend(gate::ruled(action.id, &ruling));
     let admitted = answer_for(&action, &ruling);
     if let Admitted::Go(id) = admitted

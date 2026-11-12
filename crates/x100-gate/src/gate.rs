@@ -6,6 +6,7 @@ use x100_core::action::{
 };
 use x100_core::fold::ProjectState;
 use x100_core::id::TaskId;
+use x100_core::money::Percent;
 use x100_core::party::Party;
 
 use crate::classify::{self, Classifier, Pending, Subject};
@@ -46,9 +47,9 @@ impl Ruling {
 #[derive(Debug)]
 pub enum Verdict {
     Ruled(Ruling),
-    /// No rule covers it. The caller asks the classifier (see [`Pending::question`]) and finishes
-    /// with [`Pending::resolve`]. If it cannot wait for an answer it resolves with `None`, which
-    /// holds the action.
+    /// No rule covers it. The caller asks the decision model (see [`Pending::question`]) and
+    /// finishes with [`Pending::resolve`]. If it cannot wait for an answer it resolves with
+    /// [`crate::Asked::NoAnswer`], which holds the action.
     Ask(Pending),
 }
 
@@ -87,19 +88,20 @@ pub fn assess(state: &ProjectState, action: &Action, workspace: Option<&str>) ->
     }
 }
 
-/// [`assess`], then the classifier's answer if one is needed. A classifier that gives no answer
-/// holds the action.
+/// [`assess`], then the classifier's answer if one is needed, raised a level when its confidence
+/// is under `threshold`. A classifier that gives no answer holds the action.
 pub fn judge(
     state: &ProjectState,
     action: &Action,
     workspace: Option<&str>,
     classifier: &dyn Classifier,
+    threshold: Percent,
 ) -> Ruling {
     match assess(state, action, workspace) {
         Verdict::Ruled(ruling) => ruling,
         Verdict::Ask(pending) => {
-            let answer = classifier.classify(pending.question());
-            pending.resolve(answer)
+            let asked = classifier.classify(pending.question());
+            pending.resolve(asked, threshold)
         }
     }
 }

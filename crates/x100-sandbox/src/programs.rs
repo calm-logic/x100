@@ -15,7 +15,9 @@ pub fn program_paths(program: &Path) -> Vec<PathBuf> {
     };
     if let Some(root) = bin.parent()
         && bin.file_name().is_some_and(|n| n == "bin")
-        && (real_dir == bin || real.starts_with(root.join("lib")))
+        // Compared resolved, since the search path itself may run through a link (macOS's /var).
+        && let Ok(real_root) = root.canonicalize()
+        && (real_dir == real_root.join("bin") || real.starts_with(real_root.join("lib")))
     {
         return vec![root.to_path_buf()];
     }

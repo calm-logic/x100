@@ -3,16 +3,17 @@
 
 use x100_core::action::Decision;
 use x100_core::credential::CredentialScope;
+use x100_core::decision::DecisionProvider;
 use x100_core::effort::EffortRange;
 use x100_core::event::{Envelope, ProjectEvent, Seq};
 use x100_core::id::{ActionId, AgentId, CredentialRef, DriverId, FileId, ProjectId, TaskId};
 use x100_core::money::Money;
 use x100_core::project::SettingChange;
 use x100_proto::{
-    AddCredential, ChangeProjectSetting, DecideAction, ListMemories, ListSkills, ListTrials, LogId,
-    LogPage, Memories, Page, RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject,
-    ReplaceCredential, ResizeTerminal, ScopeCredential, Secret, SetEffortRange, SetLeadBudget,
-    Skills, Trials,
+    AddCredential, ChangeProjectSetting, ConnectDecisionModel, DecideAction,
+    DisconnectDecisionModel, ListMemories, ListSkills, ListTrials, LogId, LogPage, Memories, Page,
+    RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject, ReplaceCredential,
+    ResizeTerminal, ScopeCredential, Secret, SetEffortRange, SetLeadBudget, Skills, Trials,
 };
 
 use crate::{Client, ClientError};
@@ -216,6 +217,27 @@ impl Client {
 
     pub async fn remove_credential(&self, credential: CredentialRef) -> Result<(), ClientError> {
         self.request(RemoveCredential { credential }).await?;
+        Ok(())
+    }
+
+    /// Connects a decision model to classify. The key goes to the daemon's vault and is not held
+    /// here.
+    pub async fn connect_decision_model(
+        &self,
+        provider: DecisionProvider,
+        key: impl Into<String>,
+    ) -> Result<CredentialRef, ClientError> {
+        let connected = self
+            .request(ConnectDecisionModel {
+                provider,
+                key: Secret::new(key),
+            })
+            .await?;
+        Ok(connected.credential)
+    }
+
+    pub async fn disconnect_decision_model(&self) -> Result<(), ClientError> {
+        self.request(DisconnectDecisionModel {}).await?;
         Ok(())
     }
 

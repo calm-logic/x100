@@ -16,7 +16,7 @@ use x100_core::project::{SettingChange, Settings};
 use x100_core::testing::{Fernleaf, START, fernleaf, gpt, opus, sonnet};
 use x100_core::time::Timestamp;
 use x100_core::tool::ToolCall;
-use x100_gate::{Answer, Classifier, Question, Ruling, Verdict, assess, judge};
+use x100_gate::{Asked, Classifier, Labels, Question, Ruling, Verdict, assess, judge};
 
 pub const LEVELS: [AskMeAbout; 4] = [
     AskMeAbout::Nothing,
@@ -152,16 +152,39 @@ pub fn decide(state: &mut ProjectState, action: &Action, decision: Decision) {
     }
 }
 
+/// The daemon's default confidence threshold.
+pub fn threshold() -> Percent {
+    Percent::new(70).unwrap()
+}
+
+/// The call every answer of [`Says`] names.
+pub const CALL: OneOffCallId = OneOffCallId::from_u128(5);
+
+pub fn answered(kind: ActionKind, risk: Risk, confidence: f64) -> Asked {
+    Asked::Answered {
+        call: CALL,
+        labels: Labels {
+            kind,
+            risk,
+            confidence,
+        },
+    }
+}
+
+pub fn no_answer() -> Asked {
+    Asked::NoAnswer {
+        call: Some(CALL),
+        why: "Jev answered 529".into(),
+    }
+}
+
 /// A classifier with a fixed reply, which remembers nothing.
-pub struct Says(pub Option<&'static str>);
+pub struct Says(pub Asked);
 
 impl Classifier for Says {
-    fn classify(&self, question: &Question) -> Option<Answer> {
-        assert!(question.prompt.contains("BEGIN DATA"));
-        self.0.map(|text| Answer {
-            call: OneOffCallId::from_u128(5),
-            text: text.into(),
-        })
+    fn classify(&self, question: &Question) -> Asked {
+        assert!(question.input.starts_with("UNTRUSTED."));
+        self.0.clone()
     }
 }
 
@@ -169,13 +192,13 @@ impl Classifier for Says {
 pub struct Silent;
 
 impl Classifier for Silent {
-    fn classify(&self, _: &Question) -> Option<Answer> {
-        panic!("the rules cover this action; no model call is wanted");
+    fn classify(&self, _: &Question) -> Asked {
+        panic!("the rules cover this action; no call is wanted");
     }
 }
 
 pub fn ruling(state: &ProjectState, action: &Action) -> Ruling {
-    judge(state, action, Some("/work/ws"), &Silent)
+    judge(state, action, Some("/work/ws"), &Silent, threshold())
 }
 
 /// The rule id a classification names in its `why`, if a rule decided it.

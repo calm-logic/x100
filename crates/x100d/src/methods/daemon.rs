@@ -150,6 +150,10 @@ fn invalid(setting: &DaemonSetting) -> Option<&'static str> {
         DaemonSetting::SandboxPrograms(paths) if paths.iter().any(|p| !p.is_absolute()) => {
             Some("a program's path must be absolute")
         }
+        // Its key goes into the vault with it, scoped to its host, so it has methods of its own.
+        DaemonSetting::DecisionModel(_) => Some(
+            "connect or disconnect a decision model with decision_model.connect or .disconnect",
+        ),
         _ => None,
     }
 }

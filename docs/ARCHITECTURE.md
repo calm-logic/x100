@@ -209,10 +209,10 @@ setup is loaded, and the harness's own updating, sandboxing and automatic compac
 Protocol as a third harness after v1, since it would bring in every agent that speaks it.
 
 **proposed** Two parts of the daemon need a model's answer without an agent: the gate's classifier and the
-lab's judge. Each makes a **one-off call**: a single turn with no tools, through the cheapest allowed harness
-and model at Low effort. A one-off call is not a driver and belongs to no agent. It is an event and a charge:
-the classifier's to the acting agent's lead or the project, the judge's to the lab line. Tests script both
-through the fake harness.
+lab's judge. Neither runs in a harness. Each is a **one-off call** to a decision model (see "Gate"), made by
+the daemon. It is not a driver and belongs to no agent. It is an event and a charge: the classifier's to the
+acting agent's lead or the project, the judge's to the lab line. The judge asks a score question; M14 builds
+it.
 
 **decided (owner, 2026-11-12)** x100 runs the builder's local agents on their own subscriptions, the way Orca,
 herdr and T3 Code do. Such a driver is the harness's own terminal interface, run in a terminal of its own, and
@@ -618,7 +618,12 @@ Decision 1, OpenAI's Decisions API, or TypeSafe AI's Jev. `docs/DECISION_MODELS.
 - **Cost.** Input tokens at the provider's price, charged to the acting agent's payer and checked against
   the budget.
 
-The one-off call through a harness is deleted with this. It started a whole terminal program for one label.
+- **As built.** The key's credential is scoped to the provider's host and to no project, so no driver can
+  use it. The call goes in process through the proxy, which swaps the reference in the headers only. 429 and
+  5xx are retried twice. Gemini's blocked input counts as a refusal. Removing the key disconnects the model.
+  `decision_model.connect` and `decision_model.disconnect` are the protocol's methods.
+
+The one-off call through a harness is deleted. It started a whole terminal program for one label.
 
 ## Memory, skills and reflection
 

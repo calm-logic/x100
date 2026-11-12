@@ -1,7 +1,8 @@
-//! Methods about the daemon, its machines, harnesses and credentials.
+//! Methods about the daemon, its machines, harnesses, credentials and decision model.
 
 use serde::{Deserialize, Serialize};
 use x100_core::credential::CredentialScope;
+use x100_core::decision::DecisionProvider;
 use x100_core::id::{CredentialRef, HarnessId, MachineId};
 use x100_core::settings::DaemonSetting;
 use x100_core::time::Timestamp;
@@ -86,3 +87,21 @@ pub struct ScopeCredential {
 pub struct RemoveCredential {
     pub credential: CredentialRef,
 }
+
+/// Connects a decision model to classify: its key goes into the vault, scoped to the provider's
+/// host and to no project, and the daemon's setting names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectDecisionModel {
+    pub provider: DecisionProvider,
+    #[serde(with = "secret::wire")]
+    pub key: Secret,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionModelConnected {
+    /// The credential that holds the key.
+    pub credential: CredentialRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisconnectDecisionModel {}

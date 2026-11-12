@@ -50,6 +50,17 @@ pub(crate) fn check(
     }
 }
 
+/// Whether the daemon may send `credential` to `host` in a request it makes itself. Only the
+/// host list binds it: such a request is no project's and no driver's, and a credential the
+/// daemon keeps for itself is given no project, so that no driver can use it.
+pub(crate) fn check_daemon(credential: &Credential, host: &str) -> Result<(), Refusal> {
+    if credential.scope.hosts.iter().any(|h| host_matches(h, host)) {
+        Ok(())
+    } else {
+        Err(Refusal::HostNotAllowed)
+    }
+}
+
 /// Hosts match exactly, ignoring case and a trailing dot. There are no wildcards: a credential
 /// names every host it may reach.
 fn host_matches(allowed: &str, host: &str) -> bool {
@@ -125,6 +136,21 @@ mod tests {
         );
         let mine = credential(Projects::Only(BTreeSet::from([ProjectId::from_u128(7)])));
         assert_eq!(check(&mine, &work, &proxy("api.homebox.test")), Ok(()));
+    }
+
+    #[test]
+    fn the_daemon_is_bound_by_the_hosts_alone() {
+        let none = credential(Projects::Only(BTreeSet::new()));
+        assert_eq!(check_daemon(&none, "API.homebox.test."), Ok(()));
+        assert_eq!(
+            check_daemon(&none, "evil.test"),
+            Err(Refusal::HostNotAllowed)
+        );
+        assert_eq!(
+            check(&none, &requester(Purpose::Work), &proxy("api.homebox.test")),
+            Err(Refusal::ProjectNotAllowed),
+            "a credential with no project reaches no driver"
+        );
     }
 
     #[test]

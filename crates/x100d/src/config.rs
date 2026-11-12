@@ -33,8 +33,13 @@ pub const SANDBOX_HELPER_ENV: &str = "X100_SANDBOX_HELPER";
 /// Any value: the vault keeps its key in a file and never asks the OS keychain. For tests.
 pub const NO_KEYCHAIN_ENV: &str = "X100_NO_KEYCHAIN";
 /// `host=address,...`: the proxy sends each host to the address given and refuses every other
-/// host. For tests, so nothing a driver tries leaves the machine.
+/// host. For tests, so nothing a driver tries leaves the machine. An address may name a port,
+/// `host=127.0.0.1:8443`, which is used instead of the one asked for: the daemon's own calls to a
+/// decision model ask for 443.
 pub const PROXY_RESOLVE_ENV: &str = "X100_PROXY_RESOLVE";
+/// A PEM file of the only authorities the proxy trusts upstream, instead of the system's. Taken
+/// only with `X100_PROXY_RESOLVE`, so it can only point the proxy at a test's own servers.
+pub const PROXY_UPSTREAM_CA_ENV: &str = "X100_PROXY_UPSTREAM_CA";
 
 /// What makes the sandboxes drivers run in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +105,9 @@ pub struct Config {
     pub no_keychain: bool,
     /// Hosts the proxy sends to a fixed address, refusing every other. Empty: the proxy looks
     /// hosts up and refuses none but the host's loopback.
-    pub proxy_resolve: std::collections::HashMap<String, std::net::IpAddr>,
+    pub proxy_resolve: std::collections::HashMap<String, x100_vault::Resolved>,
+    /// The authorities the proxy trusts upstream instead of the system's, with `proxy_resolve`.
+    pub proxy_upstream_ca: Option<PathBuf>,
 }
 
 impl Config {
@@ -124,6 +131,7 @@ impl Config {
             sandbox_helper: None,
             no_keychain: false,
             proxy_resolve: std::collections::HashMap::new(),
+            proxy_upstream_ca: None,
         }
     }
 
@@ -202,6 +210,14 @@ impl Config {
         if let Some(pairs) = text(PROXY_RESOLVE_ENV) {
             config.proxy_resolve = resolve(&pairs)?;
         }
+        if let Some(ca) = env(PROXY_UPSTREAM_CA_ENV) {
+            if config.proxy_resolve.is_empty() {
+                return Err(format!(
+                    "{PROXY_UPSTREAM_CA_ENV} is taken only with {PROXY_RESOLVE_ENV}"
+                ));
+            }
+            config.proxy_upstream_ca = Some(PathBuf::from(ca));
+        }
         if let Some(start) = clock {
             // A real harness bills real time, so only scripted ones run on a fake clock.
             if config.scripts_dir.is_none() {
@@ -221,20 +237,27 @@ impl Config {
     }
 }
 
-/// `host=address,host=address`.
-fn resolve(pairs: &str) -> Result<std::collections::HashMap<String, std::net::IpAddr>, String> {
+/// `host=address,host=address:port`.
+fn resolve(pairs: &str) -> Result<std::collections::HashMap<String, x100_vault::Resolved>, String> {
     pairs
         .split(',')
         .filter(|p| !p.trim().is_empty())
         .map(|p| {
-            let (host, ip) = p
+            let (host, at) = p
                 .split_once('=')
                 .ok_or_else(|| format!("{PROXY_RESOLVE_ENV}: {p:?} is not host=address"))?;
-            let ip = ip
-                .trim()
-                .parse()
-                .map_err(|_| format!("{PROXY_RESOLVE_ENV}: {ip:?} is not an address"))?;
-            Ok((host.trim().to_ascii_lowercase(), ip))
+            let at = at.trim();
+            let resolved = match at.parse::<std::net::SocketAddr>() {
+                Ok(socket) => x100_vault::Resolved {
+                    ip: socket.ip(),
+                    port: Some(socket.port()),
+                },
+                Err(_) => at
+                    .parse::<std::net::IpAddr>()
+                    .map(x100_vault::Resolved::from)
+                    .map_err(|_| format!("{PROXY_RESOLVE_ENV}: {at:?} is not an address"))?,
+            };
+            Ok((host.trim().to_ascii_lowercase(), resolved))
         })
         .collect()
 }
@@ -371,6 +394,20 @@ mod tests {
         assert!(c.no_keychain);
         assert_eq!(c.proxy_resolve.len(), 2);
         assert!(c.proxy_resolve.contains_key("a.test"));
+        assert_eq!(c.proxy_resolve["b.test"].port, None);
+        // A port, for a daemon's own call to a server a test runs; and the test's authority with it.
+        let env = |k: &str| match k {
+            PROXY_RESOLVE_ENV => Some(OsString::from("a.test=127.0.0.1:8443,b.test=[::1]:9")),
+            PROXY_UPSTREAM_CA_ENV => Some(OsString::from("/t/ca.pem")),
+            _ => None,
+        };
+        let c = Config::from_args(["--data-dir".into(), "/d".into()], env).unwrap();
+        assert_eq!(c.proxy_resolve["a.test"].port, Some(8443));
+        assert_eq!(c.proxy_resolve["b.test"].port, Some(9));
+        assert_eq!(c.proxy_upstream_ca, Some(PathBuf::from("/t/ca.pem")));
+        // Never alone: it could otherwise make the daemon trust anything for the real hosts.
+        let alone = |k: &str| (k == PROXY_UPSTREAM_CA_ENV).then(|| OsString::from("/t/ca.pem"));
+        assert!(Config::from_args(["--data-dir".into(), "/d".into()], alone).is_err());
         let args = ["--data-dir", "/d", "--sandbox", "chroot"];
         assert!(Config::from_args(args.map(OsString::from), no_env).is_err());
     }

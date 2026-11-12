@@ -284,7 +284,7 @@ fn the_budget_tab_shows_spend_against_each_budget() {
     let (f, s) = scenario();
     let b = s.budget().unwrap();
     assert_eq!(b.project.budget, Money::from_dollars(50));
-    assert_eq!(b.project.spent, dollars(7_688_300));
+    assert_eq!(b.project.spent, dollars(7_685_090));
     assert!(!b.project.stopped);
 
     // Lab runs: twelve runs at three cents, against a tenth of the total.
@@ -300,7 +300,7 @@ fn the_budget_tab_shows_spend_against_each_budget() {
     assert_eq!(product.spent, dollars(350_000));
     // Marketing's turns and the classifier call for its email.
     let marketing = b.leads[&f.marketing];
-    assert_eq!(marketing.spent, dollars(5_003_300));
+    assert_eq!(marketing.spent, dollars(5_000_090));
     assert!(marketing.stopped);
 
     assert_eq!(b.agents[&f.ceo].cost, dollars(740_000));

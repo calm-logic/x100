@@ -13,6 +13,7 @@
 //! provider is not put to it: x100 chose that host, not the agent.
 
 mod body;
+mod call;
 mod forward;
 pub(crate) mod tls;
 
@@ -32,14 +33,30 @@ use x100_core::id::{ActionId, CredentialRef};
 
 use crate::scope::Requester;
 use crate::{Vault, VaultError};
+pub use call::{Called, DaemonCall};
 pub use tls::{Authority, UpstreamTrust};
+
+/// Where a host in [`ProxyConfig::resolve`] is sent instead of being looked up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resolved {
+    pub ip: IpAddr,
+    /// The port to connect to instead of the one asked for. A request the daemon makes itself
+    /// always asks for 443, which a test's server on loopback cannot listen on.
+    pub port: Option<u16>,
+}
+
+impl From<IpAddr> for Resolved {
+    fn from(ip: IpAddr) -> Self {
+        Self { ip, port: None }
+    }
+}
 
 pub struct ProxyConfig {
     /// Which authorities the real upstream's certificate must chain to.
     pub upstream: UpstreamTrust,
     /// Hosts sent to a fixed address instead of being looked up, as curl's `--resolve` does.
-    /// For tests: the port stays the one asked for.
-    pub resolve: HashMap<String, IpAddr>,
+    /// For tests.
+    pub resolve: HashMap<String, Resolved>,
     /// Only the hosts in `resolve` are reached; every other is refused. For tests, so that
     /// nothing a program tries leaves the machine.
     pub closed: bool,
@@ -137,7 +154,7 @@ pub(crate) struct Shared {
     vault: Vault,
     authority: Authority,
     client: Arc<rustls::ClientConfig>,
-    resolve: HashMap<String, IpAddr>,
+    resolve: HashMap<String, Resolved>,
     closed: bool,
     refused: RwLock<BTreeSet<String>>,
     reports: mpsc::UnboundedSender<EgressReport>,
@@ -162,6 +179,16 @@ impl Shared {
                 .parse::<IpAddr>()
                 .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified());
         self.closed || loopback || self.refused.read().expect("refused hosts").contains(&host)
+    }
+
+    /// A connection to `host`, at the address `resolve` gives it if it gives one.
+    async fn tcp(&self, host: &str, port: u16) -> Result<tokio::net::TcpStream, String> {
+        use tokio::net::TcpStream;
+        match self.resolve.get(&host.to_ascii_lowercase()) {
+            Some(r) => TcpStream::connect((r.ip, r.port.unwrap_or(port))).await,
+            None => TcpStream::connect((host, port)).await,
+        }
+        .map_err(|e| format!("connecting to {host}:{port}: {e}"))
     }
 }
 
