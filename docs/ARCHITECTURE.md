@@ -583,7 +583,7 @@ output, including encoded forms. Its limits:
 
 **proposed** Two stages. Rules first: a table from action kind and target to a risk level (delete data, deploy
 to production, spend, send to people outside, change credentials, force-push). Then, for actions the rules do
-not cover, a small model classifies, through a one-off call. The builder's "Ask me about" level is compared with the result. Held
+not cover, a decision model classifies (below). The builder's "Ask me about" level is compared with the result. Held
 actions are events; the app shows them; approval or denial is an event the orchestrator resumes on.
 
 **proposed** A held action does not hold up a driver. The agent is told the action is held and can wait on the
@@ -597,9 +597,28 @@ it failed, or that the same request may be sent once more.
 proxy, which asks before anything leaves. A held request gets a 403 naming the action, and on Approve the
 agent's identical retry goes through once. Grants are rebuilt from the log, so they survive a restart. A call
 the tools would refuse anyway is refused before any hold. A driver's traffic to its own provider and hosts
-the proxy refuses are recorded and not judged. Commands inside a sandbox are not gated. The classifier's
-one-off call runs in the acting agent's sandbox on a route that reaches only its provider, and is charged to
-that agent's payer. A new kind of action is one row in the table in `x100-gate/src/rule.rs`.
+the proxy refuses are recorded and not judged. Commands inside a sandbox are not gated. The classifier's call is made by the daemon and charged to the acting agent's payer. A new kind of action is one row in the table in `x100-gate/src/rule.rs`.
+
+**decided (owner, 2026-11-12)** The classifier is a decision model, not a language model in a harness: Gemini
+Decision 1, OpenAI's Decisions API, or TypeSafe AI's Jev. `docs/DECISION_MODELS.md` has what each needs.
+
+**proposed** How that works:
+
+- **Connecting.** Each takes an API key only, so the builder connects one in Settings by pasting a key, which
+  goes into the vault scoped to that provider's host. Which one classifies is a daemon setting. One trait in
+  `x100-gate`, one adapter per provider.
+- **The call.** The daemon makes it, through the vault's proxy with the credential's reference, so no code
+  outside the vault handles the value. One request asks two choice questions about the action: its kind,
+  with a catch-all option, and its risk (low, medium, high). The input is the action as the gate sees it,
+  marked as untrusted.
+- **The answer.** The risk is never below the rule table's floor. Below a confidence threshold, 0.7 by
+  default, the risk is raised one level. No answer, an error or a refusal holds the action.
+- **No decision model connected.** Nothing is classified. An unruled read goes through at its floor, and an
+  unruled write is held. Settings says a decision model is not connected.
+- **Cost.** Input tokens at the provider's price, charged to the acting agent's payer and checked against
+  the budget.
+
+The one-off call through a harness is deleted with this. It started a whole terminal program for one label.
 
 ## Memory, skills and reflection
 

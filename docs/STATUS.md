@@ -217,7 +217,8 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-M12I, integrations with Homebox and GitHub. Opus subagent.
+A fix so the tests pass on a machine that cannot make a sandbox (macOS CI). Sonnet subagent.
+Then M12D, decision models for the classifier, then M12I, integrations with Homebox and GitHub.
 
 Queued, in this order:
 
@@ -256,6 +257,10 @@ invent any role with a charter, and team changes need the builder's agreement.
 
 ## Owner's decisions during the build
 
+- **2026-11-12. The gate's classifier is a decision model**: Gemini Decision 1, OpenAI's Decisions API or
+  TypeSafe AI's Jev, not a language model run in a harness. Research in `docs/DECISION_MODELS.md`, design in
+  ARCHITECTURE's Gate section, milestone M12D in the plan. Until it is built the classifier still starts a
+  harness.
 - **2026-11-12. Trials are a toggle, off by default.** After Anthropic's post on agent memory, reflection
   commits its changes directly unless the project's "trial before commit" setting is on. Corrections of notes
   against the log are never put on trial. This changed the decided line in ARCHITECTURE's "Evals, trials and

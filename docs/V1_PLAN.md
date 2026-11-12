@@ -283,6 +283,18 @@ is held; at "Every decision" both are. An Approve that arrives after the agent's
 the new driver. A file edit inside a sandbox is never an action, so the check's file edit is `write_spec` and
 its deploy is a write to a hosting service's API.
 
+### M12D. Decision models for the classifier
+
+The gate's classifier calls a decision model: Gemini Decision 1, OpenAI's Decisions API or TypeSafe AI's Jev,
+one adapter each behind one trait. The builder connects one with an API key in Settings. The one-off call
+through a harness is deleted.
+
+Check, with a stand-in server for each of the three APIs: an unruled write is classified by the connected
+model and held or allowed by its answer; an answer under the confidence threshold is raised a level; an
+error, a refusal and no answer each hold the action; the call is charged; the key is in no event, transcript
+or reply. With no decision model connected, an unruled read goes through, an unruled write is held, and no
+harness is started. When asked to, one real call to each provider the builder has a key for.
+
 ### M12I. Integrations, with Homebox first
 
 Integrations as a part of x100 the builder connects once and projects then use: a list of supported
