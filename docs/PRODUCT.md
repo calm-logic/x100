@@ -47,6 +47,8 @@ Every client shows the same projects, chat and tabs, because each is a view onto
 | Lab | The CEO's private space for running trials. Nothing in it touches the project. |
 | Memory | A note an agent keeps between tasks. |
 
+Agents are "it". No agent is "he" or "she", in the product, the documents or the marketing page.
+
 ## Rules of the organisation
 
 These are the product's behaviour, not suggestions.
@@ -276,6 +278,5 @@ Product decisions only the owner can make. Technical decisions are in `ARCHITECT
 2. **What reflection may change without asking.** Recommended for v1: memories and skills freely, team shape
    only with the builder's agreement.
 3. **Sharing skills across projects.** What is shared, and who approves it.
-4. **Who the CEO is.** "He" in the film captions, "it" elsewhere on the page. Pick one.
-5. **Name of the category.** The page title and FAQ still say "Agency Management Environment". The first section
+4. **Name of the category.** The page title and FAQ still say "Agency Management Environment". The first section
    says "agentic management environment". Pick one.
