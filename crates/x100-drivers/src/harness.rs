@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use x100_core::driver::Failure;
+use x100_core::driver::{Failure, View};
 use x100_core::effort::Effort;
 use x100_core::harness::{HarnessKind, ModelName, ModelOffer, Support};
 use x100_core::id::DriverId;
@@ -26,6 +26,11 @@ pub trait Harness: Send + Sync {
     /// Each model with the effort levels it runs at and the listed price of each.
     fn models(&self) -> Vec<ModelOffer>;
     fn supports(&self) -> Support;
+    /// Whether its drivers run in a terminal, which interfaces open to show the driver, or
+    /// headless, where the transcript is all there is.
+    fn view(&self) -> View {
+        View::Headless
+    }
     /// Starts the child process and returns once the harness has said it is ready, so a version it
     /// cannot work with is refused here rather than mid-task.
     async fn start(&self, spec: DriverSpec) -> Result<DriverHandle, StartError>;
@@ -49,9 +54,14 @@ pub struct DriverSpec {
     pub env: Vec<(String, String)>,
     pub stall: StallPolicy,
     pub permissions: Permissions,
-    /// Called with the child's process id as soon as it is spawned, before any handshake, so a
-    /// daemon killed during the handshake has already written the process down.
+    /// Called with each child's process id as soon as it is spawned, before any handshake, so a
+    /// daemon killed during the handshake has already written the process down. A terminal driver
+    /// may call it more than once.
     pub on_spawn: SpawnHook,
+    /// Where the builder's own login for this harness lives: the directory the harness keeps it
+    /// in (`~/.claude`, `~/.codex`). Terminal harnesses run on it; headless ones take a key in
+    /// [`DriverSpec::env`] and ignore it. x100 passes the path on and never opens the login.
+    pub login: Option<PathBuf>,
 }
 
 /// This driver's own address for the daemon's tools over MCP (streamable HTTP), and the token
@@ -189,6 +199,8 @@ pub enum StartError {
     /// The harness started but cannot be used, for example a version too old for x100.
     #[error("refused: {0}")]
     Refused(String),
+    #[error("this harness runs on the builder's own login, and no login directory was given")]
+    NoLogin,
     #[error("the driver failed while starting: {failure:?}; its last stderr: {stderr}")]
     Failed { failure: Failure, stderr: String },
 }

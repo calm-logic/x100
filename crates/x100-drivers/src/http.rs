@@ -1,12 +1,12 @@
-//! Just enough HTTP/1.1 for the fake provider: one request per connection, answered with
-//! `Connection: close`, which both harnesses' clients accept.
+//! Just enough HTTP/1.1 for the fake provider and for harness hooks: one request per connection,
+//! answered with `Connection: close`, which both harnesses' clients accept.
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const MAX_HEAD: usize = 1 << 20;
 
-pub(super) struct Request {
+pub(crate) struct Request {
     pub method: String,
     pub target: String,
     pub headers: Vec<(String, String)>,
@@ -22,7 +22,7 @@ impl Request {
     }
 }
 
-pub(super) async fn read_request(stream: &mut TcpStream) -> std::io::Result<Request> {
+pub(crate) async fn read_request(stream: &mut TcpStream) -> std::io::Result<Request> {
     let mut buf = Vec::new();
     let head_end = loop {
         if let Some(end) = find(&buf, b"\r\n\r\n") {
@@ -110,7 +110,7 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
-pub(super) async fn respond(
+pub(crate) async fn respond(
     stream: &mut TcpStream,
     status: u16,
     content_type: &str,

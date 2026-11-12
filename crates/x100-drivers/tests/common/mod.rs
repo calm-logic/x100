@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod fake;
+pub mod terminal;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -41,6 +42,7 @@ pub fn spec(n: u128, dir: &Path, model: &str, effort: Effort) -> DriverSpec {
         stall: stall_policy(),
         permissions: Permissions::AllowAll,
         on_spawn: SpawnHook::ignore(),
+        login: None,
     }
 }
 

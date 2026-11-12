@@ -83,6 +83,23 @@ pub fn classify_codex(info: &Value, detail: &str) -> Option<ProviderFailure> {
     }
 }
 
+/// How used a subscription's usage window may get before the driver says so.
+pub(crate) const LIMIT_WARNING_PERCENT: f64 = 90.0;
+
+/// A warning that one of a subscription login's usage windows is nearly used up, so the daemon
+/// can move work elsewhere before the harness stops on it.
+pub(crate) fn limit_warning(
+    harness: &str,
+    window: &str,
+    used: f64,
+    resets_at: Option<i64>,
+) -> Option<String> {
+    (used >= LIMIT_WARNING_PERCENT).then(|| {
+        let resets = resets_at.map_or(String::new(), |t| format!("; it resets at {t} (Unix time)"));
+        format!("{harness}: the login's {window} usage window is {used:.0}% used{resets}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -84,6 +84,7 @@ impl ClaudeStream {
                 VERSIONS.check(version).map(|warning| Ready {
                     version: version.to_owned(),
                     warnings: warning.into_iter().collect(),
+                    session: None,
                 })
             } else {
                 Err(format!("initialize failed: {}", response["error"]))

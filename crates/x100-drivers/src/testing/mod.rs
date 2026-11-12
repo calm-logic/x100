@@ -6,8 +6,6 @@
 //! one tool, `ping`, standing in for the daemon's tools, and refuses and records any `CONNECT`, so
 //! a harness pointed at it as its proxy cannot reach anything else.
 
-mod http;
-
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -15,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::{JoinHandle, JoinSet};
+
+use crate::http;
 
 /// Tokens every reply reports: fresh input, cache reads and writes, and output.
 pub const REPLY_INPUT: u64 = 100;
@@ -39,6 +39,9 @@ pub enum Reply {
     },
     /// An HTTP error with the provider's error body.
     Status(u16),
+    /// An OpenAI `compaction` item, which Codex asks for when it compacts on an OpenAI login.
+    /// Its content is opaque to Codex and goes back in the next request.
+    Compaction(String),
 }
 
 /// A model request the provider received.
@@ -268,7 +271,7 @@ fn anthropic_stream(reply: &Reply, model: &Value, n: u64) -> Vec<u8> {
             json!({ "type": "input_json_delta", "partial_json": input.to_string() }),
             "tool_use",
         ),
-        Reply::Text(text) => (
+        Reply::Text(text) | Reply::Compaction(text) => (
             json!({ "type": "text", "text": "" }),
             json!({ "type": "text_delta", "text": text }),
             "end_turn",
@@ -344,6 +347,9 @@ fn openai_stream(reply: &Reply, model: &Value, n: u64) -> Vec<u8> {
         }
         Reply::Tool { name, input } => json!({ "type": "function_call", "id": format!("fc_{n}"),
             "call_id": format!("call_{n}"), "name": name, "arguments": input.to_string(), "status": "completed" }),
+        Reply::Compaction(content) => {
+            json!({ "type": "compaction", "id": format!("cmp_{n}"), "encrypted_content": content })
+        }
         Reply::Freeform { name, input } => {
             json!({ "type": "custom_tool_call", "id": format!("ctc_{n}"),
             "call_id": format!("call_{n}"), "name": name, "input": input, "status": "completed" })

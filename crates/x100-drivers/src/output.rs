@@ -5,6 +5,7 @@ use serde_json::Value;
 use x100_core::driver::{ContextFill, Failure};
 use x100_core::ledger::CostBasis;
 use x100_core::money::{Money, Usage};
+use x100_core::terminal::Chunk;
 
 /// One thing a driver did, in the order it did it. The stream ends after [`DriverOutput::Failed`]
 /// or once the driver is stopped.
@@ -36,6 +37,9 @@ pub enum DriverOutput {
     /// Something the daemon should record and a person may need to act on, such as a harness
     /// version x100 was not tested with.
     Warning(String),
+    /// A piece of the driver's terminal, as it happens: bytes its program wrote or a resize, the
+    /// starting size first. Only drivers whose harness runs in a terminal emit these.
+    Terminal(Chunk),
     /// The driver has failed and its process group has been stopped. Always the last output.
     Failed(Failure),
 }

@@ -29,7 +29,7 @@ use crate::handle::{DriverHandle, InputError};
 use crate::harness::{CommandLine, DriverSpec, Harness, StartError, ToolEndpoint, check_offered};
 use crate::output::{Decision, DriverOutput, PermissionId, PermissionRequest, Spent, TurnEnd};
 use crate::protocol::{Effects, Input, Protocol, Ready};
-use crate::supervisor::{self, DaemonCall, Launch};
+use crate::supervisor::{DaemonCall, Launch};
 
 /// The daemon's tools as the fake harness reaches them. The real harnesses reach the same tools
 /// over MCP at [`DriverSpec::tools`].
@@ -129,18 +129,22 @@ impl Harness for FakeHarness {
             price,
         };
         let launch = Launch {
-            line,
-            env,
-            dir: spec.dir.clone(),
             support: self.supports(),
             stall: spec.stall,
             permissions: spec.permissions,
             clock: Arc::clone(&self.clock),
             daemon_call,
             cleanup: None,
-            on_spawn: spec.on_spawn.clone(),
         };
-        supervisor::launch(launch, Box::new(protocol)).await
+        crate::wire::launch_piped(
+            launch,
+            &line,
+            &env,
+            &spec.dir,
+            &spec.on_spawn,
+            Box::new(protocol),
+        )
+        .await
     }
 }
 
@@ -169,6 +173,7 @@ impl Protocol for FakeProtocol {
                 fx.started = Some(Ok(Ready {
                     version,
                     warnings: Vec::new(),
+                    session: None,
                 }));
                 return;
             }

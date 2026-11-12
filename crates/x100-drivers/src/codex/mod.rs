@@ -8,6 +8,9 @@
 //! is computed here from the model's listed price.
 
 mod rpc;
+mod terminal;
+
+pub use terminal::{CodexTerminal, CodexTerminalConfig};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,7 +26,7 @@ use crate::handle::DriverHandle;
 use crate::harness::{
     CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, StartError, check_offered,
 };
-use crate::supervisor::{self, Launch};
+use crate::supervisor::Launch;
 use crate::version::VersionPolicy;
 
 pub(crate) const VERSIONS: VersionPolicy = VersionPolicy {
@@ -35,7 +38,7 @@ pub(crate) const VERSIONS: VersionPolicy = VersionPolicy {
 };
 
 /// The variable the daemon's tools token is passed in, named in the MCP configuration.
-const TOKEN_VAR: &str = "X100_TOOLS_TOKEN";
+pub(crate) const TOKEN_VAR: &str = "X100_TOOLS_TOKEN";
 
 #[derive(Debug, Clone)]
 pub struct CodexConfig {
@@ -140,34 +143,84 @@ const FEATURES_OFF: &[&str] = &[
     "goals",
 ];
 
+/// Which provider a driver's Codex talks to.
+pub(crate) enum Provider<'a> {
+    /// A provider of x100's own, with the key in an environment variable. Headless drivers.
+    Keyed {
+        base_url: &'a str,
+        key_env: &'a str,
+        retries: u32,
+    },
+    /// OpenAI, on the login in `auth.json`: what a terminal driver runs on. It is a provider of
+    /// x100's own that uses the login, since OpenAI's built-in one cannot have its retries set
+    /// (Codex refuses to override it). With no base URL Codex picks OpenAI's address by the kind
+    /// of login, as for its own provider; a base URL moves it, for tests.
+    Login {
+        base_url: Option<&'a str>,
+        retries: u32,
+    },
+}
+
 /// The approval policy is set on `thread/start`, not here: 0.167.1 refuses `untrusted` in the file
 /// but takes it on the thread.
-fn config_toml(config: &CodexConfig, spec: &DriverSpec) -> String {
+pub(crate) fn config_toml(provider: &Provider, spec: &DriverSpec) -> String {
+    // Keys at the top level come before the first table.
     let mut toml = format!(
         "model = {model}\n\
-         model_provider = \"x100\"\n\
          sandbox_mode = \"danger-full-access\"\n\
          check_for_update_on_startup = false\n\
          project_doc_max_bytes = 0\n\
-         model_auto_compact_token_limit = 1000000000000\n\
-         \n[features]\n",
+         model_auto_compact_token_limit = 1000000000000\n",
         model = toml_str(&spec.model.0),
     );
+    match provider {
+        Provider::Keyed { .. } => toml.push_str("model_provider = \"x100\"\n"),
+        Provider::Login { .. } => toml.push_str(
+            "model_provider = \"x100-login\"\n\
+             cli_auth_credentials_store = \"file\"\n",
+        ),
+    }
+    toml.push_str("\n[features]\n");
     for feature in FEATURES_OFF {
         toml.push_str(&format!("{feature} = false\n"));
     }
+    toml.push_str("\n[analytics]\nenabled = false\n");
+    if let Provider::Keyed {
+        base_url,
+        key_env,
+        retries,
+    } = provider
+    {
+        toml.push_str(&format!(
+            "\n[model_providers.x100]\n\
+             name = \"x100\"\n\
+             base_url = {base_url}\n\
+             env_key = {env_key}\n\
+             wire_api = \"responses\"\n\
+             request_max_retries = {retries}\n\
+             stream_max_retries = {retries}\n",
+            base_url = toml_str(base_url),
+            env_key = toml_str(key_env),
+        ));
+    }
+    if let Provider::Login { base_url, retries } = provider {
+        toml.push_str(
+            "\n[model_providers.x100-login]\n\
+             name = \"OpenAI\"\n\
+             requires_openai_auth = true\n\
+             wire_api = \"responses\"\n",
+        );
+        if let Some(url) = base_url {
+            toml.push_str(&format!("base_url = {}\n", toml_str(url)));
+        }
+        toml.push_str(&format!(
+            "request_max_retries = {retries}\nstream_max_retries = {retries}\n"
+        ));
+    }
+    // Trusted ahead, so neither Codex nor its terminal asks, and neither writes the answer down.
     toml.push_str(&format!(
-        "\n[analytics]\nenabled = false\n\
-         \n[model_providers.x100]\n\
-         name = \"x100\"\n\
-         base_url = {base_url}\n\
-         env_key = {env_key}\n\
-         wire_api = \"responses\"\n\
-         request_max_retries = {retries}\n\
-         stream_max_retries = {retries}\n",
-        base_url = toml_str(&config.base_url),
-        env_key = toml_str(&config.key_env),
-        retries = config.max_retries,
+        "\n[projects.{dir}]\ntrust_level = \"trusted\"\n",
+        dir = toml_str(&spec.dir.display().to_string()),
     ));
     if let Some(tools) = &spec.tools {
         toml.push_str(&format!(
@@ -221,7 +274,12 @@ impl Harness for Codex {
         let driver_dir = self.config.state_dir.join(spec.driver.to_string());
         let home = driver_dir.join("codex-home");
         std::fs::create_dir_all(&home).map_err(StartError::Prepare)?;
-        std::fs::write(home.join("config.toml"), config_toml(&self.config, &spec))
+        let provider = Provider::Keyed {
+            base_url: &self.config.base_url,
+            key_env: &self.config.key_env,
+            retries: self.config.max_retries,
+        };
+        std::fs::write(home.join("config.toml"), config_toml(&provider, &spec))
             .map_err(StartError::Prepare)?;
 
         let mut env: Vec<(String, String)> = self
@@ -243,19 +301,23 @@ impl Harness for Codex {
                 .map(Into::into)
                 .collect(),
         });
-        let protocol = rpc::CodexRpc::new(&spec, price);
+        let protocol = rpc::CodexRpc::new(&spec, price, false);
         let launch = Launch {
-            line,
-            env,
-            dir: spec.dir.clone(),
             support: self.supports(),
             stall: spec.stall,
             permissions: spec.permissions,
             clock: Arc::clone(&self.clock),
             daemon_call: None,
             cleanup: Some(driver_dir),
-            on_spawn: spec.on_spawn.clone(),
         };
-        supervisor::launch(launch, Box::new(protocol)).await
+        crate::wire::launch_piped(
+            launch,
+            &line,
+            &env,
+            &spec.dir,
+            &spec.on_spawn,
+            Box::new(protocol),
+        )
+        .await
     }
 }

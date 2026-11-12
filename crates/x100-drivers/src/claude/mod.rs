@@ -7,6 +7,9 @@
 //! limited by the command line.
 
 mod stream;
+mod terminal;
+
+pub use terminal::{ClaudeTerminal, ClaudeTerminalConfig};
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -24,7 +27,7 @@ use crate::handle::DriverHandle;
 use crate::harness::{
     CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError, check_offered,
 };
-use crate::supervisor::{self, Launch};
+use crate::supervisor::Launch;
 use crate::version::VersionPolicy;
 
 pub(crate) const VERSIONS: VersionPolicy = VersionPolicy {
@@ -256,17 +259,21 @@ impl Harness for ClaudeCode {
         });
         let protocol = stream::ClaudeStream::new(spec.start_pack.clone(), spec.tools.is_some());
         let launch = Launch {
-            line,
-            env,
-            dir: spec.dir.clone(),
             support: self.supports(),
             stall: spec.stall,
             permissions: spec.permissions,
             clock: Arc::clone(&self.clock),
             daemon_call: None,
             cleanup: Some(driver_dir),
-            on_spawn: spec.on_spawn.clone(),
         };
-        supervisor::launch(launch, Box::new(protocol)).await
+        crate::wire::launch_piped(
+            launch,
+            &line,
+            &env,
+            &spec.dir,
+            &spec.on_spawn,
+            Box::new(protocol),
+        )
+        .await
     }
 }

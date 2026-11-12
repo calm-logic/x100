@@ -197,6 +197,17 @@ nothing left running.
 - **OpenAI.** Its app-server page says a local or open-source application using app-server authentication can
   continue to, and that it was never permitted for commercial or hosted services. Heavy automation is unclear.
 
+## Corrected by M3T, which built the terminal drivers
+
+- `SessionStart` never reaches an `http` hook, so readiness comes from `OSC 7501 idle`. The first turn is typed
+  like the rest, not given as an argument.
+- Claude's session file lags the `Stop` hook. The driver re-reads it until the last message appears.
+- The answer to Claude's `OSC 7501` probe must come before the device-attributes answer from the same read.
+- `codex resume` refuses a thread not yet stored, so the driver writes one note into the thread and names it
+  before attaching the terminal. Naming it also stops the extra title request.
+- Codex's terminal fetches an announcement from raw.githubusercontent.com at every start, with no setting.
+- One login is shared by links, as STATUS.md "From M3T" records. Settled on the owner's real logins.
+
 ## Open, and only a real login settles it
 
 - **Sharing one login among many drivers.** Both programs rewrite the login file when the token refreshes. A

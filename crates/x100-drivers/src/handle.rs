@@ -1,8 +1,12 @@
 //! The handle a driver's owner holds: its output stream and its controls.
 
+use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot};
+use x100_core::terminal::TermPos;
 
 use crate::output::{Decision, DriverOutput, PermissionId};
+use crate::terminal::Size;
+use crate::terminal::pty::Terminal;
 
 /// What the harness reported when it started.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,8 +15,12 @@ pub struct DriverInfo {
     pub version: String,
     /// Said once at start, such as a version x100 was not tested with.
     pub warnings: Vec<String>,
-    /// The child's process id, which is also its process group id.
+    /// The first child's process id, which is also its process group id. A terminal driver may
+    /// run more than one process; each is given to [`crate::SpawnHook`] as it starts.
     pub pid: u32,
+    /// The harness's own id for the conversation, where it has one: Claude Code's session, Codex's
+    /// thread.
+    pub session: Option<String>,
 }
 
 /// A running driver. Dropping the handle and every [`DriverControl`] stops it.
@@ -32,6 +40,11 @@ impl DriverHandle {
     /// emitted has been read.
     pub async fn next(&mut self) -> Option<DriverOutput> {
         self.output.recv().await
+    }
+
+    /// What the driver has already emitted, without waiting.
+    pub fn try_next(&mut self) -> Option<DriverOutput> {
+        self.output.try_recv().ok()
     }
 
     /// A clonable control, for giving input while another task reads the output.
@@ -77,6 +90,10 @@ pub(crate) enum Command {
     ),
     Interrupt(oneshot::Sender<Result<(), InputError>>),
     Compact(oneshot::Sender<Result<(), InputError>>),
+    Resize(Size, oneshot::Sender<Result<(), InputError>>),
+    Screen(oneshot::Sender<(TermPos, String)>),
+    /// A terminal started after the driver was ready, and the process in it.
+    Attach(Child, Terminal, oneshot::Sender<()>),
     CheckStall(oneshot::Sender<bool>),
     Stop(oneshot::Sender<()>),
 }
@@ -112,6 +129,29 @@ impl DriverControl {
     /// Compacts the driver's context between turns. Ends with [`DriverOutput::Compacted`].
     pub async fn compact(&self) -> Result<(), InputError> {
         self.ask(Command::Compact).await
+    }
+
+    /// Resizes the driver's terminal. The new size is recorded where the program's output starts
+    /// to follow it.
+    pub async fn resize(&self, size: Size) -> Result<(), InputError> {
+        self.ask(|tx| Command::Resize(size, tx)).await
+    }
+
+    /// The text the driver's terminal shows now, or `None` for a driver without one, with the
+    /// place of the last chunk it reflects. That chunk and every one before it have been emitted
+    /// on the output stream before this returns.
+    pub async fn screen(&self) -> Option<(TermPos, String)> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::Screen(tx)).ok()?;
+        rx.await.ok()
+    }
+
+    pub(crate) async fn attach(&self, child: Child, terminal: Terminal) -> Result<(), InputError> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::Attach(child, terminal, tx))
+            .map_err(|_| InputError::Ended)?;
+        rx.await.map_err(|_| InputError::Ended)
     }
 
     /// Reads the clock now and fails the driver if it has been silent too long. The supervisor

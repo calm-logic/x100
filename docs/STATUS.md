@@ -104,17 +104,42 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   retired and the next start pack carries the agent's recent tasks; a provider failure cools the model off.
   `agents.set_budget`, `agents.set_effort`, `machines.set_cap` and `harnesses.rescan` are real. **Known
   loss on retiring until M13:** what the agent read in handled messages and in accepted workers' reports.
+- **M3T, terminal drivers on local logins.** 53 tests in `x100-drivers`. Against the fake provider, the real
+  `claude` and `codex` programs, each in a pseudo-terminal: a one-file edit, a daemon tool call with the
+  bearer token, a second turn that kept context, an interrupt, compaction, a held command, each provider error
+  as the right failure, and a stop with nothing left running, a background command in its own session
+  included. A recording replays to the live screen, across a resize. Chunks arrive during a turn. Codex runs
+  as its app-server with the real terminal attached. **On the owner's real logins, by the subagent: 4 model
+  turns per harness** (claude-haiku-5-5 and gpt-6-luna, low effort): both started with no login or trust
+  screen, made the edit, and kept context on a second turn. Not yet verified by the orchestrator's own real
+  run: that comes with the end-to-end run. **Not verified:** macOS (the Keychain with a changed home), a token
+  refresh on a real login, the daemon serving the terminal.
+- **M15b, the agent's live view, and M16, the remaining tabs.** Verified together in the main tree.
+- **Whole workspace after M3T, M15b and M16**, the orchestrator's run, twice: 355 tests pass, 0 fail, 5
+  ignored (the real-provider and real-login tests). Build, clippy with warnings denied and fmt clean. No
+  process left. The orchestrator looked at `research-handoff.png` (one continuous log across two drivers with
+  the takeover marked, the drivers it has had, waits, jobs, inbox) and `budget.png`.
+  - M15b: a terminal widget that paints cells itself, replays 46 real recordings cell for cell against a bare
+    emulator, never writes back, and scales down to fit a smaller pane. Output in one view redraws only that
+    view. Opening Migrations three levels down shows its log. Research's view is one output across two drivers.
+    Cancelling a job from the view reaches the daemon. Measured by the subagent: 8% of one core replaying at
+    recorded speed, 22 to 34% at maximum speed, 0.3% idle, under load from other builds.
+  - M16: Specs, Tasks, Files, Budget, Log, Preview link, Infra line, Settings with Credentials, held actions as
+    a strip above the composer, and an agent's memories, skills and trials. Each tab matches the client's state
+    after the Fernleaf script. The Log lays out fewer than 60 rows of 20,000 events. Every event has wording,
+    checked at compile time.
+  - **Rough or unseen:** the held strip, a preview address and the memories view were never seen in a real
+    window, since the script produces none. The log wraps mid-word. Facts truncate. A terminal driver has not
+    been seen inside the app, since the daemon does not serve terminals yet.
 
 ## In progress
 
-- M15b, the agent's live terminal view in the desktop app. Opus subagent, owns `crates/x100-app`.
-- M3T, terminal drivers on local logins. Opus subagent, owns `crates/x100-drivers`.
-- M16, the remaining tabs: reported. Verified and committed together with M15b, since both are in
-  `crates/x100-app`.
-- After M3T: wire the terminal drivers into the orchestrator and daemon (choose them, record their terminal,
-  serve `terminal.read` and `terminal.subscribe`), with the core changes M8 asked for (a login on the harness
-  record, a per-login cap setting, `Incompatible::LoginFull`, a retire reason for a warm driver that no longer
-  fits, a deadline for a wait for a driver, a machine update event).
+- Wiring the terminal drivers into the orchestrator and daemon: register them, pass the login directory,
+  record each driver's terminal, serve `terminal.read` and `terminal.subscribe`, count the cap per login, keep
+  every pid a driver reports. With the core changes M8 and M3T asked for (terminal harness kinds, a login on
+  the harness record, a per-login cap setting, `Incompatible::LoginFull`, a retire reason for a warm driver
+  that no longer fits, a deadline for a wait for a driver, a machine update event). Opus subagent.
+- Then the end-to-end run of the owner's goal: a small real project through the desktop app on local logins.
 
 ## Waiting on the owner
 
@@ -207,6 +232,20 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From M3T:
+
+- **The login is reached without x100 opening it.** Claude Code: the driver's own home has `.claude` as a link
+  to the builder's `~/.claude`, with the builder's settings, hooks, plugins, MCP servers and memory files
+  switched off. It writes there: a session file and a state backup per run, the prompts in `history.jsonl`, and
+  transient entries. Each driver start can push out one of the builder's own five state backups. Codex: a
+  `CODEX_HOME` per driver whose `auth.json` is a link to the builder's, which Codex follows when it rewrites
+  the login. Nothing else of the builder's `~/.codex` is read or changed.
+- **Three outside connections the terminal programs make** that nothing switches off: Claude Code fetches the
+  account profile and refreshes its token, and Codex's terminal fetches an announcement at every start.
+- **A broken commit.** 012610c (M8) picked up a file rename M3T had staged, so `x100-drivers` did not build at
+  that commit. Fixed by the M3T commit. From now on the orchestrator commits with explicit paths only after
+  checking the index is empty.
 
 From M15a:
 

@@ -192,6 +192,7 @@ impl Actor_ {
             env: Vec::new(),
             stall: StallPolicy::from_settings(&(self.shared.settings)()),
             permissions: Permissions::AllowAll,
+            login: None,
             // Written down before the handshake, since a daemon killed during it would otherwise
             // leave a process nobody recorded. A blocking write, but a short one.
             on_spawn: SpawnHook::new({
@@ -420,7 +421,8 @@ impl Actor_ {
                     driver: self.driver,
                 });
             }
-            DriverOutput::Warning(_) | DriverOutput::Failed(_) => {}
+            // Recording a terminal's chunks arrives with the wiring of terminal drivers.
+            DriverOutput::Warning(_) | DriverOutput::Failed(_) | DriverOutput::Terminal(_) => {}
         }
         Ok(())
     }

@@ -9,16 +9,21 @@ use x100_core::ledger::CostBasis;
 use x100_core::money::{Money, Price, Usage};
 
 use super::{VERSIONS, effort_name};
-use crate::failure::classify_codex;
+use crate::failure::{classify_codex, limit_warning};
 use crate::handle::InputError;
 use crate::harness::{DriverSpec, Permissions};
 use crate::output::{Decision, DriverOutput, PermissionId, PermissionRequest, Spent, TurnEnd};
 use crate::protocol::{Effects, Input, Protocol, Ready};
+use crate::terminal::{Reported, Status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Request {
     Initialize,
     ThreadStart,
+    /// Writes the thread's first item, so that it is stored and a terminal can resume it.
+    Materialize,
+    /// Names the thread, so the terminal does not ask the model for a title.
+    Name,
     TurnStart,
     Other,
 }
@@ -36,6 +41,8 @@ pub(crate) struct CodexRpc {
     cwd: String,
     approval: &'static str,
     expects_tools: bool,
+    attached: bool,
+    name: String,
     price: Price,
     next_id: u64,
     requests: HashMap<u64, Request>,
@@ -52,7 +59,12 @@ pub(crate) struct CodexRpc {
     changes: HashMap<String, Value>,
     /// Pending approvals: the id x100 gave each, and the JSON-RPC id to answer.
     approvals: HashMap<String, Value>,
+    /// The subscription usage windows already warned about, so each is said once.
+    limits_warned: Vec<String>,
 }
+
+/// The note that stores an attached thread.
+const ATTACHED_NOTE: &str = "This session is driven by x100. The builder watches it in a terminal.";
 
 fn nothing_spent() -> Spent {
     Spent {
@@ -63,7 +75,9 @@ fn nothing_spent() -> Spent {
 }
 
 impl CodexRpc {
-    pub(crate) fn new(spec: &DriverSpec, price: Price) -> Self {
+    /// `attached` keeps the thread on disk and stored before the driver is ready, so that Codex's
+    /// own terminal can attach to it with `codex resume`.
+    pub(crate) fn new(spec: &DriverSpec, price: Price, attached: bool) -> Self {
         Self {
             start_pack: spec.start_pack.clone(),
             model: spec.model.0.clone(),
@@ -74,6 +88,8 @@ impl CodexRpc {
                 Permissions::AskDaemon => "untrusted",
             },
             expects_tools: spec.tools.is_some(),
+            attached,
+            name: format!("x100 driver {}", spec.driver),
             price,
             next_id: 0,
             requests: HashMap::new(),
@@ -87,6 +103,7 @@ impl CodexRpc {
             last: None,
             changes: HashMap::new(),
             approvals: HashMap::new(),
+            limits_warned: Vec::new(),
         }
     }
 
@@ -130,24 +147,44 @@ impl CodexRpc {
                     "approvalPolicy": self.approval,
                     "sandbox": "danger-full-access",
                     "developerInstructions": self.start_pack,
-                    "ephemeral": true,
+                    "ephemeral": !self.attached,
                 });
                 self.request(Request::ThreadStart, "thread/start", params, fx);
             }
             (Request::ThreadStart, None) => {
                 self.thread = result["thread"]["id"].as_str().map(str::to_owned);
-                fx.started = Some(Ok(Ready {
-                    version: self.version.clone(),
-                    warnings: std::mem::take(&mut self.warnings),
-                }));
+                if !self.attached {
+                    self.ready(fx);
+                    return;
+                }
+                // A thread is stored only once it holds an item, and `codex resume` refuses one
+                // that is not. A developer note is the one item that changes nothing the model
+                // is asked.
+                let params = json!({
+                    "threadId": self.thread,
+                    "items": [{
+                        "type": "message",
+                        "role": "developer",
+                        "content": [{ "type": "input_text", "text": ATTACHED_NOTE }],
+                    }],
+                });
+                self.request(Request::Materialize, "thread/inject_items", params, fx);
             }
+            (Request::Materialize, None) => {
+                let params = json!({ "threadId": self.thread, "name": self.name });
+                self.request(Request::Name, "thread/name/set", params, fx);
+            }
+            (Request::Name, None) => self.ready(fx),
             (Request::TurnStart, None) => {
                 self.turn = result["turn"]["id"].as_str().map(str::to_owned);
                 if std::mem::take(&mut self.interrupt_waiting) {
                     self.interrupt(fx);
                 }
             }
-            (Request::Initialize | Request::ThreadStart, Some(error)) => {
+            (
+                Request::Initialize | Request::ThreadStart | Request::Materialize | Request::Name,
+                Some(error),
+            ) => {
                 fx.started = Some(Err(format!("Codex refused to start: {error}")));
             }
             (Request::TurnStart, Some(error)) => fx.emit(DriverOutput::Failed(Failure::Error {
@@ -161,6 +198,14 @@ impl CodexRpc {
             }
             (Request::Other, None) => {}
         }
+    }
+
+    fn ready(&mut self, fx: &mut Effects) {
+        fx.started = Some(Ok(Ready {
+            version: self.version.clone(),
+            warnings: std::mem::take(&mut self.warnings),
+            session: self.thread.clone(),
+        }));
     }
 
     fn on_server_request(&mut self, message: &Value, fx: &mut Effects) {
@@ -332,11 +377,34 @@ impl CodexRpc {
                     params["error"]
                 )));
             }
+            Some("account/rateLimits/updated") => self.on_limits(&params["rateLimits"], fx),
             Some("configWarning") => fx.emit(DriverOutput::Warning(format!(
                 "Codex configuration: {}",
                 params["summary"]
             ))),
             _ => {}
+        }
+    }
+
+    /// On a subscription login, each usage window's share used. A key has no windows.
+    fn on_limits(&mut self, limits: &Value, fx: &mut Effects) {
+        for window in ["primary", "secondary"] {
+            let Some(used) = limits[window]["usedPercent"].as_f64() else {
+                continue;
+            };
+            let name = match limits[window]["windowDurationMins"].as_i64() {
+                Some(minutes) if minutes % 1440 == 0 => format!("{}-day", minutes / 1440),
+                Some(minutes) if minutes % 60 == 0 => format!("{}-hour", minutes / 60),
+                _ => window.to_owned(),
+            };
+            if self.limits_warned.contains(&name) {
+                continue;
+            }
+            let resets = limits[window]["resetsAt"].as_i64();
+            if let Some(warning) = limit_warning("Codex", &name, used, resets) {
+                self.limits_warned.push(name);
+                fx.emit(DriverOutput::Warning(warning));
+            }
         }
     }
 
@@ -374,6 +442,24 @@ impl Protocol for CodexRpc {
         }
     }
 
+    /// The attached terminal's report. Everything else Codex says comes on the app-server's
+    /// stream; a terminal asking for a login means nobody will give one.
+    fn reported(&mut self, report: &Reported, fx: &mut Effects) {
+        if let Reported::Status {
+            state: Status::Blocked(kind),
+            message,
+        } = report
+            && kind == "auth"
+        {
+            fx.emit(DriverOutput::Failed(Failure::Error {
+                detail: message
+                    .clone()
+                    .unwrap_or_else(|| "Codex asks for a login".into()),
+                provider: Some(x100_core::harness::ProviderFailure::KeyRefused),
+            }));
+        }
+    }
+
     fn input(&mut self, input: Input, fx: &mut Effects) -> Result<(), InputError> {
         let thread = self.thread.clone().unwrap_or_default();
         match input {
@@ -407,5 +493,73 @@ impl Protocol for CodexRpc {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::harness::{CommandWrapper, SpawnHook, StallPolicy};
+    use std::time::Duration;
+    use x100_core::effort::Effort;
+    use x100_core::harness::ModelName;
+    use x100_core::id::DriverId;
+
+    fn rpc() -> CodexRpc {
+        let spec = DriverSpec {
+            driver: DriverId::from_u128(1),
+            model: ModelName("gpt-6-luna".into()),
+            effort: Effort::Low,
+            dir: "/work".into(),
+            wrap: CommandWrapper::identity(),
+            start_pack: String::new(),
+            tools: None,
+            env: Vec::new(),
+            stall: StallPolicy {
+                silent: Duration::from_secs(60),
+                while_tool_runs: Duration::from_secs(60),
+                check_every: Duration::from_secs(60),
+            },
+            permissions: Permissions::AllowAll,
+            on_spawn: SpawnHook::ignore(),
+            login: None,
+        };
+        CodexRpc::new(&spec, crate::codex::models()[3].levels[0].1, true)
+    }
+
+    fn limits(used: u64) -> String {
+        // The shape a ChatGPT login reported on 2026-11-12: one seven-day window.
+        json!({ "jsonrpc": "2.0", "method": "account/rateLimits/updated", "params": { "rateLimits": {
+            "limitId": "codex", "planType": "self_serve_business_prolite",
+            "primary": { "resetsAt": 1794975976, "usedPercent": used, "windowDurationMins": 10080 },
+            "secondary": null, "credits": { "balance": "0", "hasCredits": false, "unlimited": false },
+        }}})
+        .to_string()
+    }
+
+    fn warnings(fx: &Effects) -> Vec<String> {
+        fx.emit
+            .iter()
+            .filter_map(|o| match o {
+                DriverOutput::Warning(w) => Some(w.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_nearly_used_window_is_warned_about_once() {
+        let mut rpc = rpc();
+        let mut fx = Effects::default();
+        rpc.line(&limits(9), &mut fx);
+        assert!(warnings(&fx).is_empty());
+        rpc.line(&limits(91), &mut fx);
+        rpc.line(&limits(95), &mut fx);
+        let said = warnings(&fx);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(
+            said[0].contains("7-day") && said[0].contains("91%"),
+            "{said:?}"
+        );
     }
 }
