@@ -240,6 +240,12 @@ invent any role with a charter, and team changes need the builder's agreement.
 
 ## Owner's decisions during the build
 
+- **2026-11-12. Trials are a toggle, off by default.** After Anthropic's post on agent memory, reflection
+  commits its changes directly unless the project's "trial before commit" setting is on. Corrections of notes
+  against the log are never put on trial. This changed the decided line in ARCHITECTURE's "Evals, trials and
+  the lab", PRODUCT's reflection features and M14's check. `x100-core` still names skill changes as "committed
+  by trials" in its fold; M13 and M14 change that with the setting. The memory design also gained log search,
+  notes that cite events, a bounded index and recorded reads, all proposed.
 - **2026-11-12. Push to `origin`.** Allowed. Pushed after each accepted milestone from now on.
 - **2026-11-12. Local subscriptions.** x100 must run the builder's local agents on their own subscriptions,
   as Orca, herdr and T3 Code do, each in a dedicated terminal reachable from the Team tab by drilldown. This

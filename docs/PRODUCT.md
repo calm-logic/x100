@@ -245,10 +245,13 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 - **v1** A skill written once can be loaded by any agent in the project.
 - **v1** Reflect now: on request, the CEO reads the log and telemetry of the last piece of work across all leads
   and workers, then compacts memories, improves existing skills, writes new ones, and proposes changes to the team.
-- **v1** Reflection is driven and gated by evidence. The CEO does not commit a change because it seems better.
-  It runs a trial first: for example, the same tasks given to a lead with a skill and without it, compared on
-  checks, cost and time. It commits the change only if the trial supports it, and drops it otherwise.
-- **v1** The CEO has a lab for this: a private environment where it can try skills, memories and ways of working
+- **v1** Reflection checks its notes against the log. A note the log shows to be wrong is corrected, with the
+  events that show it.
+- **v1** Trial before commit, a project setting, off by default. Off, reflection commits its changes directly,
+  and the builder can see and revert each one. On, the CEO runs a trial first: for example, the same tasks
+  given to a lead with a skill and without it, compared on checks, cost and time. It commits the change only
+  if the trial supports it, and drops it otherwise. Corrections are never put on trial.
+- **v1** The CEO has a lab for trials: a private environment where it can try skills, memories and ways of working
   against real past tasks from the project. Nothing done in the lab reaches the project's code, files or
   accounts, and lab spend has its own cap inside the project budget.
 - **v1** Trials are visible. The builder can see each one: what was proposed, what it was tested on, how each

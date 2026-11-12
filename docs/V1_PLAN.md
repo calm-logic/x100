@@ -326,15 +326,18 @@ branch does not. Every change is a git commit and an event.
 
 ### M14. Lab: evals and trials
 
-Reflect now, gated by trials. Eval sets built from the project's own accepted past tasks, from checks the CEO
+Reflect now, with the project's "trial before commit" setting, off by default. Eval sets built from the project's own accepted past tasks, from checks the CEO
 writes, and from probe questions for memories. The lab: a fresh sandbox from a checkpoint for each run, lab
 drivers with no credentials and no outbound writes, a lab line in the ledger with its own cap. Scoring, the
 rule for committing, and merging or deleting the trial branch.
 
-Check, with the fake harness scripted so that one skill change helps and another does not: the helpful change
+Check, with the setting off: reflection's skill edit and compaction are committed directly, each a commit and
+an event, and no lab driver starts. With either setting, a note that contradicts the log is corrected with no
+trial.
+
+Check, with the setting on and the fake harness scripted so that one skill change helps and another does not: the helpful change
 is committed and the other is discarded, each after both arms ran three times, and both trials are in the log
-with their scores. A memory compaction is committed only when every probe question is still answered. A note
-that contradicts the log is corrected and cites the events that show it. A compaction that leaves the memory
+with their scores. A memory compaction is committed only when every probe question is still answered. A compaction that leaves the memory
 larger than it was, or the index over its limit, is discarded. After
 the trials, the project's worktree, files and non-lab ledger lines are byte-for-byte what they were. A lab
 driver's attempt to use a credential or write outbound is refused. A trial that would pass the lab's cap is

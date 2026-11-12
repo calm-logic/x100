@@ -138,7 +138,8 @@ Invariants worth proving:
 - Nothing delivered to an agent is lost: every inbox item is handled by a turn that completed.
 - No agent waits forever: every wait has a deadline, and a wait on something that can no longer happen ends.
 - A cancelled job never fires, and a one-off job fires at most once.
-- No change from reflection reaches an agent's skills or memories without a Committed trial behind it.
+- Every change from reflection to an agent's skills or memories is a commit and an event. With the project's
+  "trial before commit" setting on, none but a correction reaches them without a Committed trial behind it.
 - Nothing a lab driver does reaches the project: no merge, no file, no outbound write, no charge outside the
   lab's cap.
 
@@ -341,7 +342,7 @@ total the daemon posts the notice in the chat itself, since a CEO turn to say so
 - **Retire.** A driver ends once its context is large and filled with many unrelated tasks.
 - **Compact.** A driver can be compacted after each task is finished and the CEO has verified it.
 
-**proposed** How that works:
+**proposed** How a trial works, when the setting is on or the CEO chooses to run one:
 
 - A driver whose turn ends goes to Warm instead of ending. A warm driver is kept for its model's prompt cache
   lifetime, which each harness publishes with the model, since it differs by provider. The end of that time is
@@ -648,12 +649,18 @@ machine.
 
 ## Evals, trials and the lab
 
-**decided (owner, 2026-11-11)** Reflection is driven and gated by evals. The CEO uses evals, data and checks to
-decide which skills and team arrangements to use. Before it commits a change it tests it, for example by
-running a lead with and without a skill and comparing what happens. The CEO has its own private environment
-for this, and what it does there is visible to the builder.
+**decided (owner, 2026-11-11)** Reflection is driven by evals. The CEO uses evals, data and checks to decide
+which skills and team arrangements to use. It can test a change before committing it, for example by running a
+lead with and without a skill and comparing what happens. The CEO has its own private environment for this,
+and what it does there is visible to the builder.
 
-**proposed** How that works:
+**decided (owner, 2026-11-12)** Whether a trial gates a change is a project setting, "trial before commit",
+off by default. Off, reflection commits its changes directly: each is a git commit and an event the builder
+can see and revert. On, a skill edit, a new skill or a compaction is committed only if its trial supports it.
+A correction, where reflection fixes a note the log shows to be wrong and cites the events, is never put on
+trial under either setting. The default may change after experiments with both.
+
+**proposed** How a trial works, when the setting is on or the CEO chooses to run one:
 
 - **Trial.** A trial is a record with a proposed change (a skill edit, a new skill, a memory compaction), an
   eval set, two arms (as things are, and with the change), the runs of each arm, their scores, a verdict and a
@@ -677,7 +684,7 @@ for this, and what it does there is visible to the builder.
 - **Seeing it.** Trials appear in the Log, and each agent's view lists the trials that changed its skills or
   memories, with both arms' scores.
 
-In v1, trials gate skills and memories. A team change is still proposed to the builder as a held action, now
+In v1, trials can gate skills and memories. A team change is still proposed to the builder as a held action, now
 with the telemetry that prompted it attached. Trials of team shape come later, since each one means running the
 same work twice with two teams.
 
@@ -837,7 +844,7 @@ None of these blocks work. Each is built as written unless the owner says otherw
 9. After three driver failures in a row on one task, the task is reported failed to its delegator.
 10. A compatible driver only has to meet the task's effort, so a takeover may run at a lower effort level than
     the driver it replaces when the task needs no more.
-11. A trial runs each arm three times, and a change needs to be no worse on every check and at least a tenth
+11. Trial before commit is off for a new project. A trial runs each arm three times, and a change needs to be no worse on every check and at least a tenth
     better on one measure to be committed.
 12. The lab's cap is a tenth of the project budget.
 13. Team changes are not put on trial in v1.
