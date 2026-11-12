@@ -222,6 +222,8 @@ invent any role with a charter, and team changes need the builder's agreement.
   a project to a Homebox project, and CEO tools for x100's own actions such as that link. OAuth as much as
   possible, a pasted token as a last resort. Homebox uses an API key for now, since it has no OAuth yet. The
   end-to-end run gains a second part: a follow-up edit, then a deploy through Homebox.
+- **2026-11-12. Homebox connects locally by default.** When a Homebox server is on this machine, "use local"
+  is the default and needs no key. Otherwise the builder gives a host address and an API key.
 - **2026-11-12. Build M11 and M12 now**, with what they depend on (M10). Homebox follows in its place in the
   plan, not ahead of it.
 

@@ -289,11 +289,15 @@ integrations, one consistent way to connect each (OAuth where the service offers
 it does not), the credential kept in the vault, and each call to the service made by the daemon so no agent
 holds the credential. A project setting that links the project to something in an integration. Tools that let
 the CEO do what the builder can: list integrations, link the project ("connect this to the Homebox project
-called foobar"), and deploy. Homebox, the owner's own self-hosted platform, is the first: connected with an
-API key for now, since it has no OAuth of its own yet, linked to a Homebox project, and deployed to. A deploy
+called foobar"), and deploy. Homebox, the owner's own self-hosted platform, is the first. It connects in one of two ways: "use local",
+the default when a Homebox server is found on this machine, which uses Homebox's own direct local access and
+needs no key; or a host address and an API key, since Homebox is self-hostable and may be elsewhere. It has
+no OAuth of its own yet. The project is linked to a Homebox project and deployed to it. A deploy
 is an action the gate rates as high risk.
 
-Check: with a stand-in for Homebox's API, connecting stores the key in the vault and the key is in no event,
+Check: with a stand-in for Homebox's API, "use local" is offered first when a local server is found and
+connects with no key, and without one the builder gives a host and a key. Connecting with a key stores it in
+the vault and the key is in no event,
 transcript or reply. The builder links a project from Settings, and the CEO links one by name from the chat.
 A deploy asked for in the chat is held at "High risk only", runs on Approve, and reports the deployed
 address. A deploy that fails says why. When asked to, the second part of the end-to-end run on the builder's
