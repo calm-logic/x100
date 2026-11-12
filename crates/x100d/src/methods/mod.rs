@@ -73,6 +73,7 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ReadFile(p) => out(files::read(hub, p).await),
         Call::RemoveFile(p) => out(files::remove(hub, p).await),
         Call::CancelJob(p) => out(agents::cancel_job(hub, p).await),
+        Call::DecideAction(p) => out(agents::decide(hub, p).await),
         Call::ReadInbox(p) => out(agents::inbox(hub, p)),
         Call::ReadWaits(p) => out(agents::waits(hub, p)),
         Call::ReadStartPack(p) => out(agents::start_pack(hub, p)),

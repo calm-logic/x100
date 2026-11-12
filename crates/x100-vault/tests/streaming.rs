@@ -66,7 +66,7 @@ async fn a_streamed_response_of_several_megabytes_arrives_as_it_is_sent_with_a_s
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let request = Request::get("/v1/messages")
@@ -134,7 +134,7 @@ async fn a_streamed_upload_with_a_reference_split_across_writes_is_swapped_as_it
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let (tx, body) = channel_body();
@@ -210,7 +210,7 @@ async fn a_large_upload_with_a_declared_length_keeps_its_length_and_passes_uncha
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let size = 6 << 20;

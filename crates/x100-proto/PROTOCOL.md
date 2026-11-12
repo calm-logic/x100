@@ -1247,7 +1247,7 @@ Errors: not_found, wrong_state
 
 ### `actions.decide`
 
-Approves or denies a held action. An action that is not held is `wrong_state`.
+Approves or denies a held action, and returns once what it calls for is done: on Approve a held tool call is carried out, a held merge is done, and a held command or request out is allowed once, for the agent's next try; on Deny nothing runs, and a held merge's task goes back to its assignee. Either way the agent is told through its inbox. An action that is not held is `wrong_state`.
 
 Params type `DecideAction`, result type `Done`.
 

@@ -127,6 +127,7 @@ fn project_events() -> Vec<ProjectEvent> {
                 what: InboxItem::Decision {
                     action: ActionId::from_u128(1),
                     decision: Decision::Approved,
+                    result: Some("done".into()),
                 },
             },
         },

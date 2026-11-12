@@ -297,7 +297,14 @@ impl LogBuilder {
             .action
             .agent;
         self.satisfy(agent, WaitOn::Decision(action));
-        self.deliver(agent, InboxItem::Decision { action, decision });
+        self.deliver(
+            agent,
+            InboxItem::Decision {
+                action,
+                decision,
+                result: None,
+            },
+        );
     }
 
     /// Ends every wait of `agent` on `on`, and cancels each one's deadline.

@@ -49,11 +49,6 @@ pub(crate) fn workspace(scratch: bool, contained: bool) -> String {
     format!("{place} {rules}")
 }
 
-/// What a model is told when its harness asks the daemon about something, which the daemon does
-/// not decide yet, so it carries on rather than trying again.
-pub(crate) const REFUSED: &str = "x100 refused this: nothing a harness asks about is allowed yet. \
-     Do not try again. Do the work another way, and say in your report what you could not do.";
-
 /// `dir` is the agent's worktree, or the project's scratch directory before it has code.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build(
@@ -128,15 +123,28 @@ pub(crate) async fn place(
             shared.desk.tools_addr(),
             logins(shared),
             &harness.login_hosts(),
+            &provider_hosts(harness),
         )
         .await?;
     crate::processes_ended(ctx, vec![(agent, placed.ended.clone())]).await;
     Ok(placed)
 }
 
+/// The hosts of the model provider a harness's drivers reach: its login's hosts, or the host its
+/// API key goes to. The gate is not asked about them, since x100 chose them, not the agent.
+fn provider_hosts(harness: &dyn Harness) -> Vec<String> {
+    let mut hosts = harness.login_hosts();
+    hosts.extend(harness.api_key().map(|k| k.host));
+    hosts
+}
+
 /// A harness run on an API key gets a reference to the first credential that may go to its
 /// provider's host from this project, which the proxy swaps for the value there.
-fn api_key(shared: &Shared, ctx: &ProjectCtx, harness: &dyn Harness) -> Option<(String, String)> {
+pub(crate) fn api_key(
+    shared: &Shared,
+    ctx: &ProjectCtx,
+    harness: &dyn Harness,
+) -> Option<(String, String)> {
     let key = harness.api_key()?;
     shared.daemon.with_state(|d| {
         d.credentials()

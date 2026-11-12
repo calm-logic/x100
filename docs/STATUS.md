@@ -199,13 +199,29 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - Two `codex app-server` processes from an earlier test run, three hours old, were found and stopped by
     pid. Sandboxed drivers now die with the daemon, so the same leak cannot recur that way.
 
+- **The gate, wired in (M12 complete).** The orchestrator's run: 517 tests pass, 0 fail, 10 ignored, clippy
+  and fmt clean, nothing left running. `x100d/tests/gate.rs`, daemon as a child process, fake harness and
+  clock, bubblewrap: at "High risk only" a read from a package registry and `write_spec` go through, and a
+  write to a hosting service's API is held with nothing sent; Approve reaches a replaced driver, whose retry
+  goes through once; the next retry is held again; Deny sends nothing and the agent is told; an unknown
+  host goes to a scripted classifier call, which is charged. At "Nothing" neither is held, at "Every
+  decision" both. A held action survives a daemon restart and can then be decided. In-process: a merge into
+  main is held at Medium and up, Approve merges, Deny sends the task back. In the app against a real daemon,
+  Approve and Deny work from the strip. `AllowAll` is deleted. `InboxItem::Decision` gained a result.
+  - **Limits:** one-off calls are outside the caps and budgets. With default settings the classifier starts
+    a whole terminal program on the builder's subscription for each request to a host no rule knows. At
+    "Every decision" every tool call is held, `wait` and `report` included.
+  - **Not run:** the permission-hook path (unreachable with harness prompts off), the classifier on a real
+    program, a crash between Approve and the carry-out (recovery code exists, untested).
+  - A turn cut off by a restart is replayed on the next driver, and can use a grant approved meanwhile.
+
 ## In progress
 
-Wiring the gate (M12) into the orchestrator and daemon. Opus subagent.
+M12I, integrations with Homebox and GitHub. Opus subagent.
 
 Queued, in this order:
 
-1. **M12I, integrations with Homebox and GitHub**, then the two-part end-to-end run.
+1. The two-part end-to-end run on the owner's logins, and a new recording.
 2. M7, M9, M13, M14, M17.
 
 ## Waiting on the owner

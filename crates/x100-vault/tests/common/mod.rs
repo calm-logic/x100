@@ -9,7 +9,7 @@ use std::convert::Infallible;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -32,10 +32,10 @@ use tokio::task::JoinHandle;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use x100_core::credential::{Credential, CredentialScope, Projects};
 use x100_core::driver::Purpose;
-use x100_core::id::{AgentId, CredentialRef, DriverId, ProjectId};
+use x100_core::id::{ActionId, AgentId, CredentialRef, DriverId, ProjectId};
 use x100_vault::{
-    EgressReport, NoKeychain, Proxy, ProxyConfig, Requester, Route, SecretValue, UpstreamTrust,
-    Vault,
+    Admission, Admit, EgressReport, NoKeychain, Proxy, ProxyConfig, Requester, Route, SecretValue,
+    UpstreamTrust, Vault,
 };
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -301,6 +301,35 @@ pub struct Setup {
     pub reference: CredentialRef,
     pub ca: TestCa,
     pub authority: CertificateDer<'static>,
+    /// The test double standing in for the gate.
+    pub admitted: Arc<AdmitAll>,
+}
+
+/// A test double for the gate: it admits every request, or refuses those to the hosts it is
+/// told to, and counts what it was asked.
+#[derive(Default)]
+pub struct AdmitAll {
+    pub asked: Mutex<Vec<(String, String)>>,
+    pub refuse: Mutex<Vec<String>>,
+}
+
+pub const REFUSED_WHY: &str = "held for the builder";
+
+#[async_trait::async_trait]
+impl Admission for AdmitAll {
+    async fn admit(&self, _: Requester, method: &str, host: &str) -> Admit {
+        let mut asked = self.asked.lock().unwrap();
+        asked.push((method.to_owned(), host.to_owned()));
+        let action = ActionId::from_u128(asked.len() as u128);
+        if self.refuse.lock().unwrap().iter().any(|h| h == host) {
+            Admit::Refuse {
+                action: Some(action),
+                why: REFUSED_WHY.into(),
+            }
+        } else {
+            Admit::Go { action }
+        }
+    }
 }
 
 pub fn scope(hosts: &[&str], projects: Projects) -> CredentialScope {
@@ -338,7 +367,10 @@ pub fn setup_with(hosts: &[&str], projects: Projects, upstream: Option<UpstreamT
         closed: false,
     };
     let (proxy, reports) = Proxy::new(vault.clone(), authority, config).unwrap();
+    let admitted = Arc::new(AdmitAll::default());
+    proxy.admit_with(admitted.clone());
     Setup {
+        admitted,
         dir,
         vault,
         proxy,

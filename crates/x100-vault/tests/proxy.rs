@@ -58,7 +58,7 @@ async fn an_authenticated_request_with_only_a_reference_succeeds_and_the_value_i
     let other = guarded(&s.ca, OTHER, Arc::clone(&other_log)).await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let mut seen_by_client: Vec<u8> = Vec::new();
@@ -82,7 +82,7 @@ async fn an_authenticated_request_with_only_a_reference_succeeds_and_the_value_i
         format!(
             "{report:?} {:?} {:?}",
             report.credential_uses(),
-            report.action()
+            report.request()
         )
         .into_bytes(),
     );
@@ -141,7 +141,7 @@ async fn a_server_that_echoes_the_value_back_is_redacted_on_the_way_to_the_clien
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let request = Request::post("/echo?token=".to_owned() + &s.reference.to_string())
@@ -196,7 +196,7 @@ async fn references_in_the_query_and_a_sized_body_are_swapped() {
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let body = format!("client_secret={}&grant=x", s.reference);
@@ -229,7 +229,7 @@ async fn a_lab_driver_and_a_project_not_allowed_get_nothing() {
     let server = guarded(&s.ca, ALLOWED, Arc::clone(&log)).await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let seen = https_via(
@@ -253,7 +253,7 @@ async fn a_lab_driver_and_a_project_not_allowed_get_nothing() {
         arm: Arm::Changed,
         run: 1,
     };
-    let route = s.proxy.open_route(requester(lab), &[]).await.unwrap();
+    let route = s.proxy.open_route(requester(lab), &[], &[]).await.unwrap();
     let seen = https_via(
         &route,
         &s.authority,
@@ -277,7 +277,7 @@ async fn a_refused_host_gets_no_tunnel_and_is_reported() {
     let server = guarded(&s.ca, ALLOWED, Arc::clone(&log)).await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     s.proxy.refuse_host("Allowed.X100.test");
@@ -318,7 +318,7 @@ async fn the_hosts_loopback_is_refused() {
     let mut s = setup();
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let tcp = tokio::net::TcpStream::connect(route.addr()).await.unwrap();
@@ -346,7 +346,7 @@ async fn a_request_without_the_routes_token_is_challenged() {
     let s = setup();
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     for auth in [None, Some("Basic eDEwMDp3cm9uZw==".to_owned())] {
@@ -392,7 +392,7 @@ async fn plain_http_goes_through_as_absolute_form_requests() {
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let tcp = tokio::net::TcpStream::connect(route.addr()).await.unwrap();
@@ -424,7 +424,7 @@ async fn an_upstream_whose_certificate_does_not_check_out_is_not_reached() {
     let server = guarded(&s.ca, ALLOWED, Arc::clone(&log)).await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let seen = https_via(
@@ -449,7 +449,7 @@ async fn dropping_a_route_closes_its_listener() {
     let s = setup();
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let addr = route.addr();
@@ -473,7 +473,7 @@ async fn a_pass_through_host_is_relayed_untouched_with_tls_end_to_end() {
     let server = guarded(&s.ca, ALLOWED, Arc::clone(&log)).await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &["Allowed.x100.test"])
+        .open_route(requester(Purpose::Work), &["Allowed.x100.test"], &[])
         .await
         .unwrap();
     // The client trusts the host's own authority, not the proxy's: the proxy is not in the
@@ -496,4 +496,79 @@ async fn a_pass_through_host_is_relayed_untouched_with_tls_end_to_end() {
         (report.method.as_str(), &report.outcome, report.uses.len()),
         ("CONNECT", &EgressOutcome::Tunnelled, 0)
     );
+}
+
+/// The gate is asked before anything of a request goes out. A request it refuses gets the gate's
+/// words and never reaches the host, and one it admits carries the gate's action in its report. A
+/// request to the driver's own provider is not put to the gate at all.
+#[tokio::test]
+async fn the_gate_is_asked_first_and_a_refused_request_never_leaves() {
+    let mut s = setup();
+    let log = Log::default();
+    let server = guarded(&s.ca, ALLOWED, Arc::clone(&log)).await;
+    let route = s
+        .proxy
+        .open_route(requester(Purpose::Work), &[], &[])
+        .await
+        .unwrap();
+
+    s.admitted.refuse.lock().unwrap().push(ALLOWED.to_owned());
+    let refused = https_via(
+        &route,
+        &s.authority,
+        ALLOWED,
+        server.port,
+        bearer(s.reference),
+    )
+    .await;
+    assert_eq!(
+        (refused.status, refused.text().as_str()),
+        (403, REFUSED_WHY)
+    );
+    assert!(log.lock().unwrap().is_empty(), "nothing reached the host");
+    let report = s.report().await;
+    assert_eq!(report.outcome, EgressOutcome::NotAdmitted);
+    assert!(report.action.is_some());
+    assert!(report.uses.is_empty(), "no reference was swapped");
+
+    s.admitted.refuse.lock().unwrap().clear();
+    let ok = https_via(
+        &route,
+        &s.authority,
+        ALLOWED,
+        server.port,
+        bearer(s.reference),
+    )
+    .await;
+    assert_eq!(ok.status, 200);
+    let report = s.report().await;
+    assert_eq!(report.outcome, EgressOutcome::Answered(200));
+    assert!(report.action.is_some());
+    let asked = s.admitted.asked.lock().unwrap().clone();
+    assert_eq!(
+        asked,
+        vec![
+            ("POST".to_owned(), ALLOWED.to_owned()),
+            ("POST".to_owned(), ALLOWED.to_owned())
+        ]
+    );
+
+    let own = s
+        .proxy
+        .open_route(requester(Purpose::Work), &[], &[ALLOWED])
+        .await
+        .unwrap();
+    s.admitted.refuse.lock().unwrap().push(ALLOWED.to_owned());
+    let ok = https_via(
+        &own,
+        &s.authority,
+        ALLOWED,
+        server.port,
+        bearer(s.reference),
+    )
+    .await;
+    assert_eq!(ok.status, 200, "the provider is not put to the gate");
+    let report = s.report().await;
+    assert_eq!(report.action, None);
+    assert_eq!(s.admitted.asked.lock().unwrap().len(), 2);
 }

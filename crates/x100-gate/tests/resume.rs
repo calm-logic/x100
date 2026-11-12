@@ -67,10 +67,11 @@ fn the_decision_always_goes_to_the_inbox() {
     let id = x100_core::id::ActionId::from_u128(9);
     for d in [Decision::Approved, Decision::Denied] {
         assert_eq!(
-            tell_agent(id, d),
+            tell_agent(id, d, None),
             InboxItem::Decision {
                 action: id,
-                decision: d
+                decision: d,
+                result: None,
             }
         );
     }
@@ -229,6 +230,16 @@ fn the_record_is_rebuilt_from_the_log() {
 }
 
 #[test]
+fn an_agent_that_never_had_a_task_keeps_its_grant_through_a_rebuild() {
+    let (mut state, ceo) = bare(AskMeAbout::HighRiskOnly);
+    assert!(state.tasks().next().is_none());
+    let approved = egress(ceo, "api.vercel.com", "POST");
+    decide(&mut state, &approved, Decision::Approved);
+    let mut once = AllowedOnce::from_state(&state);
+    assert_eq!(once.take(ceo, &approved.request), Some(approved.id));
+}
+
+#[test]
 fn what_the_builder_sees_for_the_held_deploy() {
     let (state, f) = fern(AskMeAbout::HighRiskOnly);
     let record = state.action(f.deploy).expect("the deploy");
@@ -340,10 +351,11 @@ fn approve_lets_the_retry_through_once_and_deny_does_not() {
     let second = command(f.backend, "wrangler deploy --env production");
     assert_eq!(plan.effect(Decision::Denied), Effect::Drop);
     assert_eq!(
-        tell_agent(second.id, Decision::Denied),
+        tell_agent(second.id, Decision::Denied, None),
         InboxItem::Decision {
             action: second.id,
-            decision: Decision::Denied
+            decision: Decision::Denied,
+            result: None,
         }
     );
     assert_eq!(once.take(f.backend, &second.request), None);

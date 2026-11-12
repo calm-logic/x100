@@ -1,8 +1,9 @@
 use x100_drivers::terminal::Size;
 use x100_orch::DriverError;
 use x100_proto::{
-    CancelJob, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack, ReadWaits,
-    ResizeTerminal, RpcError, SetEffortRange, SetLeadBudget, StartPack, StopDriver, Waits,
+    CancelJob, DecideAction, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack,
+    ReadWaits, ResizeTerminal, RpcError, SetEffortRange, SetLeadBudget, StartPack, StopDriver,
+    Waits,
 };
 
 use super::{project, refused, terminal_of};
@@ -13,6 +14,16 @@ pub async fn cancel_job(hub: &Hub, p: CancelJob) -> Result<Done, RpcError> {
     // Through the orchestrator, so a wait on the job ends with it.
     hub.orch
         .cancel_job(p.project, p.job)
+        .await
+        .map_err(refused)?;
+    Ok(Done {})
+}
+
+/// Through the orchestrator, which carries out what the decision calls for and tells the agent.
+pub async fn decide(hub: &Hub, p: DecideAction) -> Result<Done, RpcError> {
+    project(hub, p.project)?;
+    hub.orch
+        .decide(p.project, p.action, p.decision)
         .await
         .map_err(refused)?;
     Ok(Done {})

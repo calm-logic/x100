@@ -83,8 +83,13 @@ impl Resume {
     }
 }
 
-/// The item for the agent's inbox, for every kind of request and either decision. The agent is
-/// told by the inbox and not by a driver, so a decision reaches the agent that replaced it.
-pub fn tell_agent(action: ActionId, decision: Decision) -> InboxItem {
-    InboxItem::Decision { action, decision }
+/// The item for the agent's inbox, for every kind of request and either decision, with what came
+/// of it. The agent is told by the inbox and not by a driver, so a decision reaches the agent that
+/// replaced it.
+pub fn tell_agent(action: ActionId, decision: Decision, result: Option<String>) -> InboxItem {
+    InboxItem::Decision {
+        action,
+        decision,
+        result,
+    }
 }

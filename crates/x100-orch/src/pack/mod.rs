@@ -338,8 +338,8 @@ fn member(state: &ProjectState, agent: AgentId) -> String {
     format!("{position} {role}: {agent}\n")
 }
 
-/// Waits, jobs it scheduled, tasks it delegated and has not accepted, and messages awaiting a
-/// reply. Held actions arrive with the gate.
+/// Waits, jobs it scheduled, tasks it delegated and has not accepted, messages awaiting a reply,
+/// and its actions held for the builder.
 fn open_business(state: &ProjectState, agent: AgentId) -> String {
     let Some(a) = state.agent(agent) else {
         return String::new();
@@ -408,6 +408,14 @@ fn open_business(state: &ProjectState, agent: AgentId) -> String {
                 m.message.id, m.message.body
             );
         }
+    }
+    for h in state.held_actions().filter(|h| h.action.agent == agent) {
+        let why = h.classification.as_ref().map_or("", |c| c.why.as_str());
+        let _ = writeln!(
+            b,
+            "- Action {} is held for the builder's decision: {why}",
+            h.action.id
+        );
     }
     b
 }

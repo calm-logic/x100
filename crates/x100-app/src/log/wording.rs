@@ -390,7 +390,9 @@ fn inbox(n: &Names, item: &InboxItem) -> String {
         InboxItem::Task { task } => format!("the task {}", n.task(*task)),
         InboxItem::Message { .. } => "a message".into(),
         InboxItem::Report { task } => format!("the report on {}", n.task(*task)),
-        InboxItem::Decision { action, decision } => format!(
+        InboxItem::Decision {
+            action, decision, ..
+        } => format!(
             "the builder's {} of {}",
             match decision {
                 Decision::Approved => "approval",

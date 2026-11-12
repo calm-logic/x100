@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use x100_core::event::DaemonEvent;
 use x100_core::party::Actor;
-use x100_orch::Orchestrator;
+use x100_orch::{EgressEnd, Orchestrator};
 use x100_store::DaemonLog;
 use x100_vault::{
     EgressOutcome, EgressReport, Keychain, NoKeychain, OsKeychain, Proxy, ProxyConfig,
@@ -94,26 +94,29 @@ pub fn reconcile(vault: &Vault, log: &DaemonLog) -> Result<(), Error> {
     Ok(())
 }
 
-/// Records each request the proxy reports in the requester's project, with the credential uses it
-/// made, and puts it to the gate's seam, until the proxy is gone.
+/// Records each request the proxy reports in the requester's project: how the gate's action for
+/// it ended, or the whole request when the gate was not asked, with the credential uses it made.
+/// Runs until the proxy is gone.
 pub fn drain(
     mut reports: mpsc::UnboundedReceiver<EgressReport>,
     orch: Orchestrator,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(report) = reports.recv().await {
-            let error = match &report.outcome {
-                EgressOutcome::Answered(_) | EgressOutcome::Tunnelled => None,
-                EgressOutcome::HostRefused => Some(format!("{} is refused", report.host)),
-                EgressOutcome::Failed(why) => Some(why.clone()),
+            let end = match &report.outcome {
+                EgressOutcome::Answered(_) | EgressOutcome::Tunnelled => EgressEnd::Went,
+                EgressOutcome::HostRefused => EgressEnd::RefusedByProxy,
+                EgressOutcome::NotAdmitted => EgressEnd::NotAdmitted,
+                EgressOutcome::Failed(why) => EgressEnd::Failed(why.clone()),
             };
             let requester = report.requester;
             orch.egress(
                 requester.project,
                 requester.agent,
-                report.action(),
+                report.request(),
+                report.action,
                 report.credential_uses(),
-                error,
+                end,
             )
             .await;
         }

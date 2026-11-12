@@ -7,8 +7,10 @@
 //!
 //! Plain HTTP arrives as absolute-form requests. HTTPS arrives as `CONNECT`, and the proxy ends
 //! TLS itself with a leaf certificate for the host, minted by the [`Authority`], offering only
-//! HTTP/1.1. Every request is then forwarded with references swapped for values where the
-//! credential allows it, and its response is redacted on the way back.
+//! HTTP/1.1. Every request is then put to the [`Admission`] the daemon gives (the gate), and
+//! only if it is admitted forwarded, with references swapped for values where the credential
+//! allows it, and its response redacted on the way back. A request to the driver's own model
+//! provider is not put to it: x100 chose that host, not the agent.
 
 mod body;
 mod forward;
@@ -18,14 +20,15 @@ use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
+use async_trait::async_trait;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use x100_core::action::Request as Action;
 use x100_core::credential::{CredentialUse, UseOutcome, Via};
-use x100_core::id::CredentialRef;
+use x100_core::id::{ActionId, CredentialRef};
 
 use crate::scope::Requester;
 use crate::{Vault, VaultError};
@@ -52,14 +55,37 @@ impl Default for ProxyConfig {
     }
 }
 
+/// What the gate says about one request, asked before anything of it goes out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admit {
+    /// Send it. The gate recorded it as `action`, which its report names.
+    Go { action: ActionId },
+    /// Answer it at once with 403 and `why`, which the program that sent it reads. The gate
+    /// recorded it as `action`, if it recorded it at all.
+    Refuse {
+        action: Option<ActionId>,
+        why: String,
+    },
+}
+
+/// Decides each request a driver sends out, other than to its own model provider. It may take
+/// its time: the request waits, and nothing of it has gone out.
+#[async_trait]
+pub trait Admission: Send + Sync {
+    async fn admit(&self, requester: Requester, method: &str, host: &str) -> Admit;
+}
+
 /// One request through the proxy, told to the caller once the request has gone out (or was
-/// refused or failed), so the wiring can record credential uses and put egress to the gate.
+/// refused or failed), so the wiring can record credential uses and how the gate's action ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EgressReport {
     pub requester: Requester,
     pub method: String,
     pub host: String,
     pub port: u16,
+    /// The gate's action for it. `None` when the gate was not asked: a request to the driver's
+    /// own provider, one to a host the proxy refuses, or one that broke before it was asked.
+    pub action: Option<ActionId>,
     /// One entry per credential and outcome, in the order first seen.
     pub uses: Vec<(CredentialRef, UseOutcome)>,
     pub outcome: EgressOutcome,
@@ -71,6 +97,8 @@ pub enum EgressOutcome {
     Answered(u16),
     /// The host is refused; nothing went out.
     HostRefused,
+    /// The gate did not admit it; nothing went out.
+    NotAdmitted,
     /// A tunnel to a pass-through host was opened; what went through it is not known.
     Tunnelled,
     /// The request could not be completed: no connection, a certificate that did not check out,
@@ -95,8 +123,8 @@ impl EgressReport {
             .collect()
     }
 
-    /// The request as an action for the gate.
-    pub fn action(&self) -> Action {
+    /// The request as the gate's action asks it.
+    pub fn request(&self) -> Action {
         Action::Egress {
             driver: self.requester.driver,
             host: self.host.clone(),
@@ -113,6 +141,8 @@ pub(crate) struct Shared {
     closed: bool,
     refused: RwLock<BTreeSet<String>>,
     reports: mpsc::UnboundedSender<EgressReport>,
+    /// Set once, by the daemon, after the proxy is made. Until then every request is refused.
+    admission: OnceLock<Arc<dyn Admission>>,
 }
 
 impl Shared {
@@ -162,6 +192,7 @@ impl Proxy {
             closed: config.closed,
             refused: RwLock::new(BTreeSet::new()),
             reports,
+            admission: OnceLock::new(),
         };
         Ok((
             Self {
@@ -175,16 +206,25 @@ impl Proxy {
         &self.shared.authority
     }
 
+    /// Puts every later request to `admission`. Set once; a second call changes nothing. Until
+    /// it is set every request is refused, so nothing goes out that the gate did not see.
+    pub fn admit_with(&self, admission: Arc<dyn Admission>) {
+        let _ = self.shared.admission.set(admission);
+    }
+
     /// Opens a route for one driver: a fresh listener on loopback and a fresh token. Dropping
     /// the route closes the listener and every connection made through it.
     ///
     /// Tunnels to a host in `pass_through` are relayed as bytes, with TLS end to end between
     /// the driver and the host: nothing is swapped, redacted or seen. That is for a terminal
     /// driver's provider, whose traffic carries the builder's login, which x100 must not see.
+    /// Requests to a host in `provider`, the model provider x100 started the driver on, are
+    /// swapped and redacted as usual but not put to the admission.
     pub async fn open_route(
         &self,
         requester: Requester,
         pass_through: &[&str],
+        provider: &[&str],
     ) -> io::Result<Route> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let addr = listener.local_addr()?;
@@ -200,6 +240,7 @@ impl Proxy {
                 .iter()
                 .map(|h| h.to_ascii_lowercase())
                 .collect(),
+            provider: provider.iter().map(|h| h.to_ascii_lowercase()).collect(),
             closed,
         });
         let task = tokio::spawn(forward::accept(listener, ctx));

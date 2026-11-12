@@ -8,8 +8,10 @@
 //! however slow it is to die, and the check cannot disagree with the record. A refused caller
 //! changes nothing in the project's log; the refusal is kept where [`Desk::refusals`] shows it.
 //!
-//! A call that passes is recorded as an action, put to the gate, planned, carried out with the git
-//! and sandbox work the plan names, and its events appended, all under the project's writer lock.
+//! A call that passes is recorded as an action and put to the gate. One the gate allows is planned,
+//! carried out with the git and sandbox work the plan names, and its events appended, all under
+//! the project's writer lock. One it holds is answered at once, and carried out the same way, as
+//! the agent, if the builder approves it ([`Desk::approved`]).
 //! Every credential value in a call is replaced by its reference first, so no message, report,
 //! spec, note or file name a driver sends holds one.
 
@@ -18,7 +20,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
-use x100_core::action::{Action, Request};
+use x100_core::action::{Action, Decision, Request};
 use x100_core::driver::Purpose;
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
@@ -28,13 +30,15 @@ use x100_core::spec::SpecKind;
 use x100_core::tool::ToolCall;
 use x100_drivers::ToolEndpoint;
 use x100_drivers::fake::DaemonTools;
+use x100_gate::Ruling;
 use x100_store::Git;
 use x100_vault::{Redactor, Requester};
 
 use crate::ctx::{Events, ProjectCtx, Writer, git_of};
-use crate::gate::{self, Gate};
+use crate::gate;
 use crate::ids::new_id;
 use crate::sandbox::Sandboxes;
+use crate::settle::deliver;
 use crate::store::blocking;
 use crate::tools::{self, Ctx, END_THE_TURN, NewCodeDir, ProcessPlan, SET_UP, Tool};
 use crate::{Settings, branches};
@@ -64,7 +68,6 @@ pub struct Desk {
     /// Where the MCP server listens, once it does. Drivers started before have no address, which
     /// only the fake harness, calling in-process, can do without.
     address: OnceLock<String>,
-    gate: Arc<dyn Gate>,
     settings: Settings,
     redactor: Redactor,
     /// Where `start_process` runs, set once the orchestrator is made.
@@ -72,12 +75,11 @@ pub struct Desk {
 }
 
 impl Desk {
-    pub fn new(gate: Arc<dyn Gate>, settings: Settings, redactor: Redactor) -> Arc<Self> {
+    pub fn new(settings: Settings, redactor: Redactor) -> Arc<Self> {
         Arc::new(Self {
             passes: Mutex::new(HashMap::new()),
             refusals: Mutex::new(VecDeque::new()),
             address: OnceLock::new(),
-            gate,
             settings,
             redactor,
             sandboxes: OnceLock::new(),
@@ -90,10 +92,6 @@ impl Desk {
 
     pub(crate) fn attach(&self, sandboxes: Arc<Sandboxes>) {
         let _ = self.sandboxes.set(sandboxes);
-    }
-
-    pub(crate) fn gate(&self) -> Arc<dyn Gate> {
-        Arc::clone(&self.gate)
     }
 
     /// The tool server's address on loopback, which every sandbox maps in.
@@ -164,13 +162,10 @@ impl Desk {
         let ctx = self.project_of(driver, token, Some(tool))?;
         let call = crate::redact::value(&self.redactor, &call)
             .ok_or("the call could not be cleared of credential values, so it is refused")?;
-        let gate = Arc::clone(&self.gate);
         let settings = (self.settings)();
         let sandboxes = self.sandboxes.get().cloned();
-        let done = blocking(move || {
-            carry_out(&ctx, &*gate, &settings, sandboxes.as_deref(), driver, call)
-        })
-        .await;
+        let done =
+            blocking(move || carry_out(&ctx, &settings, sandboxes.as_deref(), driver, call)).await;
         match done {
             Err(Outcome::Fenced(why)) => Err(self.refuse(driver, Some(tool), why)),
             Err(Outcome::Refused(why)) => Err(why),
@@ -195,6 +190,25 @@ impl Desk {
         found.ok_or_else(|| {
             let why = format!("this token was not given to {driver}: the call is refused");
             self.refuse(driver, tool, why)
+        })
+    }
+
+    /// Carries out a held tool call the builder approved, as its agent, under the lock `w` holds,
+    /// whichever driver the agent has now. `head` (the approval) is appended with what happened,
+    /// and so is the decision for the agent's inbox, with the call's reply or why it failed.
+    /// Blocks.
+    pub(crate) fn approved(
+        &self,
+        ctx: &ProjectCtx,
+        w: &Writer,
+        action: &Action,
+        head: Events,
+    ) -> Result<String, String> {
+        let settings = (self.settings)();
+        let sandboxes = self.sandboxes.get().cloned();
+        let planned = plan(ctx, w, &settings, action);
+        execute(ctx, w, sandboxes.as_deref(), action, head, planned, true).map_err(|o| match o {
+            Outcome::Fenced(why) | Outcome::Refused(why) => why,
         })
     }
 
@@ -274,52 +288,116 @@ enum Outcome {
 
 fn carry_out(
     ctx: &ProjectCtx,
-    gate: &dyn Gate,
     settings: &DaemonSettings,
     sandboxes: Option<&Sandboxes>,
     driver: DriverId,
     call: ToolCall,
 ) -> Result<String, Outcome> {
-    let store = &ctx.store;
-    let file_stored = match &call {
-        ToolCall::AddFile { hash, .. } => store.files.contains(hash).unwrap_or(false),
-        _ => true,
-    };
     // Fenced under the lock, so the driver cannot end between the check and the append.
     let w = ctx.writer();
     let agent = w.read(|s| fence(s, driver)).map_err(Outcome::Fenced)?;
-    let clock = w.clock();
     let action = Action {
-        id: new_id(clock, ActionId::new),
+        id: new_id(w.clock(), ActionId::new),
         agent,
-        request: Request::Tool {
-            driver,
-            call: call.clone(),
-        },
+        request: Request::Tool { driver, call },
     };
-    let (ruling, planned) = w.read(|s| {
+    let ruling = w.read(|s| gate::rule(s, &action));
+    let planned = plan(ctx, &w, settings, &action);
+    // A call the tools refuse is refused whatever the gate says, so the builder is never asked
+    // about what would not be done. It reaches the plan, which is what allowed means here.
+    if let Err(refusal) = planned {
+        let allowed = Ruling::Allow(ruling.classification().clone());
+        return refuse(
+            &w,
+            gate::proposed(&action, &allowed),
+            action.id,
+            refusal,
+            None,
+        );
+    }
+    let head = gate::proposed(&action, &ruling);
+    if ruling.is_held() {
+        append(&w, head)?;
+        let words = gate::held_words(
+            action.id,
+            &ruling.classification().why,
+            gate::on_approve(&action.request),
+        );
+        return Ok(serde_json::json!({ "held": action.id, "message": words }).to_string());
+    }
+    execute(ctx, &w, sandboxes, &action, head, planned, false)
+}
+
+/// The tool call's plan on the state as it is now.
+fn plan(
+    ctx: &ProjectCtx,
+    w: &Writer,
+    settings: &DaemonSettings,
+    action: &Action,
+) -> Result<tools::Plan, String> {
+    let Request::Tool { call, .. } = &action.request else {
+        unreachable!("only a tool call is planned by the desk")
+    };
+    let file_stored = match call {
+        ToolCall::AddFile { hash, .. } => ctx.store.files.contains(hash).unwrap_or(false),
+        _ => true,
+    };
+    let clock = w.clock();
+    w.read(|s| {
         let ctx = Ctx {
-            agent,
+            agent: action.agent,
             now: clock.now(),
             settings,
             clock,
             file_stored,
         };
-        (gate.rule(s, &action), tools::plan(s, &ctx, &call))
-    });
-    let mut head = gate::proposed(&action, &ruling);
-    if ruling.hold {
-        append(&w, head)?;
-        return Ok(r#"{"held":"for the builder's decision; wait on it or carry on"}"#.into());
-    }
+        tools::plan(s, &ctx, call)
+    })
+}
+
+/// Carries out a tool call the gate allowed or the builder approved, by its plan on the state as
+/// it is now: does the git and sandbox work the plan names, and appends `head` with what happened,
+/// ending the action. With `tell`, the agent is also given the builder's approval with the
+/// call's reply, or why it failed, in the append that ends the action.
+fn execute(
+    ctx: &ProjectCtx,
+    w: &Writer,
+    sandboxes: Option<&Sandboxes>,
+    action: &Action,
+    mut head: Events,
+    planned: Result<tools::Plan, String>,
+    tell: bool,
+) -> Result<String, Outcome> {
+    let Request::Tool { driver, call } = &action.request else {
+        unreachable!("only a tool call is carried out by the desk")
+    };
+    let (agent, driver) = (action.agent, *driver);
+    let clock = w.clock();
+    let told = |result: Result<&str, &str>| {
+        tell.then(|| {
+            let result = match result {
+                Ok(reply) => reply.to_owned(),
+                Err(why) => format!("It could not be carried out: {why}"),
+            };
+            deliver(
+                clock,
+                agent,
+                x100_gate::tell_agent(action.id, Decision::Approved, Some(result)),
+            )
+        })
+    };
+    let fail = |head: Events, refusal: String| {
+        let tell = told(Err(&refusal));
+        refuse(w, head, action.id, refusal, tell)
+    };
     let plan = match planned {
         Ok(plan) => plan,
-        Err(refusal) => return refuse(&w, head, action.id, refusal),
+        Err(refusal) => return fail(head, refusal),
     };
     let git = w.read(git_of);
     for agent in &plan.commit {
         if let Some(e) = git.as_ref().and_then(|g| branches::commit(g, *agent).err()) {
-            return refuse(&w, head, action.id, e);
+            return fail(head, e);
         }
     }
     let mut reply_override = None;
@@ -332,22 +410,25 @@ fn carry_out(
         };
         match carry_out_process(sandboxes, requester, process) {
             Ok(reply) => reply_override = reply,
-            Err(e) => return refuse(&w, head, action.id, e),
+            Err(e) => return fail(head, e),
         }
     }
     let mut events = plan.events;
     if let Some(new) = &plan.code_dir {
         match make_code_dir(new) {
             Ok(dir) => events.insert(0, (x100_core::party::Actor::Agent(agent), dir)),
-            Err(e) => return refuse(&w, head, action.id, e),
+            Err(e) => return fail(head, e),
         }
     }
     let mut own: Vec<ProjectEvent> = events.iter().map(|(_, e)| e.clone()).collect();
     head.extend(events);
-    match plan.merge {
+    let reply = match plan.merge {
         None => {
+            let reply = reply_override.unwrap_or_else(|| answer(call, &own));
             head.push(gate::finished(action.id, None));
-            append(&w, head)?;
+            head.extend(told(Ok(&reply)));
+            append(w, head)?;
+            reply
         }
         Some(merge) => {
             let merge_action = Action {
@@ -355,29 +436,34 @@ fn carry_out(
                 agent: merge.by,
                 request: Request::Merge { task: merge.task },
             };
-            let ruling = w.read(|s| gate.rule(s, &merge_action));
+            let ruling = w.read(|s| gate::rule(s, &merge_action));
             head.extend(gate::proposed(&merge_action, &ruling));
-            if ruling.hold {
+            if ruling.is_held() {
+                let reply = answer(call, &own);
                 head.push(gate::finished(action.id, None));
-                append(&w, head)?;
-                return Ok(answer(&call, &own));
+                head.extend(told(Ok(&reply)));
+                append(w, head)?;
+                return Ok(reply);
             }
             // Appended before the merge runs, so the task is Promoting while it does.
-            append(&w, head)?;
+            append(w, head)?;
             let outcome = match w.read(git_of) {
                 Some(git) => branches::merge(&git, merge.from, merge.into),
                 None => Err("the project has no code directory to merge into".into()),
             };
             let mut tail = w.read(|s| tools::merged(s, clock, &merge, merge_action.id, outcome));
             own.extend(tail.iter().map(|(_, e)| e.clone()));
+            let reply = reply_override.unwrap_or_else(|| answer(call, &own));
             tail.push(gate::finished(action.id, None));
-            append(&w, tail)?;
+            tail.extend(told(Ok(&reply)));
+            append(w, tail)?;
+            reply
         }
-    }
-    if let (ToolCall::WriteSpec { spec, body, .. }, Some(git)) = (&call, &git) {
+    };
+    if let (ToolCall::WriteSpec { spec, body, .. }, Some(git)) = (call, &git) {
         write_spec_file(git, *spec, body);
     }
-    Ok(reply_override.unwrap_or_else(|| answer(&call, &own)))
+    Ok(reply)
 }
 
 /// Starts or stops a process in the agent's sandbox. Blocks: it runs on a blocking thread with the
@@ -434,8 +520,10 @@ fn refuse(
     mut head: Events,
     action: ActionId,
     refusal: String,
+    tell: Option<(x100_core::party::Actor, ProjectEvent)>,
 ) -> Result<String, Outcome> {
     head.push(gate::finished(action, Some(refusal.clone())));
+    head.extend(tell);
     append(w, head)?;
     Err(Outcome::Refused(refusal))
 }

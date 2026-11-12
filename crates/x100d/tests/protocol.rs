@@ -343,15 +343,6 @@ async fn methods_that_later_milestones_make_real_say_which() {
             "M9",
         ),
         (
-            DecideAction {
-                project: p,
-                action: x100_core::id::ActionId::from_u128(1),
-                decision: x100_core::action::Decision::Approved,
-            }
-            .into(),
-            "M12",
-        ),
-        (
             ListMemories {
                 project: p,
                 agent: a,
@@ -410,6 +401,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "files.read",
         "files.remove",
         "jobs.cancel",
+        "actions.decide",
         "agents.inbox",
         "agents.waits",
         "drivers.start_pack",

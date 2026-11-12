@@ -35,7 +35,7 @@ use x100_drivers::codex::{Codex, CodexConfig};
 use x100_drivers::testing::{FakeProvider, Reply};
 use x100_drivers::{DriverHandle, DriverSpec, Harness, StartError};
 use x100_jobs::Scheduler;
-use x100_orch::{AllowAll, Config, Desk, Orchestrator, ProcessRegistry, ToolServer};
+use x100_orch::{Config, Desk, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::ProjectStore;
 
 const HARNESS: HarnessId = HarnessId::from_u128(11);
@@ -144,11 +144,7 @@ impl Run {
             },
         );
         let settings = common::settings_of(&daemon);
-        let desk = Desk::new(
-            Arc::new(AllowAll),
-            Arc::clone(&settings),
-            x100_vault::Redactor::for_values(&[]),
-        );
+        let desk = Desk::new(Arc::clone(&settings), x100_vault::Redactor::for_values(&[]));
         let tools = ToolServer::start(Arc::clone(&desk)).await.unwrap();
         let harness = harness(&provider, Arc::clone(&shared));
         let (processes, _) =

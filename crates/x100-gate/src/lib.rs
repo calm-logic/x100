@@ -24,6 +24,7 @@ mod tools;
 
 pub use classify::{Answer, Classifier, Pending, Question, parse};
 pub use command::watched_programs;
+pub use egress::{Settled, settled};
 pub use gate::{Ruling, Verdict, assess, holds, judge};
 pub use once::{AllowedOnce, Grant, Permit};
 pub use resume::{AtOnce, Effect, Resume, resume, tell_agent};

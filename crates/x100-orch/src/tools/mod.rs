@@ -77,6 +77,28 @@ pub(crate) struct MergePlan {
     pub into: Target,
 }
 
+impl MergePlan {
+    /// The merge an accepted task waits for, read back from the log, as for a held merge the
+    /// builder has just decided.
+    pub(crate) fn of(state: &ProjectState, task: TaskId) -> Option<MergePlan> {
+        let a = state.task(task)?.state.assignment()?;
+        Some(match a.delegator {
+            Party::Agent(delegator) => MergePlan {
+                task,
+                by: delegator,
+                from: a.assignee,
+                into: Target::Agent(delegator),
+            },
+            Party::Builder => MergePlan {
+                task,
+                by: a.assignee,
+                from: a.assignee,
+                into: Target::Main,
+            },
+        })
+    }
+}
+
 /// A rule the call broke, in words the agent can act on.
 pub(crate) type Refusal = String;
 

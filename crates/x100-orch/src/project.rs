@@ -172,8 +172,14 @@ impl Loop {
         mut ctl: mpsc::UnboundedReceiver<Ctl>,
         mut msgs: mpsc::UnboundedReceiver<Msg>,
     ) {
-        // Waits whose end a stopped daemon wrote but did not act on.
-        self.commit(|s, clock| settle::reconcile(s, clock)).await;
+        // Waits whose end a stopped daemon wrote but did not act on, and approvals it did not
+        // carry out.
+        self.commit(|s, clock| {
+            let mut events = settle::reconcile(s, clock);
+            events.extend(crate::decide::unfinished(s, clock));
+            events
+        })
+        .await;
         self.evaluate().await;
         loop {
             tokio::select! {

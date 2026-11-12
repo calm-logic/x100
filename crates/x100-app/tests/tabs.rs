@@ -1,7 +1,6 @@
 //! The tabs after the Fernleaf script, against a real daemon on the fake clock, without a display:
 //! each shows what the client library holds, a file removed from Files is in the Log, a task raised
-//! shows in Tasks, Ask me about reaches the daemon, a control whose method is not available yet
-//! says so, and one task changing redraws its row alone.
+//! shows in Tasks, Ask me about reaches the daemon, and one task changing redraws its row alone.
 
 mod common;
 
@@ -19,10 +18,10 @@ use x100_app::specs::{SpecModel, SpecsView};
 use x100_app::tabs::{MainPanel, Tab};
 use x100_app::tasks::{Status, TaskModel, TasksView};
 use x100_client::Client;
-use x100_core::action::{AskMeAbout, Decision};
+use x100_core::action::AskMeAbout;
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
-use x100_core::id::{ActionId, ProjectId};
+use x100_core::id::ProjectId;
 use x100_core::party::Party;
 use x100_core::spec::SpecKind;
 
@@ -604,46 +603,6 @@ fn running_without_a_sandbox_is_shown_and_set_from_settings() {
             vcx_read(&o.vcx, |cx| part.read(cx).outcome().cloned()),
             None
         );
-    }
-}
-
-#[test]
-fn approve_and_deny_say_so_while_the_daemon_has_not_made_them() {
-    let mut o = script();
-    let held = o.vcx.read(|cx| {
-        o.window
-            .read(cx)
-            .unwrap()
-            .project(o.project)
-            .unwrap()
-            .chat
-            .read(cx)
-            .held()
-            .clone()
-    });
-    // The script raises nothing that waits for the builder, so there is nothing in the strip.
-    assert!(vcx_read(&o.vcx, |cx| held.read(cx).shown().is_empty()));
-    // The control's request still goes to the daemon, which answers for an action it does not hold.
-    let action = ActionId::from_u128(1);
-    held.update(&mut o.vcx, |h, cx| h.decide(action, Decision::Approved, cx));
-    o.pump_until("the answer is back", |vcx| {
-        vcx.read(|cx| held.read(cx).outcome(action).is_some())
-            && vcx.read(|cx| held.read(cx).outcome(action).cloned()) != Some(Outcome::Working)
-    });
-    let outcome = vcx_read(&o.vcx, |cx| held.read(cx).outcome(action).cloned()).unwrap();
-    match outcome {
-        Outcome::Unavailable(text) => {
-            assert!(
-                text.starts_with("Not available yet: it arrives with M"),
-                "{text}"
-            )
-        }
-        // Once the daemon makes it, an action it does not hold is refused as such.
-        Outcome::Failed(why) => assert!(
-            why.to_lowercase().contains("not found") || why.contains("held"),
-            "{why}"
-        ),
-        Outcome::Working => unreachable!(),
     }
 }
 

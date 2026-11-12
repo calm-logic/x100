@@ -7927,6 +7927,7 @@ dependencies = [
  "ulid",
  "x100-core",
  "x100-drivers",
+ "x100-gate",
  "x100-jobs",
  "x100-router",
  "x100-sandbox",
@@ -7990,6 +7991,7 @@ version = "0.0.0"
 dependencies = [
  "aho-corasick",
  "apple-native-keyring-store",
+ "async-trait",
  "base64 0.22.1",
  "bytes",
  "chacha20poly1305",

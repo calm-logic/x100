@@ -86,7 +86,7 @@ async fn curl_goes_through_the_proxy_trusting_only_its_authority() {
     .await;
     let route = s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let authority = s.vault.authority().unwrap();
@@ -304,7 +304,7 @@ async fn claude_code_with_a_reference_for_its_key_reaches_the_provider_with_the_
     let route = run
         .s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let authority = run.s.vault.authority().unwrap();
@@ -362,7 +362,7 @@ async fn codex_with_a_reference_for_its_key_reaches_the_provider_with_the_value(
     let route = run
         .s
         .proxy
-        .open_route(requester(Purpose::Work), &[])
+        .open_route(requester(Purpose::Work), &[], &[])
         .await
         .unwrap();
     let authority = run.s.vault.authority().unwrap();

@@ -130,8 +130,17 @@ pub fn describe(state: &ProjectState, item: &InboxItem) -> String {
             }
             None => format!("A report on a task that is not in the log.\nReport on: {task}"),
         },
-        InboxItem::Decision { action, decision } => {
-            format!("Your held action was {decision:?} by the builder.\nAction: {action}")
+        InboxItem::Decision {
+            action,
+            decision,
+            result,
+        } => {
+            let mut text = format!("Your held action was {decision:?} by the builder.");
+            if let Some(result) = result {
+                text.push_str(&format!("\n{result}"));
+            }
+            text.push_str(&format!("\nAction: {action}"));
+            text
         }
         InboxItem::Job { job, note } => {
             format!("A scheduled job woke you: {note}\nJob: {job}")

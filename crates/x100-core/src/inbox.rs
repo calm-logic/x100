@@ -27,6 +27,10 @@ pub enum InboxItem {
     Decision {
         action: ActionId,
         decision: Decision,
+        /// What came of it, in words the agent can act on: the reply of a held tool call the
+        /// daemon carried out, why it failed, or that a command or request may now be tried
+        /// once more. `None` when there is nothing to add to the decision.
+        result: Option<String>,
     },
     /// A job woke it.
     Job { job: JobId, note: String },

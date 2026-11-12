@@ -8,7 +8,28 @@
 use x100_core::action::{ActionState, Request, Risk};
 use x100_core::fold::ProjectState;
 
+use crate::gate::{Ruling, from_rule};
 use crate::rule::{self, Matched, Rule};
+
+/// Egress that x100 settled itself, so the gate records it without judging it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settled {
+    /// The harness's own traffic to the model provider x100 started the driver on.
+    Provider,
+    /// The proxy refused the host before anything went out.
+    RefusedByProxy,
+}
+
+/// The ruling recorded for egress x100 settled: allowed, since the gate holds nothing back from
+/// it, with the row that says why.
+pub fn settled(how: Settled, host: &str, method: &str) -> Ruling {
+    let row = match how {
+        Settled::Provider => &rule::EGRESS_PROVIDER,
+        Settled::RefusedByProxy => &rule::EGRESS_REFUSED,
+    };
+    let detail = format!("{} {}", method.to_uppercase(), normal(host));
+    Ruling::Allow(from_rule(&Matched::because(row, detail)))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reading {

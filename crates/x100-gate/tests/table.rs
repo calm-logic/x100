@@ -509,6 +509,25 @@ fn egress_is_ruled_by_host_and_method() {
     }
 }
 
+/// What x100 settled itself, the driver's own provider and a host the proxy refuses, is recorded
+/// as allowed at every level, under a row of the table, and never asks the classifier.
+#[test]
+fn egress_x100_settled_is_recorded_under_its_own_rows() {
+    for (how, id) in [
+        (x100_gate::Settled::Provider, "egress.own_provider"),
+        (
+            x100_gate::Settled::RefusedByProxy,
+            "egress.refused_by_proxy",
+        ),
+    ] {
+        let r = x100_gate::settled(how, "API.Example.com:443", "post");
+        assert!(!r.is_held());
+        assert_eq!(rule_of(&r).as_deref(), Some(id));
+        assert!(r.classification().why.contains("POST api.example.com"));
+        assert!(rule::ALL.iter().any(|row| row.id == id));
+    }
+}
+
 #[test]
 fn a_new_host_goes_to_the_classifier_and_a_host_the_builder_approved_does_not() {
     let (mut state, f) = fern(AskMeAbout::HighRiskOnly);

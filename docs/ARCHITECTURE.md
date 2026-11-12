@@ -590,7 +590,16 @@ actions are events; the app shows them; approval or denial is an event the orche
 decision. On Approve, the daemon carries out a held tool call itself, or, for a command stopped by a harness's
 permission hook, allows that exact command once for that agent. A permission hook pauses the harness's turn
 while it is unanswered, so the daemon answers a held command at once with a denial that says it is held. The decision goes to the agent's inbox, so it
-reaches the agent even if its driver has changed meanwhile.
+reaches the agent even if its driver has changed meanwhile, and carries the result: the held call's reply, why
+it failed, or that the same request may be sent once more.
+
+**proposed** What the gate rules on: every daemon tool call, every merge, and every request through the vault's
+proxy, which asks before anything leaves. A held request gets a 403 naming the action, and on Approve the
+agent's identical retry goes through once. Grants are rebuilt from the log, so they survive a restart. A call
+the tools would refuse anyway is refused before any hold. A driver's traffic to its own provider and hosts
+the proxy refuses are recorded and not judged. Commands inside a sandbox are not gated. The classifier's
+one-off call runs in the acting agent's sandbox on a route that reaches only its provider, and is charged to
+that agent's payer. A new kind of action is one row in the table in `x100-gate/src/rule.rs`.
 
 ## Memory, skills and reflection
 

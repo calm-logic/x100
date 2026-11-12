@@ -18,20 +18,24 @@
 //!   the vault's proxy ([`sandbox`]), and everything a driver emits is redacted of credential
 //!   values before it is recorded.
 //!
-//! The seam a later milestone attaches to, with today's trivial behaviour:
-//! - [`Gate`] classifies each action, an egress through the proxy among them, and allows or
-//!   holds it (M12).
+//! - Every tool call, merge, request out through the proxy and command a permission hook stops
+//!   is an action the gate of `x100-gate` allows or holds for the builder ([`gate`], [`admit`]),
+//!   and the builder's decision is carried out and told to the agent ([`decide`]).
 
+mod admit;
 mod branches;
 mod builder;
 mod ctx;
+mod decide;
 mod desk;
 mod driver;
+mod egress;
 mod fleet;
 mod gate;
 mod ids;
 mod jobs;
 mod mcp;
+mod oneoff;
 pub mod pack;
 mod processes;
 mod project;
@@ -45,14 +49,15 @@ mod store;
 mod tools;
 mod turns;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::{mpsc, oneshot};
+use x100_core::action::Decision;
 use x100_core::effort::EffortRange;
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::{
-    AgentId, DriverId, FileId, HarnessId, JobId, MachineId, MessageId, ProjectId, TaskId,
+    ActionId, AgentId, DriverId, FileId, HarnessId, JobId, MachineId, MessageId, ProjectId, TaskId,
 };
 use x100_core::job::{DaemonJob, Job, ProjectJob};
 use x100_core::money::Money;
@@ -68,7 +73,7 @@ use x100_store::{DaemonLog, ProjectStore};
 
 pub use builder::Refused;
 pub use desk::{Desk, Refusal};
-pub use gate::{AllowAll, Gate, Ruling};
+pub use egress::EgressEnd;
 pub use ids::new_id;
 pub use mcp::ToolServer;
 pub use processes::{ProcessRegistry, Reaped};
@@ -152,6 +157,10 @@ pub(crate) struct Shared {
     pub sandboxes: Arc<sandbox::Sandboxes>,
     pub redactor: Redactor,
     pub serial: bool,
+    /// Approved requests out that a request now going through is using, until its report.
+    pub in_flight: Mutex<HashSet<ActionId>>,
+    /// The drivers of one-off calls under way, whose routes reach their provider alone.
+    pub one_offs: Mutex<HashSet<DriverId>>,
 }
 
 impl Shared {
@@ -221,6 +230,8 @@ impl Orchestrator {
                 sandboxes,
                 redactor: config.redactor,
                 serial: config.serial,
+                in_flight: Mutex::new(HashSet::new()),
+                one_offs: Mutex::new(HashSet::new()),
             }),
             projects: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -403,44 +414,17 @@ impl Orchestrator {
         self.reconsider();
     }
 
-    /// A request a driver sent out through the proxy, after it went: recorded as an action with
-    /// the gate's ruling on it, and with the credential uses it made. The proxy cannot hold a
-    /// request yet, so a ruling to hold is recorded and nothing more.
-    pub async fn egress(
+    /// The builder approves or denies a held action. What it calls for is done before this
+    /// returns, and the agent is told through its inbox.
+    pub async fn decide(
         &self,
         project: ProjectId,
-        agent: AgentId,
-        request: x100_core::action::Request,
-        uses: Vec<x100_core::credential::CredentialUse>,
-        error: Option<String>,
-    ) {
-        let Ok(ctx) = self.ctx(project) else {
-            return;
-        };
-        let gate = self.shared.desk.gate();
-        blocking(move || {
-            let committed = ctx.commit(|s, clock| {
-                let action = x100_core::action::Action {
-                    id: new_id(clock, x100_core::id::ActionId::new),
-                    agent,
-                    request,
-                };
-                let ruling = gate.rule(s, &action);
-                let mut events = gate::proposed(&action, &ruling);
-                events.push(gate::finished(action.id, error));
-                events.extend(uses.into_iter().map(|u| {
-                    (
-                        Actor::Daemon,
-                        x100_core::event::ProjectEvent::CredentialUsed(u),
-                    )
-                }));
-                (events, ())
-            });
-            if let Err(e) = committed {
-                eprintln!("x100: an egress of project {project} could not be recorded: {e}");
-            }
-        })
-        .await;
+        action: ActionId,
+        decision: Decision,
+    ) -> Result<(), Refused> {
+        let ctx = self.ctx(project)?;
+        let shared = Arc::clone(&self.shared);
+        blocking(move || decide::decide(&shared, &ctx, action, decision)).await
     }
 
     /// A job of the daemon's log fired: a cool-off ends, if that job is still what ends it, and

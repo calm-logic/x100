@@ -27,7 +27,7 @@ use x100_core::time::{Clock, FakeClock, Timestamp};
 use x100_drivers::fake::{DaemonTools, FakeHarness};
 use x100_drivers::{DriverHandle, DriverSpec, Harness, StartError, ToolEndpoint};
 use x100_jobs::Scheduler;
-use x100_orch::{AllowAll, Config, Containment, Desk, Orchestrator, ProcessRegistry, ToolServer};
+use x100_orch::{Config, Containment, Desk, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::{DaemonLog, ProjectStore};
 
 pub const FAKE: &str = env!("CARGO_BIN_EXE_x100-orch-fake-harness");
@@ -277,11 +277,7 @@ impl World {
             &setup.settings,
         );
         let settings = settings_of(&daemon);
-        let desk = Desk::new(
-            Arc::new(AllowAll),
-            Arc::clone(&settings),
-            x100_vault::Redactor::for_values(&[]),
-        );
+        let desk = Desk::new(Arc::clone(&settings), x100_vault::Redactor::for_values(&[]));
         let tools = match setup.serve {
             true => Some(
                 ToolServer::start(Arc::clone(&desk))

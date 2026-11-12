@@ -89,7 +89,8 @@ impl Sandboxes {
     }
 
     /// Places `driver` of `agent`, which works in `dir`, in the agent's sandbox, making one if
-    /// it has none over `dir`. `login_hosts` are relayed untouched by its proxy route, and
+    /// it has none over `dir`. `login_hosts` are relayed untouched by its proxy route,
+    /// `provider` are the hosts of its model provider, which the gate is not asked about, and
     /// `logins` are the login directories a sandbox shows read-write.
     #[allow(clippy::too_many_arguments)]
     pub async fn place(
@@ -100,6 +101,7 @@ impl Sandboxes {
         tools: Option<SocketAddr>,
         logins: Vec<PathBuf>,
         login_hosts: &[String],
+        provider: &[String],
     ) -> Result<Placed, String> {
         let (agent, driver) = (requester.agent, requester.driver);
         if settings.run_without_sandbox {
@@ -108,7 +110,7 @@ impl Sandboxes {
                  run_without_sandbox setting allows: it can do anything you can"
             );
             let state = self.containment.dir.join("uncontained").join(short(driver));
-            let (route, env) = self.route(requester, login_hosts, None).await?;
+            let (route, env) = self.route(requester, login_hosts, provider, None).await?;
             return Ok(Placed {
                 wrap: CommandWrapper::identity(),
                 expose: Expose::nothing(),
@@ -138,7 +140,9 @@ impl Sandboxes {
             )
             .await?;
         let sandbox = &agent_box.sandbox;
-        let (route, env) = self.route(requester, login_hosts, Some(sandbox)).await?;
+        let (route, env) = self
+            .route(requester, login_hosts, provider, Some(sandbox))
+            .await?;
         let forwarder = sandbox.forwarder();
         Ok(Placed {
             wrap: sandbox.wrap(),
@@ -229,14 +233,16 @@ impl Sandboxes {
         &self,
         requester: Requester,
         login_hosts: &[String],
+        provider: &[String],
         sandbox: Option<&Sandbox>,
     ) -> Result<(Option<Route>, Vec<(String, String)>), String> {
         let Some((proxy, cert)) = &self.containment.proxy else {
             return Ok((None, Vec::new()));
         };
         let hosts: Vec<&str> = login_hosts.iter().map(String::as_str).collect();
+        let provider: Vec<&str> = provider.iter().map(String::as_str).collect();
         let route = proxy
-            .open_route(requester, &hosts)
+            .open_route(requester, &hosts, &provider)
             .await
             .map_err(|e| format!("could not open a route on the proxy: {e}"))?;
         if let Some(sandbox) = sandbox {
@@ -269,7 +275,7 @@ impl Sandboxes {
         let logs = sandbox.home().join("processes");
         std::fs::create_dir_all(&logs).map_err(|e| format!("making {}: {e}", logs.display()))?;
         let log = logs.join(format!("{}.log", name.0));
-        let (route, mut env) = self.route(requester, &[], Some(sandbox)).await?;
+        let (route, mut env) = self.route(requester, &[], &[], Some(sandbox)).await?;
         env.extend(
             ["PATH", "LANG"]
                 .into_iter()

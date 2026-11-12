@@ -100,14 +100,22 @@ impl AllowedOnce {
     }
 
     /// Every approved command and egress action that was not carried out, for an agent that still
-    /// has a task. The grant's task is the agent's current one, which is the nearest the log
-    /// comes to the one it had when the builder approved.
+    /// has a task, or that has never had one, such as a CEO before its project is set up: no task
+    /// of its has ended, so nothing has forgotten its grants. The grant's task is the agent's
+    /// current one, which is the nearest the log comes to the one it had when the builder
+    /// approved.
     pub fn from_state(state: &ProjectState) -> Self {
         let mut once = Self::new();
         for record in state.actions() {
             let agent = record.action.agent;
             let working = state.agent(agent).is_some_and(|a| !a.open_tasks.is_empty());
-            if record.state == ActionState::Approved && working {
+            let never_tasked = || {
+                state.agent(agent).is_some()
+                    && !state
+                        .tasks()
+                        .any(|t| t.state.assignment().is_some_and(|a| a.assignee == agent))
+            };
+            if record.state == ActionState::Approved && (working || never_tasked()) {
                 let task = state.current_task(agent).map(|t| t.task.id);
                 once.grant(&record.action, task);
             }

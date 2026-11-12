@@ -280,7 +280,8 @@ levels. Hold, approve, deny, resume. A held action does not hold up the driver.
 Check: table tests for the rules. End to end with the fake harness: at "High risk only", a production deploy
 is held and a file edit is not; Approve resumes it; Deny drops it and the agent is told; at "Nothing" neither
 is held; at "Every decision" both are. An Approve that arrives after the agent's driver was replaced reaches
-the new driver.
+the new driver. A file edit inside a sandbox is never an action, so the check's file edit is `write_spec` and
+its deploy is a write to a hosting service's API.
 
 ### M12I. Integrations, with Homebox first
 

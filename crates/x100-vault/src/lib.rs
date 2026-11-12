@@ -65,7 +65,8 @@ use x100_core::id::CredentialRef;
 
 pub use keychain::{Keychain, NoKeychain, OsKeychain, Unavailable};
 pub use proxy::{
-    Authority, EgressOutcome, EgressReport, Proxy, ProxyConfig, Route, UpstreamTrust, sandbox_env,
+    Admission, Admit, Authority, EgressOutcome, EgressReport, Proxy, ProxyConfig, Route,
+    UpstreamTrust, sandbox_env,
 };
 pub use redact::{RedactStream, Redactor};
 pub use scope::Requester;

@@ -22,7 +22,7 @@ use x100_core::credential::{UseOutcome, Via};
 use x100_core::id::CredentialRef;
 
 use super::body::{BoxError, Transform, Transformed};
-use super::{EgressOutcome, EgressReport, Shared};
+use super::{Admit, EgressOutcome, EgressReport, Shared};
 use crate::refs::{self, Decide, Swapper};
 use crate::scope::Requester;
 use crate::store::Denied;
@@ -40,6 +40,8 @@ pub(crate) struct RouteCtx {
     pub(crate) requester: Requester,
     pub(crate) token: String,
     pub(crate) pass_through: std::collections::BTreeSet<String>,
+    /// The driver's own model provider, which the admission is not asked about.
+    pub(crate) provider: std::collections::BTreeSet<String>,
     pub(crate) closed: watch::Receiver<()>,
 }
 
@@ -246,6 +248,26 @@ async fn forward(
     if ctx.shared.is_refused(&target.host) {
         report.finish(EgressOutcome::HostRefused);
         return plain(StatusCode::FORBIDDEN, "host refused");
+    }
+    if !ctx.provider.contains(&target.host.to_ascii_lowercase()) {
+        let Some(admission) = ctx.shared.admission.get() else {
+            report.finish(EgressOutcome::NotAdmitted);
+            return plain(
+                StatusCode::FORBIDDEN,
+                "x100's gate is not ready, so nothing goes out yet",
+            );
+        };
+        let method = req.method().as_str().to_owned();
+        match admission.admit(ctx.requester, &method, &target.host).await {
+            Admit::Go { action } => report.of(action),
+            Admit::Refuse { action, why } => {
+                if let Some(action) = action {
+                    report.of(action);
+                }
+                report.finish(EgressOutcome::NotAdmitted);
+                return plain(StatusCode::FORBIDDEN, &why);
+            }
+        }
     }
     let head_request = req.method() == Method::HEAD;
     let (mut parts, body) = req.into_parts();
@@ -551,10 +573,15 @@ impl Report {
                 method: method.to_owned(),
                 host: host.to_owned(),
                 port,
+                action: None,
                 uses: Vec::new(),
                 outcome: EgressOutcome::Failed("the request was abandoned".into()),
             }),
         }))
+    }
+
+    fn of(&self, action: x100_core::id::ActionId) {
+        self.0.report.lock().expect("report").action = Some(action);
     }
 
     fn finish(self, outcome: EgressOutcome) {

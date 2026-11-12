@@ -19,10 +19,11 @@ use x100_core::party::{Actor, Party};
 use x100_core::terminal::Chunk;
 use x100_core::transcript::{Entry, Item, TurnEnd as Ended};
 use x100_drivers::terminal::Size;
-use x100_drivers::{Decision, DriverControl, DriverOutput, Spent, StartError, TurnEnd};
+use x100_drivers::{DriverControl, DriverOutput, Spent, StartError, TurnEnd};
 use x100_router::Choice;
 
 use crate::Shared;
+use crate::admit;
 use crate::branches::{self, Ready};
 use crate::ctx::{Events, ProjectCtx, git_of};
 use crate::pack;
@@ -425,16 +426,12 @@ impl Actor_ {
                 })
                 .await;
             }
+            // Answered at once, since the hook pauses the harness's turn while it waits: a held
+            // command is denied with a reason that says it is held.
             DriverOutput::PermissionRequest(request) => {
-                // The gate is M12. Until then nothing is allowed that the harness would ask about.
-                let _ = control
-                    .answer(
-                        request.id,
-                        Decision::Deny {
-                            reason: spec::REFUSED.into(),
-                        },
-                    )
-                    .await;
+                let at = (&self.shared, &self.ctx, self.agent, self.driver);
+                let decision = admit::hook(at, &request).await;
+                let _ = control.answer(request.id, decision).await;
             }
             DriverOutput::Spent(spent) => self.charge(spent).await,
             DriverOutput::Context(fill) => {

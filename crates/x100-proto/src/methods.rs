@@ -218,7 +218,11 @@ methods! {
     /// Cancels a scheduled job. A job that has fired, or was cancelled, is `wrong_state`.
     CancelJob, "jobs.cancel", CancelJob => Done, [NotFound, WrongState];
 
-    /// Approves or denies a held action. An action that is not held is `wrong_state`.
+    /// Approves or denies a held action, and returns once what it calls for is done: on Approve a
+    /// held tool call is carried out, a held merge is done, and a held command or request out is
+    /// allowed once, for the agent's next try; on Deny nothing runs, and a held merge's task goes
+    /// back to its assignee. Either way the agent is told through its inbox. An action that is not
+    /// held is `wrong_state`.
     DecideAction, "actions.decide", DecideAction => Done, [NotFound, WrongState];
 
     /// Sets a lead's budget. All leads' budgets together may not pass the project's total.

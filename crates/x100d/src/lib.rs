@@ -29,7 +29,7 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use x100_core::time::Clock;
-use x100_orch::{AllowAll, Containment, Desk, Orchestrator, ProcessRegistry, ToolServer};
+use x100_orch::{Containment, Desk, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
@@ -125,11 +125,7 @@ impl Daemon {
 
         // The harnesses reach the tools through the desk, so it exists before them, and so does
         // the address every driver is given.
-        let desk = Desk::new(
-            Arc::new(AllowAll),
-            Arc::clone(&settings),
-            opened.vault.redactor(),
-        );
+        let desk = Desk::new(Arc::clone(&settings), opened.vault.redactor());
         let tools = ToolServer::start(Arc::clone(&desk)).await?;
         let found = discover::discover(&config, &log, desk.clone(), no_sandbox.as_deref())?;
         // A rescan makes harnesses again, which reach the tools through the same desk.
@@ -156,6 +152,8 @@ impl Daemon {
             // Turns run side by side, except where a fake clock asks for a repeatable run.
             serial: config.fake_clock.is_some(),
         });
+        // Before any driver starts: until then the proxy lets nothing out.
+        opened.proxy.admit_with(orch.admission());
         let reports = vault::drain(opened.reports, orch.clone());
         let hub = Arc::new(Hub::new(
             config.clone(),
