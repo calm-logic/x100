@@ -132,13 +132,13 @@ pub enum TeamError {
     CeoRetires,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct Member {
     pub(crate) position: Position,
     pub(crate) retired: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Team {
     pub(crate) ceo: AgentId,
     pub(crate) members: BTreeMap<AgentId, Member>,
@@ -186,6 +186,14 @@ impl Team {
             .keys()
             .copied()
             .filter(move |a| self.parent(*a) == Some(agent))
+    }
+
+    /// Each lead on the team and its budget. Retired leads are left out.
+    pub fn lead_budgets(&self) -> impl Iterator<Item = (AgentId, Money)> + '_ {
+        self.members.iter().filter_map(|(id, m)| match m.position {
+            Position::Lead { budget, .. } if !m.retired => Some((*id, budget)),
+            _ => None,
+        })
     }
 
     /// The effort range in force for `agent`: its own, or for a worker without one, its parent's.

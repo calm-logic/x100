@@ -1,11 +1,13 @@
 //! The team's shape: one root, one parent each, and who pays.
 
 use proptest::prelude::*;
+use x100_core::action::AskMeAbout;
 use x100_core::agent::Position;
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::id::AgentId;
-use x100_core::ledger::Payer;
-use x100_core::money::Money;
+use x100_core::ledger::{Budgets, LeadsOverTotal, Payer};
+use x100_core::money::{Money, Percent};
+use x100_core::project::Settings;
 use x100_core::team::{Team, TeamError, TeamOp};
 
 fn id(n: u128) -> AgentId {
@@ -201,4 +203,75 @@ proptest! {
             }
         }
     }
+}
+
+fn settings(total: u64) -> Settings {
+    Settings {
+        ask_me_about: AskMeAbout::HighRiskOnly,
+        budget: Money::from_dollars(total),
+        lab_share: Percent::new(10).unwrap(),
+        allowed: Default::default(),
+    }
+}
+
+fn lead_with(n: u128, dollars: u64) -> TeamOp {
+    TeamOp::Join {
+        agent: id(n),
+        position: Position::Lead {
+            effort: EffortRange::FULL,
+            budget: Money::from_dollars(dollars),
+        },
+    }
+}
+
+fn check(total: u64, team: &Team) -> Result<(), LeadsOverTotal> {
+    Budgets::in_force(&settings(total), team).check_leads()
+}
+
+#[test]
+fn a_form_team_whose_budgets_pass_the_total_is_refused() {
+    let base = Team::new(id(0), EffortRange::FULL);
+    let fits = [lead_with(1, 20), lead_with(2, 30)]
+        .iter()
+        .try_fold(base.clone(), |t, op| t.apply(op))
+        .unwrap();
+    assert_eq!(check(50, &fits), Ok(()));
+    let over = fits.apply(&lead_with(3, 1)).unwrap();
+    assert_eq!(
+        check(50, &over),
+        Err(LeadsOverTotal {
+            leads: Money::from_dollars(51),
+            total: Money::from_dollars(50)
+        })
+    );
+}
+
+#[test]
+fn set_budget_and_the_builders_changes_are_checked_against_the_total() {
+    let t = [lead_with(1, 20), lead_with(2, 20)]
+        .iter()
+        .try_fold(Team::new(id(0), EffortRange::FULL), |t, op| t.apply(op))
+        .unwrap();
+    let raised = t
+        .apply(&TeamOp::SetBudget {
+            agent: id(1),
+            budget: Money::from_dollars(31),
+        })
+        .unwrap();
+    assert!(check(50, &raised).is_err());
+    // The builder lowering the total under what the leads hold is refused the same way.
+    assert!(check(39, &t).is_err());
+    assert_eq!(check(40, &t), Ok(()));
+}
+
+#[test]
+fn a_retired_leads_budget_no_longer_counts() {
+    let t = [lead_with(1, 30), lead_with(2, 20)]
+        .iter()
+        .try_fold(Team::new(id(0), EffortRange::FULL), |t, op| t.apply(op))
+        .unwrap();
+    let t = t.apply(&TeamOp::Retire { agent: id(2) }).unwrap();
+    let t = t.apply(&lead_with(3, 20)).unwrap();
+    assert_eq!(check(50, &t), Ok(()));
+    assert_eq!(t.lead_budgets().count(), 2);
 }

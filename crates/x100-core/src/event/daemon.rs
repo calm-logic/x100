@@ -4,6 +4,7 @@ use crate::credential::{Credential, CredentialScope};
 use crate::harness::{CoolOff, Harness, HarnessModel, Machine};
 use crate::id::{CredentialRef, JobId, MachineId, ProjectId};
 use crate::job::{DaemonJob, Job, JobEvent};
+use crate::settings::DaemonSetting;
 
 /// An event in the daemon's log: what belongs to no project.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -44,6 +45,9 @@ pub enum DaemonEvent {
         name: String,
         path: String,
     },
+    /// The builder changed one of the daemon's settings. Until the first change each is at its
+    /// default.
+    SettingChanged(DaemonSetting),
     JobScheduled(Job<DaemonJob>),
     Job {
         job: JobId,

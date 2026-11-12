@@ -867,6 +867,7 @@ dependencies = [
  "stateright",
  "thiserror",
  "ulid",
+ "x100-core",
 ]
 
 [[package]]

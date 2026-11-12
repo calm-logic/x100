@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{AgentId, DriverId, OneOffCallId};
 use crate::money::{Money, Usage};
+use crate::project::Settings;
+use crate::team::Team;
 
 /// The budget line a charge is made against. Every line also counts against the project's total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -26,8 +28,18 @@ pub struct Charge {
     pub payer: Payer,
     pub source: ChargeSource,
     pub usage: Usage,
-    /// What the harness reported, or the tokens at the model's listed price.
     pub cost: Money,
+    pub basis: CostBasis,
+}
+
+/// Where a charge's cost came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostBasis {
+    /// The harness reported it.
+    Reported,
+    /// The tokens it reported, at the model's listed price.
+    Listed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -84,7 +96,39 @@ impl Spend {
     }
 }
 
+/// The leads' budgets together would be more than the project's total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the leads' budgets add up to {leads:?}, more than the project's total of {total:?}")]
+pub struct LeadsOverTotal {
+    pub leads: Money,
+    pub total: Money,
+}
+
 impl Budgets {
+    /// The limits a project's settings and team set. A retired lead's budget is no longer in force.
+    pub fn in_force(settings: &Settings, team: &Team) -> Budgets {
+        Budgets {
+            project: settings.budget,
+            lab: settings.lab_cap(),
+            leads: team.lead_budgets().collect(),
+        }
+    }
+
+    /// The leads' budgets together never exceed the project's total. A `form_team`, a `set_budget`
+    /// or a builder's change to a lead's budget or to the total is checked by building the budgets
+    /// it would leave in force and asking this; one that fails is refused.
+    pub fn check_leads(&self) -> Result<(), LeadsOverTotal> {
+        let leads = self.leads.values().fold(Money::ZERO, |sum, b| sum + *b);
+        if leads > self.project {
+            Err(LeadsOverTotal {
+                leads,
+                total: self.project,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn of(&self, payer: Payer) -> Money {
         match payer {
             Payer::Project => self.project,

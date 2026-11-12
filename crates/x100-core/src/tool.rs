@@ -10,6 +10,7 @@ use crate::id::{AgentId, FileId, JobId, MessageId, TaskId};
 use crate::job::Schedule;
 use crate::memory::{NoteName, SkillRef};
 use crate::money::Money;
+use crate::process::ProcessName;
 use crate::spec::{SpecKind, SpecStatus};
 use crate::task::{Progress, Verdict};
 use crate::team::{LeadSpec, TeamChange};
@@ -64,9 +65,12 @@ pub enum ToolCall {
         part: Option<String>,
         attachments: Vec<FileId>,
     },
+    /// `effort` is set when the assignee says the task needs a different effort. The daemon clamps
+    /// it into the agent's range and records it as [`crate::task::TaskEvent::EffortChanged`].
     UpdateTask {
         task: TaskId,
         progress: Progress,
+        effort: Option<Effort>,
     },
     WriteSpec {
         spec: SpecKind,
@@ -85,6 +89,14 @@ pub enum ToolCall {
     },
     LoadSkill {
         skill: SkillRef,
+    },
+    /// Run a command in the agent's sandbox, owned by the sandbox so it outlives the driver.
+    StartProcess {
+        name: ProcessName,
+        command: String,
+    },
+    StopProcess {
+        name: ProcessName,
     },
     Remember {
         note: NoteName,

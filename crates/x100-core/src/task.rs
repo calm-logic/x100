@@ -82,7 +82,12 @@ pub enum TaskFailure {
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     Accept,
-    SendBack { note: String },
+    /// `effort` is set when the delegator asks for more. The daemon clamps it into the assignee's
+    /// range and records it as [`TaskEvent::EffortChanged`].
+    SendBack {
+        note: String,
+        effort: Option<Effort>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -45,7 +45,7 @@ pub enum InboxItem {
 }
 
 /// Which items an agent has been given and not yet handled.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Inbox {
     /// `None` for an item waiting for a turn, or the driver whose current turn holds it.
     items: BTreeMap<InboxItemId, Option<DriverId>>,

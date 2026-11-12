@@ -144,6 +144,8 @@ pub enum RetireReason {
     ContextFull,
     TooManyTasks,
     WarmTooLong,
+    /// It has been alive longer than the daemon's setting allows.
+    TooOld,
     /// Its task was accepted and its harness cannot compact.
     CannotCompact,
     AgentRetired,

@@ -14,6 +14,7 @@ use crate::ledger::{BudgetReached, Charge};
 use crate::memory::{NoteName, SkillRef, SkillVersion};
 use crate::message::Message;
 use crate::party::Party;
+use crate::process::{Process, ProcessEnd, ProcessName};
 use crate::project::{SettingChange, Settings};
 use crate::spec::SpecRevision;
 use crate::task::{Opening, Task, TaskEvent};
@@ -53,6 +54,13 @@ pub enum ProjectEvent {
     Driver {
         driver: DriverId,
         event: DriverEvent,
+    },
+    /// The daemon started a process in the agent's sandbox, from `start_process`.
+    ProcessStarted(Process),
+    ProcessStopped {
+        agent: AgentId,
+        name: ProcessName,
+        end: ProcessEnd,
     },
     /// The agent's worktree was committed to its hidden checkpoint ref at the end of a turn, or
     /// before a handoff.

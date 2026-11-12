@@ -132,7 +132,9 @@ impl AgentEvent {
 /// The agent machine. Planned → Working when its first inbox item arrives. Working → Waiting when
 /// it waits, or when no driver can be found; Waiting → Working when anything reaches its inbox, or,
 /// waiting for a driver, when one is found. Working → Idle; Idle → Working when anything reaches
-/// its inbox. Idle → Retired. There is no Failed state: drivers fail, agents do not.
+/// its inbox. Waiting for a driver → Idle when that wait reached its deadline and the task was
+/// reported failed. Idle → Retired, and Planned → Retired for a lead a team change removes before
+/// any work reached it. There is no Failed state: drivers fail, agents do not.
 ///
 /// Changes to the agent's place in the team leave its state as it is, and are refused once it is
 /// retired. Whether they are allowed by the team's shape is [`crate::team::Team`]'s question.
@@ -146,8 +148,8 @@ pub fn next(state: &AgentState, event: &AgentEvent) -> Result<AgentState, Reject
         (S::Working | S::Waiting(_), E::WaitEnded { .. }) => Some(state.clone()),
         (S::Working, E::NoDriver(why)) => Some(S::Waiting(Waiting::ForDriver(why.clone()))),
         (S::Waiting(Waiting::ForDriver(_)), E::DriverFound) => Some(S::Working),
-        (S::Working, E::WentIdle) => Some(S::Idle),
-        (S::Idle, E::Retired) => Some(S::Retired),
+        (S::Working | S::Waiting(Waiting::ForDriver(_)), E::WentIdle) => Some(S::Idle),
+        (S::Planned | S::Idle, E::Retired) => Some(S::Retired),
         (_, E::EffortSet(_) | E::BudgetSet(_) | E::Moved { .. } | E::Promoted { .. }) => {
             Some(state.clone())
         }

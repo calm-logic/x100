@@ -21,11 +21,19 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   cannot state, and who must check them: fencing (M9), allow-lists, cool-offs and caps (M8), waits closed by
   the orchestrator (M6), jobs on the real clock (M4), merges only on a committed trial (M13, M14), lab
   isolation (M10, M11, M14).
+- **M1b, the folds, which completes M1.** The orchestrator's run: 99 tests pass, clippy and fmt clean. A
+  670-event scenario modelled on the Fernleaf demo folds into the state every tab reads, with assertions per
+  tab. Property tests: a snapshot sent through JSON at any split point plus the later events equals folding
+  the whole log. A rejected event is an error naming the record. Stateright still proves all seven models
+  (takeover now 288,835 states after the agent machine change) and refutes all ten broken variants.
+  `x100-core` is now the contract: only the orchestrator changes it. Later crates get the scenario builder
+  through the `testing` feature.
 
 ## In progress
 
-- M1b: the folds into tab state, plus the small changes to M1a listed under decisions. Opus subagent, owns
-  `crates/x100-core`.
+- M2, store and protocol. Sonnet subagent, owns `crates/x100-store` and `crates/x100-proto`.
+- M3, drivers and harnesses. Opus subagent, owns `crates/x100-drivers`. Real harnesses are tested against a
+  local fake provider. The paid runs wait for the owner.
 
 ## Waiting on the owner
 
@@ -105,6 +113,15 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From M1b:
+
+- **The state holds no log.** The subagent kept every event in the project state, so a snapshot grew with the
+  project. The orchestrator removed it. The Log tab pages events from the store.
+- **Defaults** for the daemon's settings: retire at 70% context, after 10 tasks or 4 hours. Stall 5 minutes.
+  Wait deadline 24 hours. Minimum repeat 5 minutes. Start pack half the window. Last handoff turn 3 minutes.
+  Three turns that neither report nor wait. Cool-off 10 minutes. Tuned in M17.
+- **Open for M6:** whether the brief is recorded as both a message and a task, as the scenario does.
 
 From M1a, where the documents were silent:
 

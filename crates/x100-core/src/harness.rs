@@ -44,6 +44,9 @@ pub struct Support {
 pub struct ModelOffer {
     pub model: ModelName,
     pub context_window: u64,
+    /// How long the provider keeps this model's prompt cache. A driver of it is kept warm this
+    /// long between turns, so a reused driver still finds its cache.
+    pub cache_lifetime: Duration,
     pub levels: Vec<(Effort, Price)>,
 }
 

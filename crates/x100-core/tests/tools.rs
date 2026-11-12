@@ -11,6 +11,7 @@ use x100_core::job::{ProjectJob, ProjectRoutine, Schedule};
 use x100_core::memory::{NoteName, SkillName, SkillRef, SkillScope};
 use x100_core::money::{Money, Percent};
 use x100_core::party::Party;
+use x100_core::process::ProcessName;
 use x100_core::spec::{SpecKind, SpecStatus};
 use x100_core::task::{Progress, Verdict};
 use x100_core::team::{LeadSpec, TeamChange};
@@ -54,6 +55,7 @@ fn every_tool_call_round_trips_inside_an_action() {
             task: TaskId::from_u128(1),
             verdict: Verdict::SendBack {
                 note: "Tests fail.".into(),
+                effort: Some(Effort::High),
             },
         },
         ToolCall::Report {
@@ -97,6 +99,7 @@ fn every_tool_call_round_trips_inside_an_action() {
         ToolCall::UpdateTask {
             task: TaskId::from_u128(1),
             progress,
+            effort: Some(Effort::Max),
         },
         ToolCall::WriteSpec {
             spec: SpecKind::Add,
@@ -113,6 +116,13 @@ fn every_tool_call_round_trips_inside_an_action() {
             url: "http://localhost:5173".into(),
         },
         ToolCall::LoadSkill { skill: skill() },
+        ToolCall::StartProcess {
+            name: ProcessName("dev".into()),
+            command: "npm run dev".into(),
+        },
+        ToolCall::StopProcess {
+            name: ProcessName("dev".into()),
+        },
         ToolCall::Remember {
             note: NoteName("deploys".into()),
             body: "Use the staging slot first.".into(),

@@ -26,12 +26,14 @@ use x100_core::harness::{
 use x100_core::id::*;
 use x100_core::inbox::InboxItem;
 use x100_core::job::{DaemonJob, Interval, Job, JobEvent, ProjectJob, Schedule};
-use x100_core::ledger::{BudgetReached, Charge, ChargeSource, Payer};
+use x100_core::ledger::{BudgetReached, Charge, ChargeSource, CostBasis, Payer};
 use x100_core::memory::{NoteName, SkillName, SkillRef, SkillScope, SkillVersion};
 use x100_core::message::{Message, Route};
-use x100_core::money::{Money, Percent, Price, Usage};
+use x100_core::money::{LongContext, Money, Percent, Price, Rates, Usage};
 use x100_core::party::{Actor, Party};
+use x100_core::process::{Process, ProcessEnd, ProcessName};
 use x100_core::project::{SettingChange, Settings};
+use x100_core::settings::DaemonSetting;
 use x100_core::spec::{SpecKind, SpecRevision, SpecStatus};
 use x100_core::task::{Assignment, Opening, Outcome, Report, Task, TaskEvent, TaskFailure};
 use x100_core::time::Timestamp;
@@ -153,6 +155,16 @@ fn project_events() -> Vec<ProjectEvent> {
                 given: vec![InboxItemId::from_u128(1)],
             },
         },
+        P::ProcessStarted(Process {
+            agent: agent(1),
+            name: ProcessName("dev".into()),
+            command: "npm run dev".into(),
+        }),
+        P::ProcessStopped {
+            agent: agent(1),
+            name: ProcessName("dev".into()),
+            end: ProcessEnd::Exited { code: Some(1) },
+        },
         P::BranchRefreshed {
             agent: agent(1),
             from: Party::Agent(agent(0)),
@@ -180,9 +192,11 @@ fn project_events() -> Vec<ProjectEvent> {
                 input: 10,
                 output: 20,
                 cache_read: 0,
-                cache_write: 0,
+                cache_write_short: 5,
+                cache_write_long: 0,
             },
             cost: Money::from_micros(400),
+            basis: CostBasis::Listed,
         }),
         P::BudgetReached(BudgetReached::Project),
         P::TaskOpened {
@@ -351,11 +365,19 @@ fn project_events() -> Vec<ProjectEvent> {
 
 fn daemon_events() -> Vec<DaemonEvent> {
     use DaemonEvent as D;
-    let price = Price {
+    let rates = Rates {
         input: Money::from_dollars(3),
         output: Money::from_dollars(15),
         cache_read: Money::from_micros(300_000),
-        cache_write: Money::from_micros(3_750_000),
+        cache_write_short: Money::from_micros(3_750_000),
+        cache_write_long: Money::from_dollars(6),
+    };
+    let price = Price {
+        rates,
+        long_context: Some(LongContext {
+            above: 200_000,
+            rates,
+        }),
     };
     let harness = Harness {
         id: HarnessId::from_u128(1),
@@ -371,6 +393,7 @@ fn daemon_events() -> Vec<DaemonEvent> {
         models: vec![ModelOffer {
             model: ModelName("model-a".into()),
             context_window: 200_000,
+            cache_lifetime: Duration::from_secs(300),
             levels: vec![(Effort::Low, price)],
         }],
     };
@@ -423,6 +446,7 @@ fn daemon_events() -> Vec<DaemonEvent> {
             name: "Fernleaf".into(),
             path: "/home/b/fernleaf".into(),
         },
+        D::SettingChanged(DaemonSetting::StallTimeout(Duration::from_secs(600))),
         D::JobScheduled(Job {
             id: JobId::from_u128(1),
             when: Schedule::Once { at: at(60_000) },
@@ -447,6 +471,8 @@ fn project_variant(e: &ProjectEvent) -> &'static str {
         P::Agent { .. } => "Agent",
         P::DriverStarted(_) => "DriverStarted",
         P::Driver { .. } => "Driver",
+        P::ProcessStarted(_) => "ProcessStarted",
+        P::ProcessStopped { .. } => "ProcessStopped",
         P::Checkpointed { .. } => "Checkpointed",
         P::BranchRefreshed { .. } => "BranchRefreshed",
         P::OneOffCalled(_) => "OneOffCalled",
@@ -486,6 +512,7 @@ fn daemon_variant(e: &DaemonEvent) -> &'static str {
         D::CredentialScopeSet { .. } => "CredentialScopeSet",
         D::CredentialRemoved { .. } => "CredentialRemoved",
         D::ProjectAdded { .. } => "ProjectAdded",
+        D::SettingChanged(_) => "SettingChanged",
         D::JobScheduled(_) => "JobScheduled",
         D::Job { .. } => "Job",
     }
@@ -512,10 +539,10 @@ where
 
 #[test]
 fn every_project_event_round_trips() {
-    round_trip(&project_events(), project_variant, 29);
+    round_trip(&project_events(), project_variant, 31);
 }
 
 #[test]
 fn every_daemon_event_round_trips() {
-    round_trip(&daemon_events(), daemon_variant, 13);
+    round_trip(&daemon_events(), daemon_variant, 14);
 }

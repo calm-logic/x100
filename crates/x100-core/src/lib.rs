@@ -1,5 +1,6 @@
 //! The contract every other x100 crate builds on: ids, domain types, the events, the six state
-//! machines, and the `Clock` trait with a fake clock for tests. No I/O and no async runtime.
+//! machines, the folds of both logs into what each tab shows, and the `Clock` trait with a fake
+//! clock for tests. No I/O and no async runtime.
 //!
 //! The six machines are pure functions `next(&State, &Event) -> Result<State, Rejected>`:
 //! [`agent::next`], [`driver::next`], [`job::next`], [`action::next`], [`task::next`] and
@@ -12,6 +13,7 @@ pub mod driver;
 pub mod effort;
 pub mod event;
 pub mod file;
+pub mod fold;
 pub mod git;
 pub mod harness;
 pub mod id;
@@ -23,10 +25,14 @@ pub mod memory;
 pub mod message;
 pub mod money;
 pub mod party;
+pub mod process;
 pub mod project;
+pub mod settings;
 pub mod spec;
 pub mod task;
 pub mod team;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod time;
 pub mod tool;
 pub mod trial;

@@ -179,7 +179,11 @@ fn agent_transitions() {
         ),
         (for_driver.clone(), E::DriverFound, S::Working),
         (S::Working, E::WentIdle, S::Idle),
+        // The wait for a driver reached its deadline and the task was reported failed.
+        (for_driver.clone(), E::WentIdle, S::Idle),
         (S::Idle, E::Retired, S::Retired),
+        // A planned lead a team change removes before any work reached it.
+        (S::Planned, E::Retired, S::Retired),
     ];
     for s in [S::Working, on_waits.clone(), for_driver.clone()] {
         accepted.push((s.clone(), wait_ended.clone(), s));
@@ -353,6 +357,7 @@ fn task_transitions() {
     });
     let send_back = E::Reviewed(Verdict::SendBack {
         note: "tests fail".into(),
+        effort: Some(Effort::High),
     });
     let merged = E::Merged {
         commit: CommitId("abc".into()),

@@ -12,7 +12,8 @@
 //! model adds is the orchestrator's policy from the architecture, which M6 and M9 build: fence the
 //! old driver before starting a new one, give the task up after three failures in a row, nudge an
 //! agent that neither reports nor waits, and report the task failed when the wait for a driver
-//! reaches its deadline.
+//! reaches its deadline, after which the agent goes idle and keeps any unhandled items for its
+//! next wake.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -87,6 +88,7 @@ struct State {
     replaced: bool,
     planned: bool,
     sent_back: bool,
+    idled_at_deadline: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,6 +152,7 @@ impl State {
 
     fn deliver(&mut self, what: InboxItem) -> Option<()> {
         self.delivered += 1;
+        self.idled_at_deadline = false;
         let id = item(self.delivered);
         let was_waiting_for_driver =
             matches!(self.agent, AgentState::Waiting(Waiting::ForDriver(_)));
@@ -235,6 +238,7 @@ impl Model for Takeover {
             replaced: false,
             planned: false,
             sent_back: false,
+            idled_at_deadline: false,
         };
         s.deliver(InboxItem::Task { task: TASK })
             .expect("a planned agent accepts its first task");
@@ -309,6 +313,10 @@ impl Model for Takeover {
                         TaskFailure::NoDriver(vec![Incompatible::NothingAllowed]),
                     );
                 }
+                // Items it has not handled stay in its inbox, for the turn after whatever next
+                // wakes it.
+                s.agent = agent::next(&s.agent, &AgentEvent::WentIdle).ok()?;
+                s.idled_at_deadline = true;
             }
             Step::StartTurn => {
                 let i = s.live_current()?;
@@ -414,6 +422,7 @@ impl Model for Takeover {
                     &s.task,
                     &TaskEvent::Reviewed(Verdict::SendBack {
                         note: String::new(),
+                        effort: None,
                     }),
                 )
                 .ok()?;
@@ -459,9 +468,14 @@ impl Model for Takeover {
                         || (s.reported && !matches!(s.task, TaskState::InProgress(_)))
                 },
             ),
-            Property::always("every inbox item is handled in the end", |m, s: &State| {
-                !is_terminal(m, s) || s.inbox.is_empty()
-            }),
+            Property::always(
+                "every inbox item is handled in the end, or waits for the agent's next wake",
+                |m, s: &State| {
+                    !is_terminal(m, s)
+                        || s.inbox.is_empty()
+                        || (s.idled_at_deadline && s.agent == AgentState::Idle)
+                },
+            ),
             Property::always("the agent ends idle, not waiting", |m, s: &State| {
                 !is_terminal(m, s) || s.agent == AgentState::Idle
             }),
@@ -485,6 +499,10 @@ impl Model for Takeover {
                 |_, s: &State| {
                     s.reported_with(|o| matches!(o, Outcome::Failed(TaskFailure::NoDriver(_))))
                 },
+            ),
+            Property::sometimes(
+                "the agent goes idle when the wait for a driver runs out",
+                |_, s: &State| s.idled_at_deadline,
             ),
         ]
     }

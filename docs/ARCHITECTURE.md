@@ -87,6 +87,11 @@ the two interfaces depend on `x100-client`.
 computed from events by functions in `x100-core`, and the daemon and every client use those same functions.
 This gives the Log tab, sync between devices and "reading the log back" during reflection from the same data.
 
+**proposed** The folded state of a project holds its records, not its log, so a snapshot stays small however
+long the project runs. The Log tab reads the events themselves from the store a page at a time, and follows
+the stream for new ones. The store appends only events the fold accepts, so an event the fold rejects when a
+log is read back is corruption and is reported, not skipped.
+
 Core entities: `Project`, `Agent` (kind: CEO, lead or worker; parent; role; charter; effort range; budget for a
 lead), `Driver` (one harness running one model at one effort level on one machine, for one agent), `Harness`,
 `Machine`, `Task` (what is asked; delegator; assignee; effort needed; status; progress note and share done;
