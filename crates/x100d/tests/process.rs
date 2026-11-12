@@ -144,25 +144,24 @@ async fn killing_the_daemon_mid_turn_fails_that_driver_and_ends_the_warm_ones() 
         !stragglers.is_empty(),
         "the script started a background process"
     );
+    let anchors: Vec<u32> = env.recorded_sandboxes().iter().map(|(_, p)| *p).collect();
+    assert_eq!(anchors.len(), 2, "each CEO's sandbox is written down");
     drop(client);
 
     daemon.kill9();
-    // The premise: a killed daemon cannot stop what its drivers started. The driver itself exits
-    // when its input closes, but the background process is still there, in the driver's group.
+    // A killed daemon cannot stop what its drivers started, but each driver runs in its agent's
+    // sandbox, which ends when the daemon's end of its tunnel closes and takes everything in it
+    // along: the background process too, before any daemon starts again.
     gone(
         &[busy_pid, pids[0], pids[1]]
             .into_iter()
-            .filter(|p| !stragglers.contains(p))
+            .chain(stragglers.iter().copied())
+            .chain(anchors)
             .collect::<Vec<_>>(),
     )
     .await;
-    assert!(
-        stragglers.iter().all(|p| running(*p)),
-        "the background process outlived the daemon"
-    );
     let mut daemon = env.spawn();
     let client = env.client().await;
-    gone(&stragglers).await;
 
     let s = client.state();
     let before = |project, id| {
@@ -696,6 +695,14 @@ async fn a_driver_killed_with_the_daemon_during_its_handshake_is_reaped_on_the_n
 
     let mut daemon = env.spawn_with(&slow);
     let client = env.client().await;
+    // Without a sandbox, as the daemon's setting allows: in one, the driver would end with the
+    // daemon, and this is about the list the next daemon reaps from.
+    client
+        .request(x100_proto::SetDaemonSetting {
+            setting: x100_core::settings::DaemonSetting::RunWithoutSandbox(true),
+        })
+        .await
+        .unwrap();
     let project = create_project(&client, &env, "slow").await;
     client.request(say(project, "ping")).await.unwrap();
 

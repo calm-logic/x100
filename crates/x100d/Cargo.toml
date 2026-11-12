@@ -22,6 +22,12 @@ path = "src/main.rs"
 name = "x100d-fake-harness"
 path = "src/bin/fake_harness.rs"
 
+# The sandbox's helper, shipped beside `x100d`, which runs it on both sides of a sandbox's
+# boundary. A program of this package so that building the daemon builds it.
+[[bin]]
+name = "x100d-sandbox"
+path = "src/bin/sandbox.rs"
+
 [dependencies]
 x100-core = { path = "../x100-core" }
 x100-store = { path = "../x100-store" }
@@ -30,6 +36,8 @@ x100-drivers = { path = "../x100-drivers" }
 x100-jobs = { path = "../x100-jobs" }
 x100-orch = { path = "../x100-orch" }
 x100-router = { path = "../x100-router" }
+x100-sandbox = { path = "../x100-sandbox" }
+x100-vault = { path = "../x100-vault" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -39,6 +47,7 @@ ulid = "3"
 
 [dev-dependencies]
 x100-client = { path = "../x100-client" }
+base64 = "0.22"
 x100-drivers = { path = "../x100-drivers", features = ["testing"] }
 x100-store = { path = "../x100-store" }
 x100-core = { path = "../x100-core", features = ["testing"] }

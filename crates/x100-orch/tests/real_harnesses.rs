@@ -9,7 +9,7 @@
 mod common;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,6 +19,7 @@ use x100_core::driver::DriverState;
 use x100_core::effort::EffortRange;
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
+use x100_core::harness::{HarnessKind, ModelOffer, Support};
 use x100_core::harness::{HarnessModel, ModelName};
 use x100_core::id::{AgentId, DriverId, HarnessId, ProjectId, TaskId};
 use x100_core::money::{Money, Percent};
@@ -32,9 +33,9 @@ use x100_core::tool::ToolCall;
 use x100_drivers::claude::{ClaudeCode, ClaudeCodeConfig};
 use x100_drivers::codex::{Codex, CodexConfig};
 use x100_drivers::testing::{FakeProvider, Reply};
-use x100_drivers::{CommandLine, CommandWrapper, Harness};
+use x100_drivers::{DriverHandle, DriverSpec, Harness, StartError};
 use x100_jobs::Scheduler;
-use x100_orch::{AllowAll, Config, Desk, Orchestrator, ProcessRegistry, Sandbox, ToolServer};
+use x100_orch::{AllowAll, Config, Desk, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::ProjectStore;
 
 const HARNESS: HarnessId = HarnessId::from_u128(11);
@@ -65,37 +66,42 @@ fn installed(program: &str) -> Option<PathBuf> {
     found
 }
 
-/// Runs each driver through `env` with the variables a test harness needs: a home of its own, the
-/// dummy key, and the fake provider as its proxy for everything but loopback.
-struct TestEnv(Vec<String>);
+/// Gives each driver the variables a test harness needs: a home of its own, the dummy key, and
+/// the fake provider as its proxy for everything but loopback.
+struct WithEnv {
+    inner: Arc<dyn Harness>,
+    env: Vec<(String, String)>,
+}
 
-impl Sandbox for TestEnv {
-    fn wrap(&self, _: AgentId, _: &Path) -> CommandWrapper {
-        let vars = self.0.clone();
-        CommandWrapper::new(move |line| {
-            let mut args: Vec<_> = vars.iter().map(Into::into).collect();
-            args.push(line.program.into_os_string());
-            args.extend(line.args);
-            CommandLine {
-                program: PathBuf::from("/usr/bin/env"),
-                args,
-            }
-        })
+#[async_trait::async_trait]
+impl Harness for WithEnv {
+    fn kind(&self) -> HarnessKind {
+        self.inner.kind()
+    }
+
+    fn models(&self) -> Vec<ModelOffer> {
+        self.inner.models()
+    }
+
+    fn supports(&self) -> Support {
+        self.inner.supports()
+    }
+
+    async fn start(&self, mut spec: DriverSpec) -> Result<DriverHandle, StartError> {
+        spec.env.extend(self.env.iter().cloned());
+        self.inner.start(spec).await
     }
 }
 
 impl Run {
     async fn start(
         model: &str,
-        harness: impl FnOnce(&Path, &FakeProvider, Arc<dyn Clock>) -> Arc<dyn Harness>,
+        harness: impl FnOnce(&FakeProvider, Arc<dyn Clock>) -> Arc<dyn Harness>,
         key: (&str, &str),
     ) -> Run {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
-        let state = dir.path().join("harness");
-        for d in [&home, &state] {
-            std::fs::create_dir(d).unwrap();
-        }
+        std::fs::create_dir(&home).unwrap();
         let clock = FakeClock::new(common::START);
         let shared: Arc<dyn Clock> = Arc::new(clock);
         let store = ProjectStore::open(&dir.path().join("store"), Arc::clone(&shared)).unwrap();
@@ -131,21 +137,33 @@ impl Run {
         let (daemon, daemon_jobs) = common::daemon_log(
             &dir.path().join("daemon"),
             Arc::clone(&shared),
-            &DaemonSettings::default(),
+            // In-process, with no sandbox: these tests are about the tools over MCP.
+            &DaemonSettings {
+                run_without_sandbox: true,
+                ..DaemonSettings::default()
+            },
         );
         let settings = common::settings_of(&daemon);
-        let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
+        let desk = Desk::new(
+            Arc::new(AllowAll),
+            Arc::clone(&settings),
+            x100_vault::Redactor::for_values(&[]),
+        );
         let tools = ToolServer::start(Arc::clone(&desk)).await.unwrap();
-        let harness = harness(&state, &provider, Arc::clone(&shared));
+        let harness = harness(&provider, Arc::clone(&shared));
         let (processes, _) =
             ProcessRegistry::open_and_reap(dir.path().join("drivers.json")).unwrap();
-        let env = TestEnv(vec![
-            format!("HOME={}", home.display()),
-            format!("{}={}", key.0, key.1),
-            format!("HTTPS_PROXY={}", provider.url()),
-            format!("HTTP_PROXY={}", provider.url()),
-            "NO_PROXY=127.0.0.1,localhost".into(),
-        ]);
+        let env = vec![
+            ("HOME".into(), home.display().to_string()),
+            (key.0.into(), key.1.into()),
+            ("HTTPS_PROXY".into(), provider.url()),
+            ("HTTP_PROXY".into(), provider.url()),
+            ("NO_PROXY".into(), "127.0.0.1,localhost".into()),
+        ];
+        let harness: Arc<dyn Harness> = Arc::new(WithEnv {
+            inner: harness,
+            env,
+        });
         let harnesses = HashMap::from([(HARNESS, harness)]);
         common::add_harnesses(&daemon, &harnesses, &[]);
         let orch = Orchestrator::new(Config {
@@ -157,7 +175,8 @@ impl Run {
             settings,
             processes: Arc::new(processes),
             desk: Arc::clone(&desk),
-            sandbox: Arc::new(env),
+            containment: common::uncontained(dir.path()),
+            redactor: x100_vault::Redactor::for_values(&[]),
             serial: true,
         });
         let project = ProjectId::from_u128(1);
@@ -303,8 +322,8 @@ async fn claude_code_writes_the_brd_and_reports_through_mcp() {
     };
     let run = Run::start(
         "claude-haiku-5-5",
-        |state, provider, clock| {
-            let mut config = ClaudeCodeConfig::new(state);
+        |provider, clock| {
+            let mut config = ClaudeCodeConfig::new();
             config.program = program;
             config.base_url = Some(provider.url());
             config.inherit_env = vec!["PATH".into()];
@@ -342,8 +361,8 @@ async fn codex_writes_the_brd_and_reports_through_mcp_from_its_exec_tool() {
     };
     let run = Run::start(
         "gpt-6-luna",
-        |state, provider, clock| {
-            let mut config = CodexConfig::new(state);
+        |provider, clock| {
+            let mut config = CodexConfig::new();
             config.program = program;
             config.base_url = format!("{}/v1", provider.url());
             config.inherit_env = vec!["PATH".into()];

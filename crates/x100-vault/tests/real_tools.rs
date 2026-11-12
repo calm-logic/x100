@@ -29,7 +29,8 @@ use x100_drivers::claude::{ClaudeCode, ClaudeCodeConfig};
 use x100_drivers::codex::{Codex, CodexConfig};
 use x100_drivers::testing::{FakeProvider, Reply};
 use x100_drivers::{
-    CommandWrapper, DriverOutput, DriverSpec, Harness, Permissions, SpawnHook, StallPolicy, TurnEnd,
+    CommandWrapper, DriverOutput, DriverSpec, Expose, Harness, Permissions, SpawnHook, StallPolicy,
+    TurnEnd,
 };
 use x100_vault::{EgressOutcome, sandbox_env};
 
@@ -204,7 +205,11 @@ fn spec(dir: &std::path::Path, model: &str, env: Vec<(String, String)>) -> Drive
         model: ModelName(model.to_owned()),
         effort: Effort::Low,
         dir: dir.to_owned(),
+        // Beside the worktree, in the test's own directory.
+        state: dir.with_file_name("driver"),
         wrap: CommandWrapper::identity(),
+        expose: Expose::nothing(),
+        tmp: None,
         start_pack: "You are a test agent.".into(),
         tools: None,
         env,
@@ -303,7 +308,7 @@ async fn claude_code_with_a_reference_for_its_key_reaches_the_provider_with_the_
         .await
         .unwrap();
     let authority = run.s.vault.authority().unwrap();
-    let mut config = ClaudeCodeConfig::new(run.path("state"));
+    let mut config = ClaudeCodeConfig::new();
     config.program = program;
     config.base_url = Some(format!("https://{PROVIDER}:{}", run._front.port));
     config.inherit_env = vec!["PATH".into()];
@@ -361,7 +366,7 @@ async fn codex_with_a_reference_for_its_key_reaches_the_provider_with_the_value(
         .await
         .unwrap();
     let authority = run.s.vault.authority().unwrap();
-    let mut config = CodexConfig::new(run.path("state"));
+    let mut config = CodexConfig::new();
     config.program = program;
     config.base_url = format!("https://{PROVIDER}:{}/v1", run._front.port);
     config.inherit_env = vec!["PATH".into()];

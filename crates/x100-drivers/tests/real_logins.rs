@@ -54,6 +54,7 @@ async fn edit_and_recall(
     let work = dir.path().join("work");
     std::fs::create_dir(&work).unwrap();
     let mut spec = spec(1, &work, model, Effort::Low);
+    spec.state = state.join(x100_core::id::DriverId::from_u128(1).to_string());
     spec.login = Some(login);
     let handle = match harness.start(spec).await {
         Ok(handle) => handle,
@@ -111,7 +112,7 @@ async fn claude_in_a_terminal_on_the_builders_login() {
     };
     let program = installed("claude").expect("claude must be installed for this test");
     let state = tempfile::tempdir().unwrap();
-    let mut config = ClaudeTerminalConfig::new(state.path());
+    let mut config = ClaudeTerminalConfig::new();
     config.program = program;
     let harness = ClaudeTerminal::new(config, Arc::new(FakeClock::new(Timestamp::from_millis(1))));
     edit_and_recall(
@@ -141,7 +142,7 @@ async fn codex_in_a_terminal_on_the_builders_login() {
     };
     let program = installed("codex").expect("codex must be installed for this test");
     let state = tempfile::tempdir().unwrap();
-    let mut config = CodexTerminalConfig::new(state.path());
+    let mut config = CodexTerminalConfig::new();
     config.program = program;
     let harness = CodexTerminal::new(config, Arc::new(FakeClock::new(Timestamp::from_millis(1))));
     edit_and_recall(&harness, "gpt-6-luna", login, state.path(), |driver| {

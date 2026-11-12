@@ -28,7 +28,7 @@ use x100_core::time::Clock;
 use super::{Provider, TOKEN_VAR, config_toml, models, rpc};
 use crate::handle::DriverHandle;
 use crate::harness::{
-    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, StartError, check_offered,
+    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, StartError, check_offered, url_host,
 };
 use crate::process;
 use crate::supervisor::{self, Launch};
@@ -37,6 +37,15 @@ use crate::wire::{Incoming, Wire, remove_dir, wait_for};
 
 /// How long the app-server has to open its socket.
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
+
+/// ChatGPT, OpenAI's sign-in and API: where Codex refreshes its login and sends its requests
+/// on that login.
+const LOGIN_HOSTS: &[&str] = &[
+    "chatgpt.com",
+    "ab.chatgpt.com",
+    "auth.openai.com",
+    "api.openai.com",
+];
 
 #[derive(Debug, Clone)]
 pub struct CodexTerminalConfig {
@@ -48,15 +57,18 @@ pub struct CodexTerminalConfig {
     pub inherit_env: Vec<String>,
     /// Codex's own retries of a failing request and of a broken stream, kept low.
     pub max_retries: u32,
-    /// Each driver's `CODEX_HOME`, home and socket are made under this one and removed when it
-    /// ends.
-    pub state_dir: PathBuf,
     pub models: Vec<ModelOffer>,
     pub size: Size,
 }
 
+impl Default for CodexTerminalConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexTerminalConfig {
-    pub fn new(state_dir: impl Into<PathBuf>) -> Self {
+    pub fn new() -> Self {
         Self {
             program: PathBuf::from("codex"),
             base_url: None,
@@ -65,7 +77,6 @@ impl CodexTerminalConfig {
                 .map(|s| (*s).to_owned())
                 .collect(),
             max_retries: 1,
-            state_dir: state_dir.into(),
             models: models(),
             size: Size::default(),
         }
@@ -128,12 +139,45 @@ impl CodexTerminal {
     }
 }
 
+/// Where the socket Codex made is on the daemon's side. Codex 0.167 makes it under a fixed
+/// `/tmp/codex-daemon-<uid>/` and links to it from the path asked for, so in a driver with a
+/// `/tmp` of its own the link names a path that is under `tmp` here.
+fn socket_outside(socket: &Path, tmp: Option<&Path>) -> std::io::Result<PathBuf> {
+    let target = match std::fs::read_link(socket) {
+        Ok(t) if t.is_relative() => socket.parent().unwrap_or(Path::new("/")).join(t),
+        Ok(t) => t,
+        Err(_) => return Ok(socket.to_path_buf()),
+    };
+    match (tmp, target.strip_prefix("/tmp")) {
+        (Some(tmp), Ok(rest)) => Ok(tmp.join(rest)),
+        _ => Ok(target),
+    }
+}
+
+/// Connects to a Unix socket whatever the length of its path. A socket's path is limited to about
+/// a hundred bytes, and one in a sandbox's `/tmp` seen from the daemon's side is longer; on Linux
+/// the socket is reached through a descriptor of its directory, whose path is short.
+async fn connect_unix(socket: &Path) -> std::io::Result<UnixStream> {
+    const SHORT_ENOUGH: usize = 100;
+    if socket.as_os_str().len() < SHORT_ENOUGH || !cfg!(target_os = "linux") {
+        return UnixStream::connect(socket).await;
+    }
+    let (Some(dir), Some(name)) = (socket.parent(), socket.file_name()) else {
+        return UnixStream::connect(socket).await;
+    };
+    let dir = std::fs::File::open(dir)?;
+    let short = Path::new("/proc/self/fd")
+        .join(std::os::fd::AsRawFd::as_raw_fd(&dir).to_string())
+        .join(name);
+    // The directory stays open until the connection is made.
+    let stream = UnixStream::connect(&short).await;
+    drop(dir);
+    stream
+}
+
 /// Carries JSON-RPC lines in WebSocket text frames, both ways.
 async fn connect(socket: &Path, wire: &mut Wire) -> std::io::Result<()> {
-    // Codex keeps the socket where a path is short enough and links to it from the path asked
-    // for; a Unix socket path is limited to about a hundred bytes.
-    let real = std::fs::canonicalize(socket)?;
-    let stream = UnixStream::connect(&real).await?;
+    let stream = connect_unix(socket).await?;
     let (ws, _) = tokio_tungstenite::client_async("ws://localhost/", stream)
         .await
         .map_err(std::io::Error::other)?;
@@ -193,6 +237,12 @@ impl Harness for CodexTerminal {
         View::Terminal
     }
 
+    fn login_hosts(&self) -> Vec<String> {
+        let mut hosts: Vec<String> = LOGIN_HOSTS.iter().map(|h| (*h).to_owned()).collect();
+        hosts.extend(self.config.base_url.as_deref().and_then(url_host));
+        hosts
+    }
+
     async fn start(&self, spec: DriverSpec) -> Result<DriverHandle, StartError> {
         check_offered(self.kind(), &self.config.models, &spec, self.supports())?;
         let login = spec.login.clone().ok_or(StartError::NoLogin)?;
@@ -204,14 +254,14 @@ impl Harness for CodexTerminal {
             .and_then(|m| m.levels.iter().find(|(e, _)| *e == spec.effort))
             .map(|(_, p)| *p)
             .expect("checked as offered");
-        let dir = self.config.state_dir.join(spec.driver.to_string());
+        let dir = spec.state.clone();
+        let socket = dir.join("socket").join("app.sock");
         let cleanup = Some(dir.clone());
         if let Err(e) = self.prepare(&spec, &dir, &login) {
             remove_dir(cleanup.as_ref()).await;
             return Err(StartError::Prepare(e));
         }
         let env = self.environment(&dir.join("home"), &dir.join("codex-home"), &spec);
-        let socket = dir.join("socket").join("app.sock");
         let address = format!("unix://{}", socket.display());
 
         let server = spec.wrap.apply(CommandLine {
@@ -239,7 +289,10 @@ impl Harness for CodexTerminal {
         .await;
         wire.add_child(child);
         let connected = match opened {
-            Some(true) => connect(&socket, &mut wire).await,
+            Some(true) => match socket_outside(&socket, spec.tmp.as_deref()) {
+                Ok(real) => connect(&real, &mut wire).await,
+                Err(e) => Err(e),
+            },
             _ => Err(std::io::Error::other(format!(
                 "codex app-server did not open {}",
                 socket.display()

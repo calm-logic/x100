@@ -40,14 +40,13 @@ async fn setup() -> Option<Setup> {
     let dir = tempfile::tempdir().unwrap();
     let work = dir.path().join("work");
     let login = dir.path().join("login");
-    let state = dir.path().join("state");
-    for d in [&work, &login, &state] {
+    for d in [&work, &login] {
         std::fs::create_dir(d).unwrap();
     }
     let auth = json!({ "auth_mode": "apikey", "OPENAI_API_KEY": KEY });
     std::fs::write(login.join("auth.json"), auth.to_string()).unwrap();
     let provider = FakeProvider::start().await.unwrap();
-    let mut config = CodexTerminalConfig::new(&state);
+    let mut config = CodexTerminalConfig::new();
     config.program = program;
     config.base_url = Some(format!("{}/v1", provider.url()));
     config.inherit_env = vec!["PATH".into()];

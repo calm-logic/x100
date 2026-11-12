@@ -108,7 +108,7 @@ async fn claude_code_with_its_real_provider() {
     let dir = tempfile::tempdir().unwrap();
     let work = dir.path().join("work");
     std::fs::create_dir(&work).unwrap();
-    let mut config = ClaudeCodeConfig::new(dir.path().join("state"));
+    let mut config = ClaudeCodeConfig::new();
     config.program = program;
     let harness = ClaudeCode::new(config, Arc::new(FakeClock::new(Timestamp::from_millis(1))));
     let env = vec![("ANTHROPIC_API_KEY".to_owned(), key)];
@@ -125,7 +125,7 @@ async fn codex_with_its_real_provider() {
     let dir = tempfile::tempdir().unwrap();
     let work = dir.path().join("work");
     std::fs::create_dir(&work).unwrap();
-    let mut config = CodexConfig::new(dir.path().join("state"));
+    let mut config = CodexConfig::new();
     config.program = program;
     let harness = Codex::new(config, Arc::new(FakeClock::new(Timestamp::from_millis(1))));
     let env = vec![("OPENAI_API_KEY".to_owned(), key)];

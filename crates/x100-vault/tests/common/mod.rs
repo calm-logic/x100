@@ -335,6 +335,7 @@ pub fn setup_with(hosts: &[&str], projects: Projects, upstream: Option<UpstreamT
             .into_iter()
             .map(|h| (h.to_owned(), local))
             .collect(),
+        closed: false,
     };
     let (proxy, reports) = Proxy::new(vault.clone(), authority, config).unwrap();
     Setup {

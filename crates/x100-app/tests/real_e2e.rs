@@ -130,10 +130,11 @@ impl Models {
                     .env("LANG", "C.UTF-8")
                     .env("X100_CLAUDE_LOGIN", login)
                     .env("X100_CODEX_LOGIN", home.join("no-codex-login"))
-                    .env("ANTHROPIC_BASE_URL", provider.url())
-                    .env("HTTPS_PROXY", provider.url())
-                    .env("HTTP_PROXY", provider.url())
-                    .env("NO_PROXY", "127.0.0.1,localhost");
+                    // The drivers' only way out is the daemon's proxy, which sends this made-up
+                    // host to the fake provider and refuses every other.
+                    .env("ANTHROPIC_BASE_URL", common::fake_base(provider))
+                    .env("X100_PROXY_RESOLVE", common::FAKE_RESOLVE)
+                    .env("X100_NO_KEYCHAIN", "1");
             }
         }
     }

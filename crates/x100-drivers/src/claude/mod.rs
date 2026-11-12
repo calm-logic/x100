@@ -25,7 +25,8 @@ use x100_core::time::Clock;
 
 use crate::handle::DriverHandle;
 use crate::harness::{
-    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError, check_offered,
+    ApiKey, CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError,
+    check_offered, url_host,
 };
 use crate::supervisor::Launch;
 use crate::version::VersionPolicy;
@@ -41,24 +42,32 @@ pub(crate) const VERSIONS: VersionPolicy = VersionPolicy {
 /// The MCP server name x100's tools appear under, so the model sees `mcp__x100__<tool>`.
 pub const TOOLS_SERVER: &str = "x100";
 
+/// Anthropic's API, where a key goes unless a base URL names another host.
+const API_HOST: &str = "api.anthropic.com";
+/// The variable Claude Code reads an API key from.
+const KEY_ENV: &str = "ANTHROPIC_API_KEY";
+
 #[derive(Debug, Clone)]
 pub struct ClaudeCodeConfig {
     /// The `claude` executable.
     pub program: PathBuf,
-    /// Where the provider is reached, if not Anthropic's own API. The fake provider in tests; the
-    /// vault's proxy once M11 is built.
+    /// Where the provider is reached, if not Anthropic's own API: the fake provider in tests.
     pub base_url: Option<String>,
     /// Variables taken from the daemon's environment. Keys are never among them.
     pub inherit_env: Vec<String>,
     /// Claude Code's own retries of a failing request, kept low so the router moves work on.
     pub max_retries: u32,
-    /// Each driver's configuration directory is made under this one and removed when it ends.
-    pub state_dir: PathBuf,
     pub models: Vec<ModelOffer>,
 }
 
+impl Default for ClaudeCodeConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeCodeConfig {
-    pub fn new(state_dir: impl Into<PathBuf>) -> Self {
+    pub fn new() -> Self {
         Self {
             program: PathBuf::from("claude"),
             base_url: None,
@@ -67,7 +76,6 @@ impl ClaudeCodeConfig {
                 .map(|s| (*s).to_owned())
                 .collect(),
             max_retries: 1,
-            state_dir: state_dir.into(),
             models: models(),
         }
     }
@@ -177,9 +185,20 @@ impl Harness for ClaudeCode {
         }
     }
 
+    fn api_key(&self) -> Option<ApiKey> {
+        let host = match &self.config.base_url {
+            Some(url) => url_host(url)?,
+            None => API_HOST.to_owned(),
+        };
+        Some(ApiKey {
+            env: KEY_ENV.into(),
+            host,
+        })
+    }
+
     async fn start(&self, spec: DriverSpec) -> Result<DriverHandle, StartError> {
         check_offered(self.kind(), &self.config.models, &spec, self.supports())?;
-        let driver_dir = self.config.state_dir.join(spec.driver.to_string());
+        let driver_dir = spec.state.clone();
         let config_dir = driver_dir.join("claude-config");
         std::fs::create_dir_all(&config_dir).map_err(StartError::Prepare)?;
 
@@ -224,12 +243,6 @@ impl Harness for ClaudeCode {
             Permissions::AskDaemon => {
                 args.extend(["--permission-prompt-tool".into(), "stdio".into()])
             }
-            Permissions::Worktree => args.extend([
-                "--permission-mode".into(),
-                "acceptEdits".into(),
-                "--permission-prompt-tool".into(),
-                "stdio".into(),
-            ]),
             Permissions::AllowAll => {
                 args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
             }

@@ -207,7 +207,7 @@ async fn relay(req: Request<Incoming>, target: Target, ctx: &Arc<RouteCtx>) -> R
 }
 
 async fn tcp(target: &Target, ctx: &RouteCtx) -> Result<TcpStream, String> {
-    match ctx.shared.resolve.get(&target.host) {
+    match ctx.shared.resolve.get(&target.host.to_ascii_lowercase()) {
         Some(ip) => TcpStream::connect((*ip, target.port)).await,
         None => TcpStream::connect((target.host.as_str(), target.port)).await,
     }

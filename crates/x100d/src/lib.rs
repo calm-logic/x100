@@ -5,15 +5,21 @@
 //! Clients come and go without stopping anything: a closed connection ends only its own
 //! subscriptions. The daemon starts again from the store: drivers do not outlive it, so what the
 //! log shows as live is settled first, and a process a killed daemon left behind is stopped.
+//!
+//! Every driver runs in its agent's sandbox, and reaches the outside only through the vault's
+//! proxy. Where no sandbox can be made, no driver starts unless the builder turns on the daemon's
+//! `run_without_sandbox` setting, and every harness says why it is passed over.
 
 mod config;
 mod conn;
+mod contain;
 mod defaults;
 mod discover;
 mod error;
 mod hub;
 mod methods;
 mod unavailable;
+mod vault;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,13 +29,14 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use x100_core::time::Clock;
-use x100_orch::{AllowAll, Desk, NoSandbox, Orchestrator, ProcessRegistry, ToolServer};
+use x100_orch::{AllowAll, Containment, Desk, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
     CLAUDE_BASE_URL_ENV, CLAUDE_LOGIN_ENV, CODEX_BASE_URL_ENV, CODEX_LOGIN_ENV, Config,
-    DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, PROJECTS_ROOT_ENV, QUEUE_CAPACITY,
-    SCRIPTS_ENV, default_data_dir,
+    DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, NO_KEYCHAIN_ENV, PROJECTS_ROOT_ENV,
+    PROXY_RESOLVE_ENV, QUEUE_CAPACITY, SANDBOX_ENV, SANDBOX_HELPER_ENV, SCRIPTS_ENV, SandboxKind,
+    default_data_dir,
 };
 pub use error::Error;
 pub use unavailable::arrives_with;
@@ -102,11 +109,29 @@ impl Daemon {
             s.projects_root.get_or_insert_with(|| root.clone());
             s
         });
+        let vault_config = config.clone();
+        let opened = tokio::task::spawn_blocking(move || vault::open(&vault_config))
+            .await
+            .expect("opening the vault panicked")?;
+        let (vault_handle, check_log) = (opened.vault.clone(), log.clone());
+        tokio::task::spawn_blocking(move || vault::reconcile(&vault_handle, &check_log))
+            .await
+            .expect("checking the vault panicked")?;
+        let backend = contain::backend(&config).await;
+        let no_sandbox = backend.as_ref().err().cloned();
+        if let Some(why) = &no_sandbox {
+            eprintln!("x100d: no sandbox can be made on this machine: {why}");
+        }
+
         // The harnesses reach the tools through the desk, so it exists before them, and so does
         // the address every driver is given.
-        let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
+        let desk = Desk::new(
+            Arc::new(AllowAll),
+            Arc::clone(&settings),
+            opened.vault.redactor(),
+        );
         let tools = ToolServer::start(Arc::clone(&desk)).await?;
-        let found = discover::discover(&config, &log, desk.clone())?;
+        let found = discover::discover(&config, &log, desk.clone(), no_sandbox.as_deref())?;
         // A rescan makes harnesses again, which reach the tools through the same desk.
         let rescan_tools = Arc::clone(&desk);
         // The daemon log's job clock: the orchestrator tells it of each cool-off it starts.
@@ -120,17 +145,28 @@ impl Daemon {
             settings,
             processes: Arc::new(processes),
             desk,
-            sandbox: Arc::new(NoSandbox),
+            containment: Containment {
+                backend,
+                dir: contain::dir(&config),
+                tag: contain::tag(&config),
+                programs: found.programs,
+                proxy: Some((opened.proxy.clone(), opened.certificate.clone())),
+            },
+            redactor: opened.vault.redactor(),
             // Turns run side by side, except where a fake clock asks for a repeatable run.
             serial: config.fake_clock.is_some(),
         });
+        let reports = vault::drain(opened.reports, orch.clone());
         let hub = Arc::new(Hub::new(
             config.clone(),
             log,
             orch,
             rescan_tools,
             daemon_jobs,
+            opened.vault,
+            no_sandbox,
         ));
+        hub.keep(reports);
 
         let projects: Vec<_> = hub
             .log

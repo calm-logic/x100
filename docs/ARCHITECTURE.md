@@ -515,10 +515,18 @@ A job firing costs nothing. The work it causes is charged as usual.
 from its parent's branch, or from the project's main branch for the CEO. Work reaches the project by merging
 branches up the tree as tasks are accepted, as "Delegation, the inbox and waiting" describes.
 
-**proposed** A sandbox has no network of its own. The backend maps two endpoints into it: the vault's proxy,
-and the driver's own address for the daemon's tools. How each is mapped is the backend's business (neither harness takes a Unix socket for either, so under bubblewrap a forwarder inside the sandbox listens on
-loopback, and containers use a host port with a per-driver token), and M10 confirms it first. Until
-M10 an agent's sandbox is a plain worktree with no isolation, which is enough for the fake harness.
+**proposed** A sandbox has no network of its own. The backend maps endpoints into it: the daemon's tool
+address, and for each driver its own route on the vault's proxy. Neither harness takes a Unix socket for
+either, so under bubblewrap a forwarder inside the sandbox listens on loopback, and containers use a host port.
+A route carries the driver's token, relays the hosts a terminal program's login needs untouched, intercepts
+every other host, and refuses the host machine's loopback.
+
+**proposed** Inside its sandbox a harness's own permission prompts and its own sandbox are off: a command runs
+without asking, because the sandbox is what contains it. The desk still gates x100's own tools and merges.
+
+**proposed** At start the daemon makes and destroys one sandbox to prove it can. If it cannot, every harness is
+passed over with the reason and no driver starts. The daemon setting `run_without_sandbox`, off by default
+and marked unsafe in Settings, lets drivers run uncontained as the builder. Sandboxes end with the daemon.
 
 **proposed** The sandbox belongs to the agent, not to a driver. Every driver the agent has runs in it, so a
 driver that takes over finds the files as the last one left them. Processes the last driver started in the

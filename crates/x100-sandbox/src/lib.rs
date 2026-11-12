@@ -20,6 +20,7 @@ mod container;
 mod git;
 pub mod helper;
 mod processes;
+mod programs;
 pub mod tunnel;
 
 use std::net::SocketAddr;
@@ -38,6 +39,7 @@ pub use bwrap::Bubblewrap;
 pub use container::{Container, IMAGE, Runtime};
 pub use git::git_paths;
 pub use processes::{ProcessId, ProcessInfo};
+pub use programs::program_paths;
 pub use x100_drivers::{CommandLine, CommandWrapper};
 
 use processes::Processes;
@@ -65,11 +67,13 @@ pub struct SandboxSpec {
     /// Further paths, each read-only or read-write: a terminal harness's login directory, the
     /// project's git directory (see [`git_paths`]).
     pub paths: Vec<Mount>,
-    /// The egress proxy on the host. Inside, `HTTPS_PROXY` and `HTTP_PROXY` name the same
-    /// address. `None` for a lab sandbox, which then has no way out at all.
-    pub proxy: Option<SocketAddr>,
-    /// The daemon's tools endpoint on the host, reachable inside at the same address.
-    pub daemon: Option<SocketAddr>,
+    /// Loopback addresses on the host made reachable inside at the same address from the start,
+    /// such as the daemon's tools endpoint. More can be mapped later with [`Sandbox::forward`].
+    ///
+    /// The sandbox sets no proxy variables: each driver's proxy URL carries a token of its own,
+    /// so the caller maps the proxy's address and gives the URL in the command's environment. A
+    /// sandbox given no proxy, as a lab's, has no way out at all.
+    pub endpoints: Vec<SocketAddr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +142,8 @@ pub struct Sandbox {
     anchor: u32,
     alive: Arc<AtomicBool>,
     anchor_task: Option<JoinHandle<()>>,
-    tunnel: tunnel::Host,
+    /// Shared with each [`Forwarder`], which maps addresses while a driver starts.
+    tunnel: Arc<tunnel::Host>,
     processes: Processes,
 }
 
@@ -210,19 +215,8 @@ pub(crate) fn mounts(spec: &SandboxSpec, layout: &Layout) -> Vec<Mount> {
 }
 
 /// The variables every command inside is given on top of its own.
-pub(crate) fn sandbox_env(spec: &SandboxSpec) -> Vec<(String, String)> {
-    let mut env = vec![("TMPDIR".to_owned(), "/tmp".to_owned())];
-    if let Some(proxy) = spec.proxy {
-        let url = format!("http://{proxy}");
-        for k in ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] {
-            env.push((k.to_owned(), url.clone()));
-        }
-        // The daemon's tools and anything the sandbox serves itself are reached directly.
-        for k in ["NO_PROXY", "no_proxy"] {
-            env.push((k.to_owned(), "localhost,127.0.0.1,::1".to_owned()));
-        }
-    }
-    env
+pub(crate) fn sandbox_env() -> Vec<(String, String)> {
+    vec![("TMPDIR".to_owned(), "/tmp".to_owned())]
 }
 
 impl Sandbox {
@@ -254,7 +248,7 @@ impl Sandbox {
             alive,
             anchor_task: Some(anchor_task),
             tunnel: match tunnel::Host::start(from, to, wait).await {
-                Ok(t) => t,
+                Ok(t) => Arc::new(t),
                 Err(e) => {
                     signal(pid, Signal::SIGKILL);
                     return Err(io("starting the sandbox")(e));
@@ -262,10 +256,7 @@ impl Sandbox {
             },
             spec,
         };
-        for to in [sandbox.spec.proxy, sandbox.spec.daemon]
-            .into_iter()
-            .flatten()
-        {
+        for to in sandbox.spec.endpoints.clone() {
             if let Err(e) = sandbox.forward(to).await {
                 sandbox.destroy().await?;
                 return Err(e);
@@ -309,10 +300,29 @@ impl Sandbox {
     /// Makes `to`, a loopback address on the host, reachable inside at the same address: for
     /// example the hook server a Claude Code terminal driver posts to.
     pub async fn forward(&self, to: SocketAddr) -> Result<(), Error> {
-        self.tunnel
-            .forward(to)
-            .await
-            .map_err(io(format!("mapping {to} into the sandbox")))
+        self.forwarder().forward(to).await
+    }
+
+    /// What [`Sandbox::forward`] does, as a value a driver's start can hold without the sandbox.
+    pub fn forwarder(&self) -> Forwarder {
+        Forwarder(Arc::clone(&self.tunnel))
+    }
+
+    /// The process that holds the sandbox, the leader of its own process group. Killing that
+    /// group ends everything in a bubblewrap sandbox; a container also needs
+    /// [`Container::kill_leftovers`].
+    pub fn anchor(&self) -> u32 {
+        self.anchor
+    }
+
+    /// The sandbox's own directory on the host, removed on destroy.
+    pub fn dir(&self) -> &Path {
+        &self.spec.dir
+    }
+
+    /// The host directory that is `/tmp` inside, where a program may leave a socket it made.
+    pub fn tmp(&self) -> PathBuf {
+        self.spec.dir.join("tmp")
     }
 
     /// Starts a process that belongs to the sandbox and outlives any driver, with exactly `env`
@@ -374,6 +384,19 @@ impl Drop for Sandbox {
             signal(self.anchor, Signal::SIGKILL);
         }
         self.processes.kill_all();
+    }
+}
+
+/// Maps loopback addresses of the host into one sandbox. Cheap to clone.
+#[derive(Clone)]
+pub struct Forwarder(Arc<tunnel::Host>);
+
+impl Forwarder {
+    pub async fn forward(&self, to: SocketAddr) -> Result<(), Error> {
+        self.0
+            .forward(to)
+            .await
+            .map_err(io(format!("mapping {to} into the sandbox")))
     }
 }
 

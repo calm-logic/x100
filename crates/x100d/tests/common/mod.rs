@@ -94,7 +94,8 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Env {
-        let dir = tempfile::tempdir().expect("a temporary directory");
+        // Under the build's own directory, not `/tmp`, which a sandbox replaces with its own.
+        let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
         let data = dir.path().join("data");
         let scripts = dir.path().join("scripts");
         std::fs::create_dir_all(&scripts).unwrap();
@@ -133,6 +134,17 @@ impl Env {
         self.spawn_with(Path::new(env!("CARGO_BIN_EXE_x100d-fake-harness")))
     }
 
+    /// A daemon to start in the test's own process, as the child process would be started.
+    pub fn config(&self) -> x100d::Config {
+        let mut config = x100d::Config::new(&self.data);
+        config.projects_root = self.projects_root();
+        config.scripts_dir = Some(self.scripts.clone());
+        config.fake_program = Some(env!("CARGO_BIN_EXE_x100d-fake-harness").into());
+        config.sandbox_helper = Some(env!("CARGO_BIN_EXE_x100d-sandbox").into());
+        config.no_keychain = true;
+        config
+    }
+
     /// A daemon whose drivers are started by `fake_harness` instead of the usual program.
     pub fn spawn_with(&self, fake_harness: &Path) -> DaemonProc {
         DaemonProc::spawn(self.daemon_args(fake_harness))
@@ -147,6 +159,21 @@ impl Env {
     /// The driver processes the daemon has written down, by driver id: one for most drivers,
     /// two for Codex in a terminal.
     pub fn recorded_pids(&self) -> Vec<(String, u32)> {
+        self.recorded()
+            .into_iter()
+            .filter(|(owner, _)| !owner.starts_with("sandbox "))
+            .collect()
+    }
+
+    /// The processes that hold the agents' sandboxes, which the daemon writes down too.
+    pub fn recorded_sandboxes(&self) -> Vec<(String, u32)> {
+        self.recorded()
+            .into_iter()
+            .filter(|(owner, _)| owner.starts_with("sandbox "))
+            .collect()
+    }
+
+    fn recorded(&self) -> Vec<(String, u32)> {
         let Ok(text) = std::fs::read_to_string(self.data.join("drivers.json")) else {
             return Vec::new();
         };
@@ -184,6 +211,22 @@ impl DaemonProc {
         own_projects_root(&args);
         let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
             .args(args)
+            // A test's vault keeps its key in a file in its own data directory, never in the
+            // builder's keychain.
+            .env(x100d::NO_KEYCHAIN_ENV, "1")
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("x100d starts");
+        DaemonProc { child: Some(child) }
+    }
+
+    /// A daemon with the test's environment and `extra` on top.
+    pub fn spawn_adding(args: Vec<std::ffi::OsString>, extra: &[(&str, String)]) -> DaemonProc {
+        own_projects_root(&args);
+        let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
+            .args(args)
+            .env(x100d::NO_KEYCHAIN_ENV, "1")
+            .envs(extra.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");
@@ -197,6 +240,7 @@ impl DaemonProc {
             .args(args)
             .env_clear()
             .envs(env.iter().map(|(k, v)| (k, v)))
+            .env(x100d::NO_KEYCHAIN_ENV, "1")
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");

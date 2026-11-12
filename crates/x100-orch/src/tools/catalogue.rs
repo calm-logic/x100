@@ -237,10 +237,14 @@ impl Tool {
             }
             Tool::LoadSkill => "Load a skill, shared or your own, into your instructions.",
             Tool::StartProcess => {
-                "Start a long-running command, such as a dev server, in your sandbox. It is owned \
-                 by the sandbox, so it outlives your driver."
+                "Start a long-running command, such as a dev server, in your sandbox, run by \
+                 `sh -c` in your working directory. It is owned by the sandbox, so it keeps \
+                 running after your turn and for your next driver; commands you start yourself \
+                 end with you. Returns the file its output goes to."
             }
-            Tool::StopProcess => "Stop a process you started with `start_process`.",
+            Tool::StopProcess => {
+                "Stop a process you started with `start_process`, and everything it started."
+            }
             Tool::Remember => {
                 "Write a note to your memory, which every later driver of yours reads."
             }

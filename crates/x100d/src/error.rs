@@ -11,4 +11,6 @@ pub enum Error {
     /// Another daemon has this data directory.
     #[error("a daemon is already running on {0}")]
     AlreadyRunning(PathBuf),
+    #[error("the vault: {0}")]
+    Vault(#[from] x100_vault::VaultError),
 }

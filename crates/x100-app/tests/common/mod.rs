@@ -53,7 +53,8 @@ pub struct Daemon {
 impl Daemon {
     /// A daemon that runs the Fernleaf script's harness, on a clock that moves only when told.
     pub fn fernleaf() -> Daemon {
-        let dir = tempfile::tempdir().expect("a temporary directory");
+        // Under the build's own directory, not `/tmp`, which a sandbox replaces with its own.
+        let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
         let child = Command::new(binary("x100d"))
             .arg("--data-dir")
             .arg(dir.path().join("data"))
@@ -66,6 +67,8 @@ impl Daemon {
             .arg(binary("x100d-fake-harness"))
             .arg("--fake-clock")
             .arg(START.as_millis().to_string())
+            // The vault's key is a file in the test's data directory, never in a keychain.
+            .env("X100_NO_KEYCHAIN", "1")
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");
@@ -276,4 +279,19 @@ pub fn click(vcx: &mut VisualTestContext, selector: &'static str) {
         .unwrap_or_else(|| panic!("nothing drawn as {selector}"));
     vcx.simulate_click(b.center(), Modifiers::none());
     pump(vcx);
+}
+
+/// The made-up host the fake provider is reached at through a daemon's proxy.
+pub const FAKE_RESOLVE: &str = "provider.x100.test=127.0.0.1";
+
+/// The fake provider's base URL by that host.
+#[allow(dead_code)]
+pub fn fake_base(provider: &x100_drivers::testing::FakeProvider) -> String {
+    let port = provider
+        .url()
+        .rsplit(':')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    format!("http://provider.x100.test:{port}")
 }

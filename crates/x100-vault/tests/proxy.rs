@@ -311,6 +311,36 @@ async fn a_refused_host_gets_no_tunnel_and_is_reported() {
     assert_eq!(seen.status, 200);
 }
 
+/// The host's own loopback holds the daemon and whatever else the builder runs locally, so a
+/// sandbox cannot reach it through its proxy, by address or by name.
+#[tokio::test]
+async fn the_hosts_loopback_is_refused() {
+    let mut s = setup();
+    let route = s
+        .proxy
+        .open_route(requester(Purpose::Work), &[])
+        .await
+        .unwrap();
+    let tcp = tokio::net::TcpStream::connect(route.addr()).await.unwrap();
+    let (mut sender, conn) =
+        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(tcp))
+            .await
+            .unwrap();
+    tokio::spawn(conn);
+    for target in ["127.0.0.1:22", "localhost:5432", "[::1]:80", "0.0.0.0:80"] {
+        let connect = Request::connect(target)
+            .header("proxy-authorization", proxy_auth(&route))
+            .body(empty())
+            .unwrap();
+        assert_eq!(
+            sender.send_request(connect).await.unwrap().status(),
+            403,
+            "{target}"
+        );
+        assert_eq!(s.report().await.outcome, EgressOutcome::HostRefused);
+    }
+}
+
 #[tokio::test]
 async fn a_request_without_the_routes_token_is_challenged() {
     let s = setup();

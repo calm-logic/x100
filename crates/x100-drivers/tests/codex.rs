@@ -38,12 +38,11 @@ async fn setup() -> Option<Setup> {
     let dir = tempfile::tempdir().unwrap();
     let work = dir.path().join("work");
     let home = dir.path().join("home");
-    let state = dir.path().join("state");
-    for d in [&work, &home, &state] {
+    for d in [&work, &home] {
         std::fs::create_dir(d).unwrap();
     }
     let provider = FakeProvider::start().await.unwrap();
-    let mut config = CodexConfig::new(&state);
+    let mut config = CodexConfig::new();
     config.program = program;
     config.base_url = format!("{}/v1", provider.url());
     config.inherit_env = vec!["PATH".into()];

@@ -134,8 +134,7 @@ pub fn spec(test: &str, base: &Path, worktree: &Path) -> SandboxSpec {
         worktree: worktree.to_path_buf(),
         programs: Vec::new(),
         paths: Vec::new(),
-        proxy: None,
-        daemon: None,
+        endpoints: Vec::new(),
     }
 }
 
@@ -221,20 +220,11 @@ pub async fn grows(path: &Path) {
     panic!("{} never grew", path.display());
 }
 
-/// The paths that hold `program` as installed on this machine, if it is: the directory of the
-/// link on the search path, and the directory the link resolves into, or the whole install for a
-/// program under a `bin` directory (node and what npm installs).
+/// The paths that hold `program` as installed on this machine, if it is on the search path.
 pub fn program_paths(program: &str) -> Option<Vec<PathBuf>> {
     let path = std::env::var_os("PATH")?;
-    let link = std::env::split_paths(&path)
+    let found = std::env::split_paths(&path)
         .map(|d| d.join(program))
         .find(|p| p.is_file())?;
-    let real = link.canonicalize().ok()?;
-    let bin = link.parent()?;
-    let root = bin.parent()?;
-    let installed = real.parent() == Some(bin) || real.starts_with(root.join("lib"));
-    if bin.file_name()? == "bin" && installed {
-        return Some(vec![root.to_path_buf()]);
-    }
-    Some(vec![link.clone(), real.parent()?.to_path_buf()])
+    Some(x100_sandbox::program_paths(&found))
 }

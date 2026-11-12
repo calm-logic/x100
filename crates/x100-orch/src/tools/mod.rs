@@ -9,6 +9,7 @@
 
 mod catalogue;
 mod later;
+mod process;
 mod schema;
 mod setup;
 mod talk;
@@ -30,6 +31,7 @@ use crate::branches::Target;
 use crate::ctx::Events;
 
 pub(crate) use catalogue::{END_THE_TURN, SET_UP, Tool};
+pub(crate) use process::ProcessPlan;
 pub(crate) use schema::schema;
 pub(crate) use work::{merged, report_failed};
 
@@ -53,6 +55,8 @@ pub(crate) struct Plan {
     pub merge: Option<MergePlan>,
     /// A code directory to make before the events are appended, for a project being set up.
     pub code_dir: Option<NewCodeDir>,
+    /// A process to start or stop in the agent's sandbox before the events are appended.
+    pub process: Option<ProcessPlan>,
 }
 
 /// Where a project being set up gets its code directory: `<root>/<slug>`, or with a number after
@@ -150,9 +154,9 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
             intent,
             brief,
         } => setup::set_up(&at, name, intent, brief.as_deref()),
-        ToolCall::StartProcess { .. }
-        | ToolCall::StopProcess { .. }
-        | ToolCall::LoadSkill { .. }
+        ToolCall::StartProcess { name, command } => process::start(&at, name, command),
+        ToolCall::StopProcess { name } => process::stop(&at, name),
+        ToolCall::LoadSkill { .. }
         | ToolCall::Remember { .. }
         | ToolCall::ReadLog { .. }
         | ToolCall::ReadMemories { .. }
@@ -298,6 +302,8 @@ pub(crate) fn reply(call: &ToolCall, events: &[ProjectEvent]) -> String {
             })
         }),
         ToolCall::SetPreview { url } => json!({ "preview": url }),
+        ToolCall::StartProcess { name, .. } => json!({ "process": name, "running": true }),
+        ToolCall::StopProcess { name } => json!({ "process": name, "running": false }),
         ToolCall::SetUpProject { .. } => {
             let mut out = json!({ "name": events.iter().find_map(|e| match e {
                 ProjectEvent::SetUp(i) | ProjectEvent::Renamed(i) => Some(&i.name),

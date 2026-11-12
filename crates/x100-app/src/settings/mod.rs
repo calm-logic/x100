@@ -1,11 +1,12 @@
 //! The Settings tab: the project's name, intent and code directory, which only the name of may be
 //! changed here, Ask me about, the project's budget, each lead's budget and effort range, the
-//! harnesses and models x100 may use, and the Credentials part. Each control sends its protocol
-//! request and says beside itself what came back: where the daemon has not made a method yet
-//! (leads' budgets and effort ranges until M8, credentials until M11) it says so, and the control
-//! does not pretend to have worked. What a control changed shows when the state changes.
+//! harnesses and models x100 may use, the Sandbox part with the daemon's one unsafe setting, and
+//! the Credentials part. Each control sends its protocol request and says beside itself what came
+//! back: where the daemon has not made a method yet it says so, and the control does not pretend
+//! to have worked. What a control changed shows when the state changes.
 
 mod credentials;
+mod sandbox;
 
 use std::collections::HashMap;
 
@@ -21,6 +22,7 @@ use x100_core::money::Money;
 use x100_core::project::SettingChange;
 
 pub use credentials::{CredentialModel, Credentials};
+pub use sandbox::{SandboxModel, SandboxPart};
 
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
@@ -133,6 +135,7 @@ pub struct SettingsView {
     fields: HashMap<Control, (Entity<TextInput>, Subscription)>,
     outcomes: HashMap<Control, Outcome>,
     credentials: Entity<Credentials>,
+    sandbox: Entity<SandboxPart>,
     _subscription: Subscription,
 }
 
@@ -158,6 +161,7 @@ impl SettingsView {
             }
         });
         let credentials = cx.new(|cx| Credentials::new(session.clone(), project, cx));
+        let sandbox = cx.new(|cx| SandboxPart::new(session.clone(), cx));
         let mut view = Self {
             session,
             project,
@@ -165,6 +169,7 @@ impl SettingsView {
             fields: HashMap::new(),
             outcomes: HashMap::new(),
             credentials,
+            sandbox,
             _subscription: subscription,
         };
         view.refresh(cx);
@@ -182,6 +187,10 @@ impl SettingsView {
 
     pub fn credentials(&self) -> &Entity<Credentials> {
         &self.credentials
+    }
+
+    pub fn sandbox(&self) -> &Entity<SandboxPart> {
+        &self.sandbox
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -593,6 +602,7 @@ impl Render for SettingsView {
                     .text_color(theme::dim())
                     .child("The CEO sets each lead's effort range. For every task x100 picks the cheapest allowed model that meets the effort the task needs."),
             )
+            .child(self.sandbox.clone())
             .child(div().pt(px(18.)).child(self.credentials.clone()))
     }
 }

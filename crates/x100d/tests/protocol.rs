@@ -25,10 +25,7 @@ struct Local {
 impl Local {
     async fn start(tweak: impl FnOnce(&mut x100d::Config)) -> Local {
         let env = Env::new();
-        let mut config = x100d::Config::new(&env.data);
-        config.projects_root = env.projects_root();
-        config.scripts_dir = Some(env.scripts.clone());
-        config.fake_program = Some(env!("CARGO_BIN_EXE_x100d-fake-harness").into());
+        let mut config = env.config();
         tweak(&mut config);
         let daemon = x100d::Daemon::start(config)
             .await
@@ -346,46 +343,6 @@ async fn methods_that_later_milestones_make_real_say_which() {
             "M9",
         ),
         (
-            RemoveCredential {
-                credential: x100_core::id::CredentialRef::from_u128(1),
-            }
-            .into(),
-            "M11",
-        ),
-        (
-            ReplaceCredential {
-                credential: x100_core::id::CredentialRef::from_u128(1),
-                value: Secret::new("v"),
-            }
-            .into(),
-            "M11",
-        ),
-        (
-            ScopeCredential {
-                credential: x100_core::id::CredentialRef::from_u128(1),
-                scope: x100_core::credential::CredentialScope {
-                    hosts: Default::default(),
-                    commands: Default::default(),
-                    projects: x100_core::credential::Projects::All,
-                },
-            }
-            .into(),
-            "M11",
-        ),
-        (
-            AddCredential {
-                name: "n".into(),
-                value: Secret::new("v"),
-                scope: x100_core::credential::CredentialScope {
-                    hosts: Default::default(),
-                    commands: Default::default(),
-                    projects: x100_core::credential::Projects::All,
-                },
-            }
-            .into(),
-            "M11",
-        ),
-        (
             DecideAction {
                 project: p,
                 action: x100_core::id::ActionId::from_u128(1),
@@ -462,6 +419,10 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "harnesses.rescan",
         "agents.set_budget",
         "agents.set_effort",
+        "credentials.add",
+        "credentials.replace",
+        "credentials.set_scope",
+        "credentials.remove",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);

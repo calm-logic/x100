@@ -9,13 +9,17 @@
 //! changes nothing in the project's log; the refusal is kept where [`Desk::refusals`] shows it.
 //!
 //! A call that passes is recorded as an action, put to the gate, planned, carried out with the git
-//! work the plan names, and its events appended, all under the project's writer lock.
+//! and sandbox work the plan names, and its events appended, all under the project's writer lock.
+//! Every credential value in a call is replaced by its reference first, so no message, report,
+//! spec, note or file name a driver sends holds one.
 
 use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use x100_core::action::{Action, Request};
+use x100_core::driver::Purpose;
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::id::{ActionId, AgentId, DriverId};
@@ -25,12 +29,14 @@ use x100_core::tool::ToolCall;
 use x100_drivers::ToolEndpoint;
 use x100_drivers::fake::DaemonTools;
 use x100_store::Git;
+use x100_vault::{Redactor, Requester};
 
 use crate::ctx::{Events, ProjectCtx, Writer, git_of};
 use crate::gate::{self, Gate};
 use crate::ids::new_id;
+use crate::sandbox::Sandboxes;
 use crate::store::blocking;
-use crate::tools::{self, Ctx, END_THE_TURN, NewCodeDir, SET_UP, Tool};
+use crate::tools::{self, Ctx, END_THE_TURN, NewCodeDir, ProcessPlan, SET_UP, Tool};
 use crate::{Settings, branches};
 
 /// How many refusals [`Desk::refusals`] keeps, newest last.
@@ -60,21 +66,42 @@ pub struct Desk {
     address: OnceLock<String>,
     gate: Arc<dyn Gate>,
     settings: Settings,
+    redactor: Redactor,
+    /// Where `start_process` runs, set once the orchestrator is made.
+    sandboxes: OnceLock<Arc<Sandboxes>>,
 }
 
 impl Desk {
-    pub fn new(gate: Arc<dyn Gate>, settings: Settings) -> Arc<Self> {
+    pub fn new(gate: Arc<dyn Gate>, settings: Settings, redactor: Redactor) -> Arc<Self> {
         Arc::new(Self {
             passes: Mutex::new(HashMap::new()),
             refusals: Mutex::new(VecDeque::new()),
             address: OnceLock::new(),
             gate,
             settings,
+            redactor,
+            sandboxes: OnceLock::new(),
         })
     }
 
     pub(crate) fn listening_at(&self, base: String) {
         let _ = self.address.set(base);
+    }
+
+    pub(crate) fn attach(&self, sandboxes: Arc<Sandboxes>) {
+        let _ = self.sandboxes.set(sandboxes);
+    }
+
+    pub(crate) fn gate(&self) -> Arc<dyn Gate> {
+        Arc::clone(&self.gate)
+    }
+
+    /// The tool server's address on loopback, which every sandbox maps in.
+    pub(crate) fn tools_addr(&self) -> Option<SocketAddr> {
+        self.address
+            .get()
+            .and_then(|url| url.strip_prefix("http://"))
+            .and_then(|a| a.parse().ok())
     }
 
     /// The address and token `driver` reaches the tools with, made as it starts. The token is
@@ -135,9 +162,15 @@ impl Desk {
     ) -> Result<String, String> {
         let tool = Tool::of(&call);
         let ctx = self.project_of(driver, token, Some(tool))?;
+        let call = crate::redact::value(&self.redactor, &call)
+            .ok_or("the call could not be cleared of credential values, so it is refused")?;
         let gate = Arc::clone(&self.gate);
         let settings = (self.settings)();
-        let done = blocking(move || carry_out(&ctx, &*gate, &settings, driver, call)).await;
+        let sandboxes = self.sandboxes.get().cloned();
+        let done = blocking(move || {
+            carry_out(&ctx, &*gate, &settings, sandboxes.as_deref(), driver, call)
+        })
+        .await;
         match done {
             Err(Outcome::Fenced(why)) => Err(self.refuse(driver, Some(tool), why)),
             Err(Outcome::Refused(why)) => Err(why),
@@ -243,6 +276,7 @@ fn carry_out(
     ctx: &ProjectCtx,
     gate: &dyn Gate,
     settings: &DaemonSettings,
+    sandboxes: Option<&Sandboxes>,
     driver: DriverId,
     call: ToolCall,
 ) -> Result<String, Outcome> {
@@ -288,6 +322,19 @@ fn carry_out(
             return refuse(&w, head, action.id, e);
         }
     }
+    let mut reply_override = None;
+    if let Some(process) = &plan.process {
+        let requester = Requester {
+            project: ctx.id,
+            agent,
+            driver,
+            purpose: Purpose::Work,
+        };
+        match carry_out_process(sandboxes, requester, process) {
+            Ok(reply) => reply_override = reply,
+            Err(e) => return refuse(&w, head, action.id, e),
+        }
+    }
     let mut events = plan.events;
     if let Some(new) = &plan.code_dir {
         match make_code_dir(new) {
@@ -330,7 +377,35 @@ fn carry_out(
     if let (ToolCall::WriteSpec { spec, body, .. }, Some(git)) = (&call, &git) {
         write_spec_file(git, *spec, body);
     }
-    Ok(answer(&call, &own))
+    Ok(reply_override.unwrap_or_else(|| answer(&call, &own)))
+}
+
+/// Starts or stops a process in the agent's sandbox. Blocks: it runs on a blocking thread with the
+/// runtime's handle at hand. A start answers with where the process's output goes.
+fn carry_out_process(
+    sandboxes: Option<&Sandboxes>,
+    requester: Requester,
+    process: &ProcessPlan,
+) -> Result<Option<String>, String> {
+    let sandboxes = sandboxes.ok_or("this daemon runs no sandboxes")?;
+    let runtime = tokio::runtime::Handle::current();
+    match process {
+        ProcessPlan::Start { name, command } => {
+            let log = runtime.block_on(sandboxes.start_process(requester, name, command))?;
+            Ok(Some(
+                serde_json::json!({
+                    "process": name,
+                    "running": true,
+                    "output": log.display().to_string(),
+                })
+                .to_string(),
+            ))
+        }
+        ProcessPlan::Stop { name } => {
+            runtime.block_on(sandboxes.stop_process(requester.agent, name))?;
+            Ok(None)
+        }
+    }
 }
 
 /// The reply to a call that was carried out. After `wait` or `report`, or the call that sets the

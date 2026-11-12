@@ -37,6 +37,9 @@ pub struct ProxyConfig {
     /// Hosts sent to a fixed address instead of being looked up, as curl's `--resolve` does.
     /// For tests: the port stays the one asked for.
     pub resolve: HashMap<String, IpAddr>,
+    /// Only the hosts in `resolve` are reached; every other is refused. For tests, so that
+    /// nothing a program tries leaves the machine.
+    pub closed: bool,
 }
 
 impl Default for ProxyConfig {
@@ -44,6 +47,7 @@ impl Default for ProxyConfig {
         Self {
             upstream: UpstreamTrust::System,
             resolve: HashMap::new(),
+            closed: false,
         }
     }
 }
@@ -106,16 +110,28 @@ pub(crate) struct Shared {
     authority: Authority,
     client: Arc<rustls::ClientConfig>,
     resolve: HashMap<String, IpAddr>,
+    closed: bool,
     refused: RwLock<BTreeSet<String>>,
     reports: mpsc::UnboundedSender<EgressReport>,
 }
 
 impl Shared {
+    /// A host refused by name, any host outside `resolve` when the proxy is closed, and the
+    /// host's own loopback, which holds the daemon and whatever else the builder serves locally:
+    /// a sandbox reaches what runs inside it directly, and nothing on the host's loopback
+    /// through the proxy. A name that only resolves to loopback is not caught here.
     fn is_refused(&self, host: &str) -> bool {
-        self.refused
-            .read()
-            .expect("refused hosts")
-            .contains(&host.to_ascii_lowercase())
+        let host = host.to_ascii_lowercase();
+        if self.resolve.contains_key(&host) {
+            return self.refused.read().expect("refused hosts").contains(&host);
+        }
+        let bare = host.trim_start_matches('[').trim_end_matches(']');
+        let loopback = bare == "localhost"
+            || bare.ends_with(".localhost")
+            || bare
+                .parse::<IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified());
+        self.closed || loopback || self.refused.read().expect("refused hosts").contains(&host)
     }
 }
 
@@ -138,7 +154,12 @@ impl Proxy {
             vault,
             authority,
             client,
-            resolve: config.resolve,
+            resolve: config
+                .resolve
+                .into_iter()
+                .map(|(h, ip)| (h.to_ascii_lowercase(), ip))
+                .collect(),
+            closed: config.closed,
             refused: RwLock::new(BTreeSet::new()),
             reports,
         };

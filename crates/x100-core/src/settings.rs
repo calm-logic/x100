@@ -46,6 +46,13 @@ pub struct DaemonSettings {
     /// `<projects root>/<its name as a slug>`. `None` is the daemon's own default, `~/x100`, which
     /// the daemon works out since this crate reads no environment.
     pub projects_root: Option<PathBuf>,
+    /// Drivers run as the builder with no sandbox: they can read and change everything the
+    /// builder can, and reach the network directly. Off by default. Without it, a daemon that
+    /// cannot make a sandbox on its machine starts no driver at all.
+    pub run_without_sandbox: bool,
+    /// Directories or files a sandbox shows read-only besides the programs the daemon finds on
+    /// its search path: a toolchain installed somewhere unusual.
+    pub sandbox_programs: Vec<PathBuf>,
 }
 
 const fn minutes(n: u64) -> Duration {
@@ -67,6 +74,8 @@ impl Default for DaemonSettings {
             cool_off: minutes(10),
             terminal_drivers_per_login: 4,
             projects_root: None,
+            run_without_sandbox: false,
+            sandbox_programs: Vec::new(),
         }
     }
 }
@@ -91,6 +100,8 @@ pub enum DaemonSetting {
     CoolOff(Duration),
     TerminalDriversPerLogin(u32),
     ProjectsRoot(PathBuf),
+    RunWithoutSandbox(bool),
+    SandboxPrograms(Vec<PathBuf>),
 }
 
 impl DaemonSettings {
@@ -109,6 +120,8 @@ impl DaemonSettings {
             S::CoolOff(v) => self.cool_off = v,
             S::TerminalDriversPerLogin(v) => self.terminal_drivers_per_login = v,
             S::ProjectsRoot(v) => self.projects_root = Some(v),
+            S::RunWithoutSandbox(v) => self.run_without_sandbox = v,
+            S::SandboxPrograms(v) => self.sandbox_programs = v,
         }
     }
 }

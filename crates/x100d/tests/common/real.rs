@@ -1,9 +1,11 @@
-//! The real `claude` and `codex` programs run by a real daemon as terminal drivers, with the model
-//! played by the fake provider on localhost. No request leaves the machine and no real login is
-//! touched: each program's login is a dummy written here into a throwaway directory the daemon is
-//! pointed at, the daemon's home is throwaway too, its environment is built from nothing, the base
-//! URLs are the fake provider's, and so is the proxy, which refuses and records any attempt to
-//! reach another host. A test is skipped, saying so, when its program is not installed.
+//! The real `claude` and `codex` programs run by a real daemon as terminal drivers, each in its
+//! agent's sandbox, with the model played by the fake provider on localhost. No request leaves the
+//! machine and no real login is touched: each program's login is a dummy written here into a
+//! throwaway directory the daemon is pointed at, the daemon's home and data directory are
+//! throwaway too, its environment is built from nothing, its vault's key is a file, and the base
+//! URLs name a made-up host that the daemon's proxy, the drivers' only way out, sends to the fake
+//! provider while it refuses every other host. A test is skipped, saying so, when its program is
+//! not installed.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -12,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::json;
 use tokio::sync::watch;
 use x100_client::{Client, Options, TerminalStream};
-use x100_core::action::AskMeAbout;
+use x100_core::action::{ActionState, AskMeAbout, Request};
 use x100_core::agent::{AgentState, Waiting};
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessKind, HarnessModel, ModelName};
@@ -50,17 +52,10 @@ impl Program {
             Program::Codex => "gpt-6-luna",
         }
     }
-
-    /// The outside connections each program makes that nothing switches off (STATUS.md, "From
-    /// M3T"): Claude Code fetches the account's profile and refreshes its token, Codex's terminal
-    /// fetches an announcement. The fake provider, as the proxy, refuses them.
-    fn tolerated(self) -> &'static str {
-        match self {
-            Program::Claude => "api.anthropic.com:443",
-            Program::Codex => "raw.githubusercontent.com:443",
-        }
-    }
 }
+
+/// The provider's made-up host, which the daemon's proxy sends to the fake provider.
+pub const PROVIDER_HOST: &str = "provider.x100.test";
 
 pub struct Real {
     pub dir: tempfile::TempDir,
@@ -133,17 +128,20 @@ impl Real {
         write_logins(&claude, &codex);
         let provider = FakeProvider::start().await.unwrap();
         let text = |p: &PathBuf| p.display().to_string();
+        let port = provider.url().rsplit(':').next().unwrap().to_owned();
+        let base = format!("http://{PROVIDER_HOST}:{port}");
         let env = vec![
             ("PATH".into(), std::env::var("PATH").unwrap()),
             ("HOME".into(), text(&home)),
             ("LANG".into(), "C.UTF-8".into()),
             ("X100_CLAUDE_LOGIN".into(), text(&claude)),
             ("X100_CODEX_LOGIN".into(), text(&codex)),
-            ("ANTHROPIC_BASE_URL".into(), provider.url()),
-            ("OPENAI_BASE_URL".into(), format!("{}/v1", provider.url())),
-            ("HTTPS_PROXY".into(), provider.url()),
-            ("HTTP_PROXY".into(), provider.url()),
-            ("NO_PROXY".into(), "127.0.0.1,localhost".into()),
+            ("ANTHROPIC_BASE_URL".into(), base.clone()),
+            ("OPENAI_BASE_URL".into(), format!("{base}/v1")),
+            (
+                x100d::PROXY_RESOLVE_ENV.into(),
+                format!("{PROVIDER_HOST}=127.0.0.1"),
+            ),
         ];
         let daemon = DaemonProc::spawn_in(args(&data), &env);
         let client = connect(&data).await;
@@ -240,8 +238,14 @@ impl Real {
             .wait_for(PATIENCE, |s| f(s.projects.get(&project)?))
             .await
             .unwrap_or_else(|_| {
+                let drivers: Vec<_> = self
+                    .client
+                    .project(project)
+                    .map(|p| p.drivers().map(|d| d.state.clone()).collect())
+                    .unwrap_or_default();
                 panic!(
-                    "timed out waiting until {what}; the model was asked {} times",
+                    "timed out waiting until {what}; the model was asked {} times; drivers: \
+                     {drivers:?}",
                     self.provider.requests().len()
                 )
             })
@@ -264,11 +268,31 @@ impl Real {
         .await
     }
 
-    /// Only the outside connections this program is known to try were tried.
-    pub fn assert_nothing_else_left_the_machine(&self) {
-        let attempts = self.provider.proxy_attempts();
-        let tolerated = self.program.tolerated();
-        assert!(attempts.iter().all(|a| a == tolerated), "{attempts:?}");
+    /// Every request a driver sent out went through the proxy, and every one to a host but the
+    /// provider's was refused there: the log records each as an egress action.
+    pub fn assert_nothing_else_left_the_machine(&self, project: ProjectId) {
+        let s = self.client.project(project).unwrap();
+        let egress: Vec<(String, bool)> = s
+            .actions()
+            .filter_map(|a| match &a.action.request {
+                Request::Egress { host, .. } => {
+                    let refused = a.state == ActionState::Failed;
+                    Some((host.clone(), refused))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            egress.iter().any(|(h, _)| h == PROVIDER_HOST),
+            "the provider was reached through the proxy: {egress:?}"
+        );
+        assert!(
+            egress
+                .iter()
+                .all(|(h, refused)| h == PROVIDER_HOST || *refused),
+            "{egress:?}"
+        );
+        assert!(self.provider.proxy_attempts().is_empty());
     }
 }
 

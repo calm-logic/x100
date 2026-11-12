@@ -12,8 +12,8 @@ use x100_core::effort::Effort;
 use x100_core::harness::ModelName;
 use x100_core::id::DriverId;
 use x100_drivers::{
-    CommandWrapper, DriverHandle, DriverOutput, DriverSpec, Permissions, SpawnHook, StallPolicy,
-    ToolEndpoint,
+    CommandWrapper, DriverHandle, DriverOutput, DriverSpec, Expose, Permissions, SpawnHook,
+    StallPolicy, ToolEndpoint,
 };
 
 /// How long a test waits for a driver to say something before it gives up. Only a guard against a
@@ -35,7 +35,11 @@ pub fn spec(n: u128, dir: &Path, model: &str, effort: Effort) -> DriverSpec {
         model: ModelName(model.to_owned()),
         effort,
         dir: dir.to_owned(),
+        // Beside the worktree, in the test's own directory.
+        state: dir.with_file_name(format!("driver-{n}")),
         wrap: CommandWrapper::identity(),
+        expose: Expose::nothing(),
+        tmp: None,
         start_pack: "You are a test agent.".into(),
         tools: None,
         env: Vec::new(),

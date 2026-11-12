@@ -14,9 +14,13 @@
 //!   `x100-router` decides ([`route`]), with the room drivers take on the machine and on logins
 //!   counted across every project ([`fleet`]).
 //!
-//! The seams later milestones attach to, each with today's trivial behaviour:
-//! - [`Sandbox`] wraps a driver's command line to run it in the agent's sandbox (M10).
-//! - [`Gate`] classifies each action and allows or holds it (M12).
+//! - Every driver runs in its agent's sandbox, reaching the outside only through its own route on
+//!   the vault's proxy ([`sandbox`]), and everything a driver emits is redacted of credential
+//!   values before it is recorded.
+//!
+//! The seam a later milestone attaches to, with today's trivial behaviour:
+//! - [`Gate`] classifies each action, an egress through the proxy among them, and allows or
+//!   holds it (M12).
 
 mod branches;
 mod builder;
@@ -32,6 +36,7 @@ pub mod pack;
 mod processes;
 mod project;
 mod recover;
+mod redact;
 mod route;
 mod sandbox;
 mod settle;
@@ -68,10 +73,40 @@ pub use ids::new_id;
 pub use mcp::ToolServer;
 pub use processes::{ProcessRegistry, Reaped};
 pub use recover::recover;
-pub use sandbox::{NoSandbox, Sandbox};
+pub use sandbox::Containment;
 
 use ctx::ProjectCtx;
 use store::blocking;
+use x100_vault::Redactor;
+
+/// Records that each agent's processes ended with its sandbox.
+pub(crate) async fn processes_ended(
+    ctx: &Arc<ProjectCtx>,
+    ended: Vec<(AgentId, Vec<x100_core::process::ProcessName>)>,
+) {
+    let events: ctx::Events = ended
+        .into_iter()
+        .flat_map(|(agent, names)| {
+            names.into_iter().map(move |name| {
+                (
+                    Actor::Daemon,
+                    x100_core::event::ProjectEvent::ProcessStopped {
+                        agent,
+                        name,
+                        end: x100_core::process::ProcessEnd::SandboxDestroyed,
+                    },
+                )
+            })
+        })
+        .collect();
+    if events.is_empty() {
+        return;
+    }
+    let ctx = Arc::clone(ctx);
+    if let Err(e) = blocking(move || ctx.writer().append(events).map(drop)).await {
+        eprintln!("x100: the end of a sandbox's processes is not in the log: {e}");
+    }
+}
 
 /// The daemon's settings as they are now, read whenever one is needed so a change reaches the
 /// next decision.
@@ -94,7 +129,9 @@ pub struct Config {
     pub processes: Arc<ProcessRegistry>,
     /// Where drivers' tool calls arrive. The harnesses are given it too, so it is made first.
     pub desk: Arc<Desk>,
-    pub sandbox: Arc<dyn Sandbox>,
+    pub containment: Containment,
+    /// Replaces every credential value it knows in what drivers emit, before it is recorded.
+    pub redactor: Redactor,
     /// One turn at a time in each project, the agent whose oldest waiting item came first going
     /// next. Agents' processes run concurrently, so only this makes a log made on the fake
     /// harness the same on every run. The daemon runs turns side by side.
@@ -112,7 +149,8 @@ pub(crate) struct Shared {
     pub settings: Settings,
     pub processes: Arc<ProcessRegistry>,
     pub desk: Arc<Desk>,
-    pub sandbox: Arc<dyn Sandbox>,
+    pub sandboxes: Arc<sandbox::Sandboxes>,
+    pub redactor: Redactor,
     pub serial: bool,
 }
 
@@ -164,6 +202,11 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub fn new(config: Config) -> Self {
+        let sandboxes = Arc::new(sandbox::Sandboxes::new(
+            config.containment,
+            Arc::clone(&config.processes),
+        ));
+        config.desk.attach(Arc::clone(&sandboxes));
         Self {
             shared: Arc::new(Shared {
                 clock: config.clock,
@@ -175,7 +218,8 @@ impl Orchestrator {
                 settings: config.settings,
                 processes: config.processes,
                 desk: config.desk,
-                sandbox: config.sandbox,
+                sandboxes,
+                redactor: config.redactor,
                 serial: config.serial,
             }),
             projects: Arc::new(Mutex::new(HashMap::new())),
@@ -347,10 +391,56 @@ impl Orchestrator {
         self.shared.fleet.changed();
     }
 
-    /// The harnesses this run can start, after a rescan found them again.
-    pub fn set_harnesses(&self, harnesses: HashMap<HarnessId, Arc<dyn Harness>>) {
+    /// The harnesses this run can start, and the programs a sandbox shows for them, after a
+    /// rescan found them again.
+    pub fn set_harnesses(
+        &self,
+        harnesses: HashMap<HarnessId, Arc<dyn Harness>>,
+        programs: Vec<std::path::PathBuf>,
+    ) {
         *self.shared.harnesses.write().expect("harnesses lock") = harnesses;
+        self.shared.sandboxes.set_programs(programs);
         self.reconsider();
+    }
+
+    /// A request a driver sent out through the proxy, after it went: recorded as an action with
+    /// the gate's ruling on it, and with the credential uses it made. The proxy cannot hold a
+    /// request yet, so a ruling to hold is recorded and nothing more.
+    pub async fn egress(
+        &self,
+        project: ProjectId,
+        agent: AgentId,
+        request: x100_core::action::Request,
+        uses: Vec<x100_core::credential::CredentialUse>,
+        error: Option<String>,
+    ) {
+        let Ok(ctx) = self.ctx(project) else {
+            return;
+        };
+        let gate = self.shared.desk.gate();
+        blocking(move || {
+            let committed = ctx.commit(|s, clock| {
+                let action = x100_core::action::Action {
+                    id: new_id(clock, x100_core::id::ActionId::new),
+                    agent,
+                    request,
+                };
+                let ruling = gate.rule(s, &action);
+                let mut events = gate::proposed(&action, &ruling);
+                events.push(gate::finished(action.id, error));
+                events.extend(uses.into_iter().map(|u| {
+                    (
+                        Actor::Daemon,
+                        x100_core::event::ProjectEvent::CredentialUsed(u),
+                    )
+                }));
+                (events, ())
+            });
+            if let Err(e) = committed {
+                eprintln!("x100: an egress of project {project} could not be recorded: {e}");
+            }
+        })
+        .await;
     }
 
     /// A job of the daemon's log fired: a cool-off ends, if that job is still what ends it, and
@@ -389,6 +479,8 @@ impl Orchestrator {
             }
             // The loop returns once it has acknowledged; waiting for it leaves nothing behind.
             let _ = p.task.await;
+            let ended = self.shared.sandboxes.destroy_project(p.ctx.id).await;
+            processes_ended(&p.ctx, ended).await;
         }
     }
 }

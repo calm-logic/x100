@@ -2,6 +2,7 @@
 
 mod agents;
 mod chat;
+mod credentials;
 mod daemon;
 mod files;
 mod projects;
@@ -81,6 +82,10 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::SetEffortRange(p) => out(agents::set_effort(hub, p).await),
         Call::SetMachineCap(p) => out(daemon::set_cap(hub, p).await),
         Call::RescanHarnesses(p) => out(daemon::rescan(hub, p).await),
+        Call::AddCredential(p) => out(credentials::add(hub, p).await),
+        Call::ReplaceCredential(p) => out(credentials::replace(hub, p).await),
+        Call::ScopeCredential(p) => out(credentials::set_scope(hub, p).await),
+        Call::RemoveCredential(p) => out(credentials::remove(hub, p).await),
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)

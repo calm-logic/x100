@@ -21,6 +21,8 @@ x100-store = { path = "../x100-store" }
 x100-drivers = { path = "../x100-drivers" }
 x100-jobs = { path = "../x100-jobs" }
 x100-router = { path = "../x100-router" }
+x100-sandbox = { path = "../x100-sandbox" }
+x100-vault = { path = "../x100-vault" }
 async-trait = "0.1"
 bytes = "1"
 getrandom = "0.4"

@@ -301,14 +301,17 @@ async fn endpoints_reach_the_host(backend: &dyn Backend) {
     let base = scratch();
     let work = dir(base.path().join("work"));
     let mut spec = spec("endpoints", base.path(), &work);
-    spec.proxy = Some(proxy);
-    spec.daemon = Some(tools);
+    spec.endpoints = vec![proxy, tools];
     let sandbox = backend.create(spec).await.unwrap();
     sandbox.forward(hooks).await.unwrap();
+    // The caller gives each command its proxy, as a driver is given its route's URL.
+    let mut env = base_env(&sandbox);
+    env.push(("http_proxy".into(), format!("http://{proxy}")));
+    env.push(("no_proxy".into(), "127.0.0.1".into()));
     let script = format!(
         "curl -s http://example.invalid/hello; echo; curl -s http://{tools}/drivers/d1/mcp; echo; curl -s -X POST http://{hooks}/hook/Stop"
     );
-    let out = run(&sandbox, &script).await;
+    let out = run_env(&sandbox, &script, &env).await;
     assert_eq!(stdout(&out), "proxied\ntooled\nhooked", "{}", text(&out));
     let head = proxied.recv().await.unwrap();
     assert!(
@@ -326,7 +329,8 @@ async fn endpoints_reach_the_host(backend: &dyn Backend) {
     sandbox.destroy().await.unwrap();
 }
 
-/// A lab sandbox, with no proxy, has no way out, and nothing listens where a proxy would be.
+/// A lab sandbox, with no proxy mapped, has no way out, and nothing listens where a proxy would
+/// be.
 async fn lab_has_no_way_out(backend: &dyn Backend) {
     let (proxy, _) = server("proxied").await;
     let base = scratch();

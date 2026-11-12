@@ -122,7 +122,7 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
     let mut cx = TestAppContext::single();
     cx.update(x100_app::init);
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (data, home, login) = (
         dir.path().join("data"),
         dir.path().join("home"),
@@ -142,10 +142,11 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
         .env("LANG", "C.UTF-8")
         .env("X100_CLAUDE_LOGIN", &login)
         .env("X100_CODEX_LOGIN", dir.path().join("no-codex-login"))
-        .env("ANTHROPIC_BASE_URL", provider.url())
-        .env("HTTPS_PROXY", provider.url())
-        .env("HTTP_PROXY", provider.url())
-        .env("NO_PROXY", "127.0.0.1,localhost")
+        // The driver runs in a sandbox whose only way out is the daemon's proxy, which sends
+        // this made-up host to the fake provider and refuses every other.
+        .env("ANTHROPIC_BASE_URL", common::fake_base(&provider))
+        .env("X100_PROXY_RESOLVE", common::FAKE_RESOLVE)
+        .env("X100_NO_KEYCHAIN", "1")
         .stdin(Stdio::null())
         .spawn()
         .expect("x100d starts");

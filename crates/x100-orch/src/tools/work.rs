@@ -182,7 +182,7 @@ pub(super) fn review(at: &At, task: TaskId, verdict: &Verdict) -> Result<Plan, R
                 from: assignment.assignee,
                 into: Target::Agent(me),
             }),
-            code_dir: None,
+            ..Plan::default()
         }),
         Verdict::SendBack { effort, .. } => {
             if let Some(wanted) = effort {

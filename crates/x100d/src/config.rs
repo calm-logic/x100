@@ -28,6 +28,41 @@ pub const CODEX_LOGIN_ENV: &str = "X100_CODEX_LOGIN";
 /// themselves read, passed on to the drivers that run them in a terminal.
 pub const CLAUDE_BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
 pub const CODEX_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
+pub const SANDBOX_ENV: &str = "X100_SANDBOX";
+pub const SANDBOX_HELPER_ENV: &str = "X100_SANDBOX_HELPER";
+/// Any value: the vault keeps its key in a file and never asks the OS keychain. For tests.
+pub const NO_KEYCHAIN_ENV: &str = "X100_NO_KEYCHAIN";
+/// `host=address,...`: the proxy sends each host to the address given and refuses every other
+/// host. For tests, so nothing a driver tries leaves the machine.
+pub const PROXY_RESOLVE_ENV: &str = "X100_PROXY_RESOLVE";
+
+/// What makes the sandboxes drivers run in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxKind {
+    Bubblewrap,
+    Docker,
+    Podman,
+}
+
+impl SandboxKind {
+    /// Bubblewrap where it exists, which is Linux; containers elsewhere.
+    pub fn default_here() -> Self {
+        if cfg!(target_os = "linux") {
+            SandboxKind::Bubblewrap
+        } else {
+            SandboxKind::Docker
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "bubblewrap" => SandboxKind::Bubblewrap,
+            "docker" => SandboxKind::Docker,
+            "podman" => SandboxKind::Podman,
+            _ => return None,
+        })
+    }
+}
 
 #[derive(Clone)]
 pub struct Config {
@@ -58,6 +93,14 @@ pub struct Config {
     pub codex_login: Option<PathBuf>,
     pub claude_base_url: Option<String>,
     pub codex_base_url: Option<String>,
+    pub sandbox: SandboxKind,
+    /// The sandbox's helper program. Defaults to `x100d-sandbox` beside this executable.
+    pub sandbox_helper: Option<PathBuf>,
+    /// The vault's key is a file in the data directory, never in the OS keychain.
+    pub no_keychain: bool,
+    /// Hosts the proxy sends to a fixed address, refusing every other. Empty: the proxy looks
+    /// hosts up and refuses none but the host's loopback.
+    pub proxy_resolve: std::collections::HashMap<String, std::net::IpAddr>,
 }
 
 impl Config {
@@ -77,6 +120,10 @@ impl Config {
             codex_login: home_dir(".codex", |k| std::env::var_os(k)),
             claude_base_url: None,
             codex_base_url: None,
+            sandbox: SandboxKind::default_here(),
+            sandbox_helper: None,
+            no_keychain: false,
+            proxy_resolve: std::collections::HashMap::new(),
         }
     }
 
@@ -84,9 +131,9 @@ impl Config {
         self.data_dir.join("x100d.sock")
     }
 
-    /// From `--data-dir`, `--projects-root`, `--scripts-dir`, `--fake-harness`, `--claude-login`
-    /// and `--codex-login` arguments, each of which falls back to its environment variable, and
-    /// `--fake-clock`. The data directory then falls back to the user's data directory, the
+    /// From `--data-dir`, `--projects-root`, `--scripts-dir`, `--fake-harness`, `--claude-login`,
+    /// `--codex-login`, `--sandbox` (`bubblewrap`, `docker` or `podman`) and `--sandbox-helper`
+    /// arguments, each of which falls back to its environment variable, and `--fake-clock`. The data directory then falls back to the user's data directory, the
     /// projects root to `~/x100`, and each login to the program's own directory in the user's
     /// home.
     pub fn from_args(
@@ -95,6 +142,7 @@ impl Config {
     ) -> Result<Self, String> {
         let (mut data, mut scripts, mut fake, mut clock) = (None, None, None, None);
         let (mut claude, mut codex, mut root) = (None, None, None);
+        let (mut sandbox, mut helper) = (None, None);
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let slot = match arg.to_str() {
@@ -105,6 +153,8 @@ impl Config {
                 Some("--fake-clock") => &mut clock,
                 Some("--claude-login") => &mut claude,
                 Some("--codex-login") => &mut codex,
+                Some("--sandbox") => &mut sandbox,
+                Some("--sandbox-helper") => &mut helper,
                 _ => return Err(format!("unknown argument {arg:?}")),
             };
             let value = args
@@ -139,6 +189,19 @@ impl Config {
         let text = |k: &str| env(k).and_then(|v| v.into_string().ok());
         config.claude_base_url = text(CLAUDE_BASE_URL_ENV);
         config.codex_base_url = text(CODEX_BASE_URL_ENV);
+        if let Some(kind) = sandbox.or_else(|| env(SANDBOX_ENV)) {
+            config.sandbox = kind
+                .to_str()
+                .and_then(SandboxKind::parse)
+                .ok_or("--sandbox is bubblewrap, docker or podman")?;
+        }
+        config.sandbox_helper = helper
+            .or_else(|| env(SANDBOX_HELPER_ENV))
+            .map(PathBuf::from);
+        config.no_keychain = env(NO_KEYCHAIN_ENV).is_some();
+        if let Some(pairs) = text(PROXY_RESOLVE_ENV) {
+            config.proxy_resolve = resolve(&pairs)?;
+        }
         if let Some(start) = clock {
             // A real harness bills real time, so only scripted ones run on a fake clock.
             if config.scripts_dir.is_none() {
@@ -156,6 +219,24 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+/// `host=address,host=address`.
+fn resolve(pairs: &str) -> Result<std::collections::HashMap<String, std::net::IpAddr>, String> {
+    pairs
+        .split(',')
+        .filter(|p| !p.trim().is_empty())
+        .map(|p| {
+            let (host, ip) = p
+                .split_once('=')
+                .ok_or_else(|| format!("{PROXY_RESOLVE_ENV}: {p:?} is not host=address"))?;
+            let ip = ip
+                .trim()
+                .parse()
+                .map_err(|_| format!("{PROXY_RESOLVE_ENV}: {ip:?} is not an address"))?;
+            Ok((host.trim().to_ascii_lowercase(), ip))
+        })
+        .collect()
 }
 
 /// `~/x100`, where new projects' code goes by default. Without a home, the current directory's
@@ -272,6 +353,26 @@ mod tests {
         let env = |k: &str| (k == PROJECTS_ROOT_ENV).then(|| OsString::from("/env"));
         let c = Config::from_args(["--data-dir".into(), "/d".into()], env).unwrap();
         assert_eq!(c.projects_root, PathBuf::from("/env"));
+    }
+
+    #[test]
+    fn the_sandbox_and_the_proxys_hosts_are_named_or_the_defaults() {
+        let c = Config::from_args(["--data-dir".into(), "/d".into()], no_env).unwrap();
+        assert_eq!(c.sandbox, SandboxKind::default_here());
+        assert!(c.proxy_resolve.is_empty() && !c.no_keychain);
+        let env = |k: &str| match k {
+            PROXY_RESOLVE_ENV => Some(OsString::from("A.test=127.0.0.1, b.test=::1")),
+            NO_KEYCHAIN_ENV => Some(OsString::from("1")),
+            _ => None,
+        };
+        let args = ["--data-dir", "/d", "--sandbox", "podman"];
+        let c = Config::from_args(args.map(OsString::from), env).unwrap();
+        assert_eq!(c.sandbox, SandboxKind::Podman);
+        assert!(c.no_keychain);
+        assert_eq!(c.proxy_resolve.len(), 2);
+        assert!(c.proxy_resolve.contains_key("a.test"));
+        let args = ["--data-dir", "/d", "--sandbox", "chroot"];
+        assert!(Config::from_args(args.map(OsString::from), no_env).is_err());
     }
 
     #[test]

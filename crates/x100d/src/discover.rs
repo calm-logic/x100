@@ -1,7 +1,6 @@
 //! Finding the harnesses on this machine and recording them in the daemon's log.
 
 use std::collections::HashMap;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,10 +18,12 @@ use x100_store::DaemonLog;
 use crate::config::Config;
 use crate::error::Error;
 
-/// The harnesses this run can start, by the id the daemon's log gives each, and the one machine.
+/// The harnesses this run can start, by the id the daemon's log gives each, the one machine, and
+/// what a sandbox must show for those harnesses to run in it.
 pub struct Found {
     pub harnesses: HashMap<HarnessId, Arc<dyn x100_drivers::Harness>>,
     pub machine: MachineId,
+    pub programs: Vec<PathBuf>,
 }
 
 /// A harness this run can start, and the builder's login it runs on, if it runs on one.
@@ -31,14 +32,41 @@ struct Candidate {
     login: Option<Login>,
 }
 
+/// `sandbox` is why no sandbox can be made here, if none can: then every harness is passed over
+/// with that reason, unless the builder's `run_without_sandbox` setting is on, so no driver runs
+/// uncontained without the builder having said so.
 pub fn discover(
     config: &Config,
     log: &DaemonLog,
     tools: Arc<dyn DaemonTools>,
+    sandbox: Option<&str>,
 ) -> Result<Found, Error> {
-    let (candidates, passed_over) = match &config.scripts_dir {
-        Some(dir) => (fakes(config, dir, tools)?, Vec::new()),
-        None => real(config),
+    let (candidates, mut passed_over, programs) = match &config.scripts_dir {
+        Some(dir) => {
+            let program = fake_program(config)?;
+            let shown = vec![program.clone(), dir.clone()];
+            (fakes(config, &program, dir, tools)?, Vec::new(), shown)
+        }
+        None => {
+            let (candidates, passed_over) = real(config);
+            let shown = crate::contain::programs(&["claude", "codex", "node"], &[]);
+            (candidates, passed_over, shown)
+        }
+    };
+    let uncontained = log.with_state(|d| d.settings().run_without_sandbox);
+    let candidates = match sandbox {
+        Some(why) if !uncontained => {
+            passed_over.extend(candidates.iter().map(|c| PassedOver {
+                kind: c.harness.kind(),
+                why: format!(
+                    "no sandbox can be made on this machine, so no driver is started: {why}. \
+                     The daemon setting run_without_sandbox runs drivers without one, which is \
+                     unsafe"
+                ),
+            }));
+            Vec::new()
+        }
+        _ => candidates,
     };
     for p in &passed_over {
         eprintln!("x100d: {:?} is not registered: {}", p.kind, p.why);
@@ -109,20 +137,25 @@ pub fn discover(
     Ok(Found {
         harnesses: found,
         machine,
+        programs,
+    })
+}
+
+fn fake_program(config: &Config) -> Result<PathBuf, Error> {
+    Ok(match &config.fake_program {
+        Some(p) => p.clone(),
+        None => std::env::current_exe()
+            .map_err(Error::Io)?
+            .with_file_name("x100d-fake-harness"),
     })
 }
 
 fn fakes(
     config: &Config,
+    program: &Path,
     dir: &Path,
     tools: Arc<dyn DaemonTools>,
 ) -> Result<Vec<Candidate>, Error> {
-    let program = match &config.fake_program {
-        Some(p) => p.clone(),
-        None => std::env::current_exe()
-            .map_err(Error::Io)?
-            .with_file_name("x100d-fake-harness"),
-    };
     let mut scripts: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(Error::Io)?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -133,7 +166,7 @@ fn fakes(
         .into_iter()
         .map(|script| {
             FakeHarness::new(
-                &program,
+                program,
                 &script,
                 Arc::clone(&config.clock),
                 Some(Arc::clone(&tools)),
@@ -145,21 +178,6 @@ fn fakes(
             .map_err(|e| Error::Script(script, e.to_string()))
         })
         .collect()
-}
-
-/// Variables a terminal driver takes from the daemon's environment besides the usual ones: a
-/// proxy the builder's network needs reaches the program, as it would if the builder ran it.
-const PROXY_ENV: &[&str] = &[
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "NO_PROXY",
-    "https_proxy",
-    "http_proxy",
-    "no_proxy",
-];
-
-fn with_proxy(inherit: &mut Vec<String>) {
-    inherit.extend(PROXY_ENV.iter().map(|s| (*s).to_owned()));
 }
 
 /// The login a terminal harness runs on, if its directory exists. The daemon looks only at the
@@ -186,13 +204,12 @@ fn login(kind: HarnessKind, dir: Option<&Path>) -> Result<Login, PassedOver> {
 /// a version that will not do is refused when a driver starts.
 fn real(config: &Config) -> (Vec<Candidate>, Vec<PassedOver>) {
     let clock: Arc<dyn Clock> = Arc::clone(&config.clock);
-    let harnesses = config.data_dir.join("harnesses");
     let (mut out, mut passed_over) = (Vec::new(), Vec::new());
     let mut add = |harness: Arc<dyn x100_drivers::Harness>, login| {
         out.push(Candidate { harness, login });
     };
     if let Some(program) = on_path("claude") {
-        let mut c = ClaudeCodeConfig::new(harnesses.join("claude"));
+        let mut c = ClaudeCodeConfig::new();
         c.program = program.clone();
         add(Arc::new(ClaudeCode::new(c, Arc::clone(&clock))), None);
         match login(
@@ -200,10 +217,9 @@ fn real(config: &Config) -> (Vec<Candidate>, Vec<PassedOver>) {
             config.claude_login.as_deref(),
         ) {
             Ok(l) => {
-                let mut c = ClaudeTerminalConfig::new(harnesses.join("claude-terminal"));
+                let mut c = ClaudeTerminalConfig::new();
                 c.program = program;
                 c.base_url = config.claude_base_url.clone();
-                with_proxy(&mut c.inherit_env);
                 add(
                     Arc::new(ClaudeTerminal::new(c, Arc::clone(&clock))),
                     Some(l),
@@ -213,15 +229,14 @@ fn real(config: &Config) -> (Vec<Candidate>, Vec<PassedOver>) {
         }
     }
     if let Some(program) = on_path("codex") {
-        let mut c = CodexConfig::new(harnesses.join("codex"));
+        let mut c = CodexConfig::new();
         c.program = program.clone();
         add(Arc::new(Codex::new(c, Arc::clone(&clock))), None);
         match login(HarnessKind::CodexTerminal, config.codex_login.as_deref()) {
             Ok(l) => {
-                let mut c = CodexTerminalConfig::new(harnesses.join("codex-terminal"));
+                let mut c = CodexTerminalConfig::new();
                 c.program = program;
                 c.base_url = config.codex_base_url.clone();
-                with_proxy(&mut c.inherit_env);
                 add(Arc::new(CodexTerminal::new(c, clock)), Some(l));
             }
             Err(p) => passed_over.push(p),
@@ -230,11 +245,4 @@ fn real(config: &Config) -> (Vec<Candidate>, Vec<PassedOver>) {
     (out, passed_over)
 }
 
-fn on_path(name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|dir| dir.join(name))
-        .find(|p| {
-            p.metadata()
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
-}
+use crate::contain::on_path;

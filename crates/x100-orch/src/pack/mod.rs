@@ -5,8 +5,8 @@
 //! failure all start the same way and differ only in what the records hold. A guide to the agent's
 //! position and to what its driver may do comes first, since nothing else tells a model how x100
 //! works; the sections after it follow ARCHITECTURE "What lives outside a driver". Skills have a
-//! section, which until M13 holds only the CEO's one built-in skill. Memories and running processes
-//! arrive with later milestones and have no section yet.
+//! section, which until M13 holds only the CEO's one built-in skill. Memories arrive with M13 and
+//! have no section yet.
 //!
 //! The pack takes at most the daemon's set share of the model's context window. The transcript's
 //! older part is what gets cut, which is why the progress note matters.
@@ -76,6 +76,16 @@ pub(crate) fn build(
         .zip(git)
         .and_then(|(base, git)| branches::diff_since(git, agent, base));
     let mut pack = head(&state, agent, for_);
+    let running = state.agent(agent).map(|a| &a.processes);
+    if let Some(running) = running.filter(|r| !r.is_empty()) {
+        pack.push_str(
+            "\nPROCESSES RUNNING IN YOUR SANDBOX (started with start_process, still serving; \
+             stop one with stop_process):\n",
+        );
+        for (name, p) in running {
+            let _ = writeln!(pack, "- {}: {}", name.0, p.command);
+        }
+    }
     if !history.calls.is_empty() {
         pack.push_str("\nDAEMON TOOL CALLS IN THIS TASK (each took effect; do not repeat them):\n");
         for call in &history.calls {

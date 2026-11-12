@@ -471,16 +471,62 @@ fn specs_files_and_previews_follow_their_rules() {
 }
 
 #[test]
+fn a_process_is_started_once_by_name_and_stopped_only_while_it_runs() {
+    let s = scene();
+    let start = |name: &str| ToolCall::StartProcess {
+        name: ProcessName(name.into()),
+        command: "npm run dev".into(),
+    };
+    let stop = ToolCall::StopProcess {
+        name: ProcessName("web".into()),
+    };
+    for bad in ["", "../x", ".hidden", "a b"] {
+        assert!(
+            s.refused(s.f.frontend, &start(bad)).contains("name"),
+            "{bad}"
+        );
+    }
+    let empty = ToolCall::StartProcess {
+        name: ProcessName("web".into()),
+        command: "  ".into(),
+    };
+    assert!(s.refused(s.f.frontend, &empty).contains("empty"));
+    assert!(s.refused(s.f.frontend, &stop).contains("no process"));
+    let plan = s.call(s.f.frontend, &start("web")).unwrap();
+    assert_eq!(
+        plan.process,
+        Some(super::ProcessPlan::Start {
+            name: ProcessName("web".into()),
+            command: "npm run dev".into(),
+        })
+    );
+    let running = Scene {
+        state: s.folds(s.f.frontend, &start("web")),
+        f: fernleaf(),
+        clock: s.clock.clone(),
+        settings: DaemonSettings::default(),
+    };
+    assert!(
+        running
+            .refused(running.f.frontend, &start("web"))
+            .contains("already running")
+    );
+    let plan = running.call(running.f.frontend, &stop).unwrap();
+    assert_eq!(
+        plan.process,
+        Some(super::ProcessPlan::Stop {
+            name: ProcessName("web".into())
+        })
+    );
+    let after = running.folds(running.f.frontend, &stop);
+    let processes = &after.agent(running.f.frontend).unwrap().processes;
+    assert!(!processes.contains_key(&ProcessName("web".into())));
+}
+
+#[test]
 fn tools_of_later_milestones_say_which_one() {
     let s = scene();
     let cases = [
-        (
-            ToolCall::StartProcess {
-                name: ProcessName("dev".into()),
-                command: "npm run dev".into(),
-            },
-            "M10",
-        ),
         (
             ToolCall::Remember {
                 note: NoteName("auth".into()),

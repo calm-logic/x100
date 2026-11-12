@@ -145,6 +145,39 @@ impl Container {
     }
 }
 
+impl Container {
+    /// Kills every running container of a sandbox whose name starts with `prefix`, which is
+    /// what a daemon killed before it could destroy its sandboxes leaves behind: killing the
+    /// runtime's client does not stop a container. Returns how many were found.
+    pub async fn kill_leftovers(&self, prefix: &str) -> Result<usize, Error> {
+        let out = self
+            .runtime
+            .command()
+            .args(["ps", "-q", "--filter"])
+            .arg(format!("name=^x100-sandbox-{prefix}"))
+            .stderr(Stdio::null())
+            .output()
+            .await
+            .map_err(io("listing containers"))?;
+        let ids: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
+        if !ids.is_empty() {
+            self.runtime
+                .command()
+                .arg("kill")
+                .args(&ids)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await
+                .map_err(io("killing leftover containers"))?;
+        }
+        Ok(ids.len())
+    }
+}
+
 #[async_trait]
 impl Backend for Container {
     async fn create(&self, spec: SandboxSpec) -> Result<Sandbox, Error> {
@@ -211,7 +244,7 @@ impl Backend for Container {
             "--cwd".into(),
             spec.worktree.display().to_string(),
         ];
-        for (k, v) in sandbox_env(&spec) {
+        for (k, v) in sandbox_env() {
             prefix.extend(["--set".into(), format!("{k}={v}")]);
         }
         for (k, v) in Runtime::env() {

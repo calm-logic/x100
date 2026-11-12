@@ -7929,7 +7929,9 @@ dependencies = [
  "x100-drivers",
  "x100-jobs",
  "x100-router",
+ "x100-sandbox",
  "x100-store",
+ "x100-vault",
 ]
 
 [[package]]
@@ -8021,6 +8023,7 @@ name = "x100d"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "nix",
  "serde",
  "serde_json",
@@ -8035,7 +8038,9 @@ dependencies = [
  "x100-orch",
  "x100-proto",
  "x100-router",
+ "x100-sandbox",
  "x100-store",
+ "x100-vault",
 ]
 
 [[package]]

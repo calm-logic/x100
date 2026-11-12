@@ -1,70 +1,70 @@
 //! What a driver is started with besides its model: where it works, how it reaches the daemon's
 //! tools, the builder's login it runs on, and what it may do without asking.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use x100_core::harness::HarnessKind;
+use x100_core::credential::Projects;
+use x100_core::driver::Purpose;
 use x100_core::id::{AgentId, DriverId};
-use x100_drivers::{DriverSpec, Permissions, SpawnHook, StallPolicy};
+use x100_drivers::{DriverSpec, Harness, Permissions, SpawnHook, StallPolicy};
 use x100_router::Choice;
+use x100_vault::Requester;
 
 use crate::Shared;
 use crate::ctx::ProjectCtx;
+use crate::sandbox::Placed;
 
 /// What every driver may do without asking, set here and nowhere else.
 ///
-/// Until sandboxes exist (M10) a driver runs as the builder, on the builder's machine. With
-/// [`Permissions::AllowAll`] a model could run any command the builder could. With this setting a
-/// driver changes files in its agent's worktree without asking. Codex runs its commands in its own
-/// sandbox, which can write only the worktree and reach no network. Claude Code's own sandbox
-/// needs `socat` on Linux and is not relied on, so every command a Claude Code driver would run,
-/// and every edit outside its worktree, is put to the daemon, which refuses it until the gate
-/// exists (M12). Nothing prompts on the terminal: nobody can type into it.
-pub(crate) const PERMISSIONS: Permissions = Permissions::Worktree;
+/// Every driver runs in its agent's sandbox, which shows it its worktree, a home of its own and
+/// the programs it runs, and nothing else of the builder's, and whose only way out is the vault's
+/// proxy. So the harnesses' own permission prompts and their own sandboxes are off: a command
+/// runs inside x100's sandbox without asking, and the daemon's own tools are still gated by the
+/// desk. A daemon whose builder turned on `run_without_sandbox` runs drivers like this with no
+/// sandbox, which that setting says is unsafe. Nothing prompts on the terminal: nobody can type
+/// into it.
+pub(crate) const PERMISSIONS: Permissions = Permissions::AllowAll;
 
-/// What a model is told [`PERMISSIONS`] lets it do with a driver of `harness`, before it plans
-/// work it could not carry out. A driver started before the project has code works in a scratch
-/// directory, and is told so.
-pub(crate) fn workspace(harness: &HarnessKind, scratch: bool) -> String {
-    if scratch {
-        return "Your working directory is a scratch directory: the project is not set up yet and \
-                has no code. Nothing you write there is kept, so do not start work in it."
-            .to_owned();
-    }
-    let base = "Your working directory is your own copy of the project, on a git branch of its \
-                own. Change files only there; they are committed when you report.";
-    let more = match harness {
-        HarnessKind::ClaudeCode | HarnessKind::ClaudeCodeTerminal => {
-            "Commands are not available here yet: every shell command is refused, so do not try \
-             one, and do not plan to run, install or test anything. Create and edit the files \
-             directly with your file tools."
-        }
-        HarnessKind::Codex | HarnessKind::CodexTerminal => {
-            "You may run commands there, in a sandbox that can write only to that directory and \
-             /tmp and has no network, so nothing can be installed or downloaded."
-        }
-        HarnessKind::Custom { .. } => "",
+/// What a model is told about where it works, before it plans work it could not carry out. A
+/// driver started before the project has code works in a scratch directory, and is told so.
+pub(crate) fn workspace(scratch: bool, contained: bool) -> String {
+    let place = if scratch {
+        "Your working directory is a scratch directory: the project is not set up yet and has no \
+         code. Nothing you write there is kept, so do not start work in it."
+    } else {
+        "Your working directory is your own copy of the project, on a git branch of its own. \
+         Change files only there; they are committed when you report."
     };
-    format!("{base} {more}").trim_end().to_owned()
+    let rules = if contained {
+        "You run in a sandbox of your own: you may run commands, install and build what the work \
+         needs, and change anything in your working directory and your home. Nothing else of \
+         the machine is there. Web requests go out through x100's proxy. To leave a server or \
+         other long-running command running after your turn, start it with `start_process`, \
+         since commands you start yourself end with you."
+    } else {
+        "You run without a sandbox, on the builder's own machine and account: run only what the \
+         work needs, and change nothing outside your working directory."
+    };
+    format!("{place} {rules}")
 }
 
-/// What a model is told when the harness asks the daemon about something [`PERMISSIONS`] does not
-/// let through, such as a shell command, so it carries on rather than trying again.
-pub(crate) const REFUSED: &str = "Commands are not available here yet, and neither are web \
-     requests or changes outside your working directory. Do not try again: write the files \
-     directly in your working directory with your file tools, and say in your report what you \
-     could not run or check.";
+/// What a model is told when its harness asks the daemon about something, which the daemon does
+/// not decide yet, so it carries on rather than trying again.
+pub(crate) const REFUSED: &str = "x100 refused this: nothing a harness asks about is allowed yet. \
+     Do not try again. Do the work another way, and say in your report what you could not do.";
 
 /// `dir` is the agent's worktree, or the project's scratch directory before it has code.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build(
     shared: &Shared,
     ctx: &Arc<ProjectCtx>,
-    agent: AgentId,
+    harness: &dyn Harness,
     driver: DriverId,
     choice: &Choice,
     dir: PathBuf,
     start_pack: String,
+    placed: &Placed,
 ) -> DriverSpec {
     // The path is passed on to the harness, which reaches the login there; x100 never opens it.
     let login = shared.daemon.with_state(|d| {
@@ -72,15 +72,20 @@ pub(crate) fn build(
             .and_then(|h| h.login.as_ref())
             .map(|l| PathBuf::from(&l.0))
     });
+    let mut env = placed.env.clone();
+    env.extend(api_key(shared, ctx, harness));
     DriverSpec {
         driver,
         model: choice.model.clone(),
         effort: choice.effort,
-        wrap: shared.sandbox.wrap(agent, &dir),
         dir,
+        state: placed.state.clone(),
+        wrap: placed.wrap.clone(),
+        expose: placed.expose.clone(),
+        tmp: placed.tmp.clone(),
         start_pack,
         tools: Some(shared.desk.issue(driver, Arc::clone(ctx))),
-        env: Vec::new(),
+        env,
         stall: StallPolicy::from_settings(&(shared.settings)()),
         permissions: PERMISSIONS,
         login,
@@ -96,4 +101,67 @@ pub(crate) fn build(
             }
         }),
     }
+}
+
+/// Puts `driver` in its agent's sandbox, and records the processes of a sandbox that had to be
+/// replaced, such as the scratch directory's once the project has code.
+pub(crate) async fn place(
+    shared: &Shared,
+    ctx: &Arc<ProjectCtx>,
+    agent: AgentId,
+    driver: DriverId,
+    harness: &dyn Harness,
+    dir: &Path,
+) -> Result<Placed, String> {
+    let requester = Requester {
+        project: ctx.id,
+        agent,
+        driver,
+        purpose: Purpose::Work,
+    };
+    let placed = shared
+        .sandboxes
+        .place(
+            &(shared.settings)(),
+            requester,
+            dir,
+            shared.desk.tools_addr(),
+            logins(shared),
+            &harness.login_hosts(),
+        )
+        .await?;
+    crate::processes_ended(ctx, vec![(agent, placed.ended.clone())]).await;
+    Ok(placed)
+}
+
+/// A harness run on an API key gets a reference to the first credential that may go to its
+/// provider's host from this project, which the proxy swaps for the value there.
+fn api_key(shared: &Shared, ctx: &ProjectCtx, harness: &dyn Harness) -> Option<(String, String)> {
+    let key = harness.api_key()?;
+    shared.daemon.with_state(|d| {
+        d.credentials()
+            .map(|r| &r.credential)
+            .find(|c| {
+                let project = match &c.scope.projects {
+                    Projects::All => true,
+                    Projects::Only(p) => p.contains(&ctx.id),
+                };
+                project
+                    && c.scope
+                        .hosts
+                        .iter()
+                        .any(|h| h.eq_ignore_ascii_case(&key.host))
+            })
+            .map(|c| (key.env.clone(), c.reference.to_string()))
+    })
+}
+
+/// The login directories a sandbox shows read-write: every terminal harness's, since an agent's
+/// next driver may run on another program than its first.
+pub(crate) fn logins(shared: &Shared) -> Vec<PathBuf> {
+    shared.daemon.with_state(|d| {
+        d.harnesses()
+            .filter_map(|h| h.login.as_ref().map(|l| PathBuf::from(&l.0)))
+            .collect()
+    })
 }

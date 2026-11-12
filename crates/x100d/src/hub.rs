@@ -13,6 +13,7 @@ use x100_jobs::Scheduler;
 use x100_orch::{Desk, Orchestrator};
 use x100_proto::{Cursor, ErrorCode, RpcError, Snapshot};
 use x100_store::{DaemonLog, Follow, ProjectStore};
+use x100_vault::Vault;
 
 use crate::config::Config;
 
@@ -42,6 +43,9 @@ pub struct Hub {
     schedulers: Mutex<BTreeMap<ProjectId, Scheduler<ProjectState>>>,
     /// The daemon log's job clock: cool-offs ending.
     daemon_jobs: Scheduler<DaemonState>,
+    pub vault: Vault,
+    /// Why no sandbox can be made on this machine, if none can.
+    pub no_sandbox: Option<String>,
 }
 
 /// A subscription's logs, registered together with the snapshot or the cursor's events.
@@ -60,6 +64,8 @@ impl Hub {
         orch: Orchestrator,
         desk: Arc<Desk>,
         daemon_jobs: Scheduler<DaemonState>,
+        vault: Vault,
+        no_sandbox: Option<String>,
     ) -> Self {
         Self {
             clock: Arc::clone(&config.clock),
@@ -71,6 +77,8 @@ impl Hub {
             tasks: Mutex::new(Vec::new()),
             schedulers: Mutex::new(BTreeMap::new()),
             daemon_jobs,
+            vault,
+            no_sandbox,
         }
     }
 
@@ -130,6 +138,11 @@ impl Hub {
             .lock()
             .expect("tasks lock")
             .extend([clock_task, feed]);
+    }
+
+    /// A task that runs until the daemon stops.
+    pub fn keep(&self, task: JoinHandle<()>) {
+        self.tasks.lock().expect("tasks lock").push(task);
     }
 
     /// Every project's job clock.

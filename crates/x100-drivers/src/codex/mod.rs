@@ -24,7 +24,8 @@ use x100_core::time::Clock;
 
 use crate::handle::DriverHandle;
 use crate::harness::{
-    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError, check_offered,
+    ApiKey, CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, StartError, check_offered,
+    url_host,
 };
 use crate::supervisor::Launch;
 use crate::version::VersionPolicy;
@@ -51,13 +52,17 @@ pub struct CodexConfig {
     pub inherit_env: Vec<String>,
     /// Codex's own retries of a failing request and of a broken stream, kept low.
     pub max_retries: u32,
-    /// Each driver's `CODEX_HOME` is made under this one and removed when it ends.
-    pub state_dir: PathBuf,
     pub models: Vec<ModelOffer>,
 }
 
+impl Default for CodexConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexConfig {
-    pub fn new(state_dir: impl Into<PathBuf>) -> Self {
+    pub fn new() -> Self {
         Self {
             program: PathBuf::from("codex"),
             base_url: "https://api.openai.com/v1".into(),
@@ -67,7 +72,6 @@ impl CodexConfig {
                 .map(|s| (*s).to_owned())
                 .collect(),
             max_retries: 1,
-            state_dir: state_dir.into(),
             models: models(),
         }
     }
@@ -161,27 +165,18 @@ pub(crate) enum Provider<'a> {
     },
 }
 
-/// Codex's own sandbox: off, unless the driver may only change its own directory, where Codex's
-/// sandbox holds its commands to that directory with no network.
-pub(crate) fn sandbox_mode(permissions: Permissions) -> &'static str {
-    match permissions {
-        Permissions::Worktree => "workspace-write",
-        Permissions::AllowAll | Permissions::AskDaemon => "danger-full-access",
-    }
-}
-
 /// The approval policy is set on `thread/start`, not here: 0.167.1 refuses `untrusted` in the file
 /// but takes it on the thread.
 pub(crate) fn config_toml(provider: &Provider, spec: &DriverSpec) -> String {
     // Keys at the top level come before the first table.
+    // Codex's own sandbox is off: its commands run in x100's, which is where the driver runs.
     let mut toml = format!(
         "model = {model}\n\
-         sandbox_mode = \"{sandbox}\"\n\
+         sandbox_mode = \"danger-full-access\"\n\
          check_for_update_on_startup = false\n\
          project_doc_max_bytes = 0\n\
          model_auto_compact_token_limit = 1000000000000\n",
         model = toml_str(&spec.model.0),
-        sandbox = sandbox_mode(spec.permissions),
     );
     match provider {
         Provider::Keyed { .. } => toml.push_str("model_provider = \"x100\"\n"),
@@ -232,7 +227,7 @@ pub(crate) fn config_toml(provider: &Provider, spec: &DriverSpec) -> String {
         "\n[projects.{dir}]\ntrust_level = \"trusted\"\n",
         dir = toml_str(&spec.dir.display().to_string()),
     ));
-    // The daemon gates its own tools, so Codex never asks about them, whatever its sandbox.
+    // The daemon gates its own tools, so Codex never asks about them.
     if let Some(tools) = &spec.tools {
         toml.push_str(&format!(
             "\n[mcp_servers.x100]\nurl = {url}\nbearer_token_env_var = \"{TOKEN_VAR}\"\n\
@@ -273,6 +268,13 @@ impl Harness for Codex {
         }
     }
 
+    fn api_key(&self) -> Option<ApiKey> {
+        Some(ApiKey {
+            env: self.config.key_env.clone(),
+            host: url_host(&self.config.base_url)?,
+        })
+    }
+
     async fn start(&self, spec: DriverSpec) -> Result<DriverHandle, StartError> {
         check_offered(self.kind(), &self.config.models, &spec, self.supports())?;
         let price = self
@@ -283,7 +285,7 @@ impl Harness for Codex {
             .and_then(|m| m.levels.iter().find(|(e, _)| *e == spec.effort))
             .map(|(_, p)| *p)
             .expect("checked as offered");
-        let driver_dir = self.config.state_dir.join(spec.driver.to_string());
+        let driver_dir = spec.state.clone();
         let home = driver_dir.join("codex-home");
         std::fs::create_dir_all(&home).map_err(StartError::Prepare)?;
         let provider = Provider::Keyed {

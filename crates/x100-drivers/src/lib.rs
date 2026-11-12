@@ -37,8 +37,8 @@ mod wire;
 pub use failure::{classify_claude, classify_codex};
 pub use handle::{DriverControl, DriverHandle, DriverInfo, InputError};
 pub use harness::{
-    CommandLine, CommandWrapper, DriverSpec, Harness, Permissions, SpawnHook, StallPolicy,
-    StartError, ToolEndpoint,
+    ApiKey, CommandLine, CommandWrapper, DriverSpec, Expose, Harness, Permissions, SpawnHook,
+    StallPolicy, StartError, ToolEndpoint,
 };
 pub use output::{Decision, DriverOutput, PermissionId, PermissionRequest, Spent, TurnEnd};
 pub use process::group_is_empty;

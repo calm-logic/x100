@@ -4,8 +4,9 @@
 //! Out of the box, work runs on the builder's own local logins, on the cheapest model of each
 //! terminal harness: Claude Code's and Codex's terminal programs, each at its cheapest listed
 //! price. The router then gives every agent, the CEO included, the cheapest of those, at the
-//! lowest effort its task allows. Headless harnesses need an API key, which reaches a driver only
-//! through the vault (M11), so on real harnesses none is allowed until then. Fake harnesses cost
+//! lowest effort its task allows. A headless harness runs on an API key, which reaches a driver
+//! only as a reference to a credential in the vault that may go to the provider's host, so none
+//! is allowed until the builder adds such a credential and allows the model. Fake harnesses cost
 //! nothing, so all their models are allowed.
 
 use std::collections::BTreeSet;

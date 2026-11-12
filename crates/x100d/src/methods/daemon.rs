@@ -118,9 +118,14 @@ pub async fn set_setting(hub: &Hub, p: SetDaemonSetting) -> Result<Done, RpcErro
         return Err(RpcError::new(ErrorCode::Rejected, why));
     }
     let log = hub.log.clone();
+    let sandbox = matches!(p.setting, DaemonSetting::RunWithoutSandbox(_));
     blocking(move || log.append(Actor::Builder, DaemonEvent::SettingChanged(p.setting)))
         .await
         .map_err(|e| store_error(&e))?;
+    // Whether drivers may run without a sandbox decides which harnesses can be used here.
+    if sandbox {
+        rediscover(hub).await?;
+    }
     // A higher cap per login lets agents waiting for a driver try again.
     hub.orch.reconsider();
     Ok(Done {})
@@ -142,6 +147,9 @@ fn invalid(setting: &DaemonSetting) -> Option<&'static str> {
         DaemonSetting::RetireAfterTasks(0)
         | DaemonSetting::TurnsWithoutProgress(0)
         | DaemonSetting::TerminalDriversPerLogin(0) => Some("a count must be above zero"),
+        DaemonSetting::SandboxPrograms(paths) if paths.iter().any(|p| !p.is_absolute()) => {
+            Some("a program's path must be absolute")
+        }
         _ => None,
     }
 }
@@ -209,18 +217,29 @@ pub async fn set_cap(hub: &Hub, p: SetMachineCap) -> Result<Done, RpcError> {
 
 /// Looks for harnesses again, records what changed, and lets the router use what was found.
 pub async fn rescan(hub: &Hub, _: RescanHarnesses) -> Result<Rescanned, RpcError> {
-    let (config, log, desk) = (hub.config.clone(), hub.log.clone(), hub.desk.clone());
-    let found = blocking(move || crate::discover::discover(&config, &log, desk))
-        .await
-        .map_err(|e| RpcError::new(ErrorCode::Internal, e.to_string()))?;
-    if found.harnesses.is_empty() {
-        return Err(RpcError::new(
-            ErrorCode::Unavailable,
-            "no harness was found on this machine",
-        ));
+    let harnesses = rediscover(hub).await?;
+    if harnesses.is_empty() {
+        let why = match &hub.no_sandbox {
+            Some(why) => format!(
+                "no harness can be used: no sandbox can be made on this machine ({why}), and \
+                 run_without_sandbox is off"
+            ),
+            None => "no harness was found on this machine".into(),
+        };
+        return Err(RpcError::new(ErrorCode::Unavailable, why));
     }
+    Ok(Rescanned { harnesses })
+}
+
+async fn rediscover(hub: &Hub) -> Result<Vec<x100_core::id::HarnessId>, RpcError> {
+    let (config, log, desk) = (hub.config.clone(), hub.log.clone(), hub.desk.clone());
+    let no_sandbox = hub.no_sandbox.clone();
+    let found =
+        blocking(move || crate::discover::discover(&config, &log, desk, no_sandbox.as_deref()))
+            .await
+            .map_err(|e| RpcError::new(ErrorCode::Internal, e.to_string()))?;
     let mut harnesses: Vec<_> = found.harnesses.keys().copied().collect();
     harnesses.sort();
-    hub.orch.set_harnesses(found.harnesses);
-    Ok(Rescanned { harnesses })
+    hub.orch.set_harnesses(found.harnesses, found.programs);
+    Ok(harnesses)
 }

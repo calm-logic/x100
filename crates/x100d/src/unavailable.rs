@@ -7,10 +7,6 @@ use x100_proto::{Call, ErrorCode, RpcError};
 pub fn arrives_with(call: &Call) -> Option<&'static str> {
     Some(match call {
         Call::ReplaceDriver(_) => "M9",
-        Call::AddCredential(_)
-        | Call::ReplaceCredential(_)
-        | Call::ScopeCredential(_)
-        | Call::RemoveCredential(_) => "M11",
         Call::DecideAction(_) => "M12",
         Call::ListMemories(_) | Call::ListSkills(_) => "M13",
         Call::Reflect(_) | Call::ListTrials(_) => "M14",

@@ -173,16 +173,40 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Not seen on screen:** a live terminal driver in the drilldown and a resize driven from the real window,
     since the scripted harness is headless. Covered by tests only until the next real run.
 
+- **The sandbox and vault, wired in (M10 and M11 complete).** The orchestrator's run: 509 tests pass, 0 fail,
+  10 ignored, clippy and fmt clean, nothing of x100 left running, nothing in the real `~/x100`. Through the
+  daemon as a child process, on bubblewrap. `x100d/tests/sandbox.rs`: a command that tries to delete a
+  stand-in home, write outside its worktree, connect to the host's loopback and reach 1.1.1.1 fails at each;
+  one project cannot see another's worktree; a server started with `start_process` serves the agent's next
+  driver; a reported task merges; terminating the daemon leaves no sandbox. `sandbox_real.rs`: the same with
+  the real `claude` and `codex` against the fake provider. `vault.rs`: a credential's value reaches only its
+  allowed host, the other host gets the reference, both uses are in the log, the echoed value comes back as
+  the reference, and a byte search of the data directory and project for the value in raw, hex,
+  percent-encoded and base64 forms finds nothing; it survives a restart and stops working when removed.
+  - Claude Code runs in `bypassPermissions`, Codex with approval `never` and its own sandbox off. The
+    sandbox is the containment. `start_process`, `stop_process` and `credentials.*` are real.
+  - With no working sandbox, harnesses are passed over with the reason. `run_without_sandbox` is the unsafe
+    way round, off by default, with a toggle in Settings.
+  - Measured once on a busy machine, message to first output on the fake harness: 129 ms in a sandbox,
+    45 ms without, medians of 15.
+  - **Limits:** every login directory is visible to every driver. A driver can read every committed object
+    of its project and write sibling branch refs. The proxy refuses literal loopback but not a name that
+    resolves to it. Process logs inside a sandbox and bytes given to `add_file` are not redacted. A process
+    that exits by itself is not recorded as exited.
+  - **Not run:** the daemon on docker or podman end to end, a machine that lacks bubblewrap, the OS
+    keychain, macOS (where the helper must be a Linux binary in the container and Codex's socket cannot
+    cross the VM).
+  - Two `codex app-server` processes from an earlier test run, three hours old, were found and stopped by
+    pid. Sandboxed drivers now die with the daemon, so the same leak cannot recur that way.
+
 ## In progress
 
-Wiring the sandbox, vault and gate into the orchestrator and daemon. Opus subagent.
+Wiring the gate (M12) into the orchestrator and daemon. Opus subagent.
 
 Queued, in this order:
 
-1. **Wiring M10, M11 and M12** into the orchestrator and daemon, one after another, each with its
-   end-to-end check. With the sandbox in, Claude Code drivers can run commands.
-2. **M12I, integrations with Homebox and GitHub**, then the two-part end-to-end run.
-3. M7, M9, M13, M14, M17.
+1. **M12I, integrations with Homebox and GitHub**, then the two-part end-to-end run.
+2. M7, M9, M13, M14, M17.
 
 ## Waiting on the owner
 
@@ -363,106 +387,8 @@ From the wiring of terminal drivers:
 - **Defaults**, in `crates/x100d/src/defaults.rs`: a new project allows each terminal harness's cheapest model
   (claude-haiku-5-5, gpt-6-luna) and no headless model, since a key can only come through the vault. The CEO's
   range is Low to Medium. Budget 50 dollars at list price.
-- **What a real driver may do, with no sandbox until M10**, one setting in `x100-orch/src/spec.rs`. Claude Code
-  runs in its accept-edits mode: edits inside the worktree go through, and every command and every edit
-  outside it is put to the daemon and refused, since the gate is M12. So a Claude Code driver cannot run
-  commands at all yet. Codex runs commands in its own sandbox: writes only to the worktree and /tmp, no
-  network. **Remaining risk:** both run as the builder and can read anything the builder can, the provider
-  login included, and what they read can reach the provider in the model's context.
-- **Known gap:** an agent with agents under it shows no output, so the CEO's terminal cannot be reached from
-  the Team tab once it has leads.
-
-From M3T:
-
-- **The login is reached without x100 opening it.** Claude Code: the driver's own home has `.claude` as a link
-  to the builder's `~/.claude`, with the builder's settings, hooks, plugins, MCP servers and memory files
-  switched off. It writes there: a session file and a state backup per run, the prompts in `history.jsonl`, and
-  transient entries. Each driver start can push out one of the builder's own five state backups. Codex: a
-  `CODEX_HOME` per driver whose `auth.json` is a link to the builder's, which Codex follows when it rewrites
-  the login. Nothing else of the builder's `~/.codex` is read or changed.
-- **Three outside connections the terminal programs make** that nothing switches off: Claude Code fetches the
-  account profile and refreshes its token, and Codex's terminal fetches an announcement at every start.
-- **A broken commit.** 012610c (M8) picked up a file rename M3T had staged, so `x100-drivers` did not build at
-  that commit. Fixed by the M3T commit. From now on the orchestrator commits with explicit paths only after
-  checking the index is empty.
-
-From M15a:
-
-- **GPUI changes JSON key order for the whole build.** It turns on `serde_json`'s `preserve_order`, and cargo
-  merges features across a workspace build. Two tests compared exact JSON text and failed. The orchestrator
-  made them compare values. A daemon built with the workspace writes keys in a different order from one built
-  alone, with the same meaning.
-- **Fetching GPUI on this machine** needs `CARGO_NET_GIT_FETCH_WITH_CLI=true` the first time, because of the
-  machine's git rule that rewrites https to ssh.
-- **The app starts a daemon itself** only for the default socket or with `--daemon`.
-- **Seams:** `team/output.rs` `AgentOutput` for M15b, and one match arm per tab in `tabs.rs` for M16.
-
-From M6a:
-
-- **Contract fixes after M6a**, verified by the orchestrator (255 tests pass twice, all 7 models proved and 10
-  broken variants refuted). Scripts read ids from labelled lines of the turn input and start pack
-  (`{{input:Task}}`, `{{pack:Your id}}`), and the test adapter is gone. The Fernleaf script now runs through
-  the real daemon as a child process. For that the daemon has a fake-clock mode (`--fake-clock`, only with a
-  scripts directory) that runs one turn at a time, and a protocol method `daemon.set_clock` to move it. The
-  start pack is the first transcript entry of each driver. An agent may hold several open waits
-  (`StillWaiting` moves it back to Waiting after a turn). The store commits a worktree to its branch. The
-  scheduler can be woken.
-
-- **Seams left for later milestones** in `x100-orch`: `DriverChooser` (M8), `Sandbox::wrap` (M10), `Gate::rule`
-  (M12). Tool calls and merges both pass the gate.
-- **An existing agent's branch is refreshed** just before the turn that is given the task, never mid-turn.
-- **Three failures in a row** are counted in memory and lost on a restart. M9 makes that durable.
-- **Any agent may message any other.** Only the CEO sets a new worker's range. `form_team` is refused once a
-  lead exists, since later team changes are held actions.
-- **The flaky macOS test** now waits for both clients to reach the same sequence numbers before comparing.
-
-From M5:
-
-- **Contract fixes after M5**, verified by the orchestrator (224 tests pass twice): the store appends several
-  events as one unit, so a message and its delivery, or a turn's checkpoint, reply and end, are written
-  together or not at all. The store's error is small. A driver's pid is recorded at spawn, so one killed with
-  the daemon during its handshake is reaped on restart. A refused turn-end batch now fails the turn and its
-  items go to the next driver.
-
-- **Protocol limits.** A line is at most 16 MiB. A subscriber whose queue has no room for 10 seconds is cut
-  off with `subscription.closed` and resumes from its cursor. A project created later reaches every
-  subscriber from its first event.
-- **Two bugs the subagent found under load and fixed**: the client dropped a notice read in the same pass as
-  its subscribe result, and a lag test that did not guarantee the cut-off.
-- **Leftover drivers.** Each driver's pid and start time are written down. On start the daemon kills every
-  recorded process group whose leader is the same process or is gone.
-- **Open for M6:** `chat.send` opens no task yet. Stall detection in the daemon runs on the real clock only.
-
-From M2 to M4:
-
-- **The transcript entry type** was defined in both the store and the protocol. It now lives once in
-  `x100-core`, with a new item for a tool's live output. 198 tests pass after the move.
-
-- **A flaky test in M2, fixed by the orchestrator.** Under load the kill test's helper was killed before its
-  first commit, and the test demanded one. It was a wrong assertion, not lost data: the message was "reported
-  event 0, stored 0". The first round now waits for one commit. It then passed six runs with every core busy.
-- **Codex approvals** are asked for on the thread, not in its config file, and a denial carries no reason.
-- **The minimum repeat** is passed to the scheduler by the daemon, since a project's log does not hold it.
-
-From M1b:
-
-- **The state holds no log.** The subagent kept every event in the project state, so a snapshot grew with the
-  project. The orchestrator removed it. The Log tab pages events from the store.
-- **Defaults** for the daemon's settings: retire at 70% context, after 10 tasks or 4 hours. Stall 5 minutes.
-  Wait deadline 24 hours. Minimum repeat 5 minutes. Start pack half the window. Last handoff turn 3 minutes.
-  Three turns that neither report nor wait. Cool-off 10 minutes. Tuned in M17.
-- **Open for M6:** whether the brief is recorded as both a message and a task, as the scenario does.
-
-From M1a, where the documents were silent:
-
-- **Agent machine.** Planned to Retired, for a planned lead a team change removes. Waiting to Idle when the
-  wait for a driver ends in a failed task.
-- **Task effort.** Changed by the delegator when sending back, or asked for by the assignee in `update_task`.
-- **Lead budgets** together never exceed the project's total.
-- **Thresholds** are the daemon's settings, in the daemon's log.
-- **Repeats** are fixed intervals, not calendar rules.
-- **Lab drivers** are not counted in "one driver acts for an agent".
-
+- **What a real driver may do** is one setting in `x100-orch/src/spec.rs`, now allow-all inside the sandbox;
+  see "The sandbox and vault, wired in" above.
 ## Could not be verified, and why
 
 - CI, 2026-11-12: Linux and the licence check are green on 8877094. macOS failed one app test that pressed

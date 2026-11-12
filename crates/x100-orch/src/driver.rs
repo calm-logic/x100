@@ -27,6 +27,7 @@ use crate::branches::{self, Ready};
 use crate::ctx::{Events, ProjectCtx, git_of};
 use crate::pack;
 use crate::project::Msg;
+use crate::redact;
 use crate::route;
 use crate::spec;
 use crate::store::blocking;
@@ -83,6 +84,8 @@ struct Actor_ {
     turn: Option<Turn>,
     /// It was started before the project had code, in the scratch directory.
     scratch: bool,
+    /// Its terminal's output, redacted as it arrives.
+    screen: redact::Screen,
 }
 
 /// Reports how the driver ended, `Some` for a failure, so the loop can count failures in a row.
@@ -94,6 +97,7 @@ pub(crate) async fn run(
     msgs: mpsc::UnboundedSender<Msg>,
 ) {
     let (agent, driver) = (start.agent, start.driver);
+    let actor_redactor = shared.redactor.clone();
     let mut actor = Actor_ {
         shared,
         ctx,
@@ -105,8 +109,12 @@ pub(crate) async fn run(
         offer: None,
         turn: None,
         scratch: false,
+        screen: redact::Screen::new(&actor_redactor),
     };
     let failure = actor.drive(start, &mut cmds, &msgs).await;
+    if let Some(rest) = actor.screen.finish(actor.ctx.clock.now()) {
+        actor.record_chunk(rest).await;
+    }
     // A file write, so on the blocking pool like the store's, where it holds up no other task.
     let processes = Arc::clone(&actor.shared.processes);
     if let Err(e) = blocking(move || processes.forget(driver)).await {
@@ -181,7 +189,13 @@ impl Actor_ {
             .await;
         self.scratch = dir.is_none();
         let dir = dir.unwrap_or_else(|| self.ctx.store.scratch());
-        let workspace = spec::workspace(&harness.kind(), self.scratch);
+        // Held to the end of the driver: it holds the driver's way out.
+        let placed =
+            match spec::place(&self.shared, &self.ctx, agent, driver, &*harness, &dir).await {
+                Ok(p) => p,
+                Err(detail) => return self.fail(error(detail)).await,
+            };
+        let workspace = spec::workspace(self.scratch, placed.contained);
         let start_pack = self.start_pack(why, workspace).await;
         // The pack is the driver's first entry, so it is on record before the driver can act.
         self.transcript(Item::StartPack {
@@ -193,11 +207,12 @@ impl Actor_ {
         let spec = spec::build(
             &self.shared,
             &self.ctx,
-            agent,
+            &*harness,
             driver,
             &choice,
             dir,
             start_pack,
+            &placed,
         );
         let mut handle = match harness.start(spec).await {
             Ok(h) => h,
@@ -322,6 +337,13 @@ impl Actor_ {
     }
 
     async fn transcript(&self, item: Item) {
+        let Some(item) = redact::value(&self.shared.redactor, &item) else {
+            eprintln!(
+                "x100: an entry of {}'s transcript could not be cleared of credential values and is left out",
+                self.agent
+            );
+            return;
+        };
         let entry = Entry {
             at: self.ctx.clock.now(),
             driver: self.driver,
@@ -333,8 +355,9 @@ impl Actor_ {
         }
     }
 
-    /// A piece of the driver's terminal, recorded as it arrives so a client follows it live.
-    async fn terminal(&self, chunk: Chunk) {
+    /// A piece of the driver's terminal, recorded as it arrives so a client follows it live, with
+    /// every credential value replaced by its reference.
+    async fn record_chunk(&self, chunk: Chunk) {
         let (ctx, driver) = (Arc::clone(&self.ctx), self.driver);
         if let Err(e) = blocking(move || ctx.store.terminals.append(driver, chunk)).await {
             eprintln!("x100: terminal of {driver}: {e}");
@@ -428,10 +451,18 @@ impl Actor_ {
                     driver: self.driver,
                 });
             }
-            DriverOutput::Terminal(chunk) => self.terminal(chunk).await,
+            DriverOutput::Terminal(chunk) => {
+                if let Some(chunk) = self.screen.chunk(chunk) {
+                    self.record_chunk(chunk).await;
+                }
+            }
             // Nothing in the log holds a warning yet, such as a login's usage window nearly used,
             // so the daemon's own output is where the builder can see it.
-            DriverOutput::Warning(w) => eprintln!("x100: driver {}: {w}", self.driver),
+            DriverOutput::Warning(w) => eprintln!(
+                "x100: driver {}: {}",
+                self.driver,
+                self.shared.redactor.redact_str(&w)
+            ),
             DriverOutput::Failed(_) => {}
         }
         Ok(())
@@ -513,6 +544,11 @@ impl Actor_ {
     /// The driver failed: the turn it was in is lost and its items wait for the next driver. A
     /// failure that looks like the provider's cools its harness and model off for every project.
     async fn fail(&mut self, failure: Failure) -> Option<Failure> {
+        // A failure carries what the program last wrote, which is the driver's own output.
+        let failure = redact::value(&self.shared.redactor, &failure).unwrap_or(Failure::Error {
+            detail: "the driver failed, and how could not be cleared of credential values".into(),
+            provider: None,
+        });
         if let (
             Failure::Error {
                 provider: Some(why),

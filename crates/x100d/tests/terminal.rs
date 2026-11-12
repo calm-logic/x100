@@ -341,17 +341,22 @@ fn pids_of(r: &Real, driver: DriverId) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-async fn stop_and_check_nothing_is_left(mut r: Real, pids: &[u32]) {
+async fn stop_and_check_nothing_is_left(mut r: Real, project: ProjectId, pids: &[u32]) {
     r.daemon.terminate();
     gone(pids).await;
+    // A sandbox's processes end with it, the last of them a moment after its anchor.
     for pid in pids {
-        assert_eq!(
-            group_members(*pid),
-            Vec::<u32>::new(),
-            "process group {pid}"
-        );
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !group_members(*pid).is_empty() {
+            assert!(
+                std::time::Instant::now() < until,
+                "process group {pid}: {:?}",
+                group_members(*pid)
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
-    r.assert_nothing_else_left_the_machine();
+    r.assert_nothing_else_left_the_machine(project);
     assert_eq!(r.provider.unused(), 0, "every scripted reply was asked for");
 }
 
@@ -376,11 +381,15 @@ async fn a_brief_runs_on_claude_codes_terminal_and_is_followed_live() {
         ];
         run_brief(&r, greet, set_up, move |task| {
             vec![
-                // A command is put to the daemon, which refuses it: nothing runs.
+                // A command runs without asking, inside the agent's sandbox: its write outside
+                // the worktree fails, and what it prints reaches the transcript.
                 Reply::Tool {
                     name: "Bash".into(),
                     input: json!({
-                        "command": format!("echo escaped > {}", outside.display()),
+                        "command": format!(
+                            "echo escaped > {} || true; echo \"inside $(hostname)\"",
+                            outside.display()
+                        ),
                         "description": "Write outside the worktree",
                     }),
                 },
@@ -401,22 +410,35 @@ async fn a_brief_runs_on_claude_codes_terminal_and_is_followed_live() {
         })
         .await
     };
-    assert!(
-        !outside.exists(),
-        "a command ran without the daemon's say-so"
-    );
-    // What the model was told of its command, in the request after it.
-    let told = r.provider.requests().iter().any(|q| {
-        q.body["messages"]
-            .to_string()
-            .contains("Commands are not available here yet")
+    assert!(!outside.exists(), "a command wrote outside its sandbox");
+    // The command ran, in the sandbox, whose host name is its own: the model was told what it
+    // printed, and the transcript holds it.
+    let told = r
+        .provider
+        .requests()
+        .iter()
+        .any(|q| q.body["messages"].to_string().contains("inside x100"));
+    assert!(told, "the command ran in the sandbox and the model saw it");
+    let transcript = r
+        .client
+        .request(x100_proto::ReadTranscript {
+            project: ran.project,
+            agent: ran.ceo,
+            after: None,
+            limit: 1000,
+        })
+        .await
+        .unwrap();
+    let printed = transcript.entries.iter().any(|e| {
+        matches!(&e.entry.item, x100_core::transcript::Item::ToolResult { output, .. }
+            if output.contains("inside x100"))
     });
-    assert!(told, "the command was put to the daemon and refused");
+    assert!(printed, "the command's output is in the transcript");
 
     let pids = pids_of(&r, ran.driver);
     assert_eq!(pids.len(), 1, "{pids:?}");
     assert!(running(pids[0]), "the warm driver is live");
-    stop_and_check_nothing_is_left(r, &pids).await;
+    stop_and_check_nothing_is_left(r, ran.project, &pids).await;
 }
 
 fn patch(name: &str) -> Reply {
@@ -456,8 +478,8 @@ fn codex_replies(task: TaskId) -> Vec<Reply> {
     let spec = json!({ "spec": "brd", "status": "draft", "body": BRD });
     let report = json!({ "task": task, "outcome": "completed", "summary": "The BRD is written." });
     vec![
-        // A file outside the worktree, which Codex's sandbox refuses, and one in it, which it lets
-        // the model write without asking.
+        // A file outside the worktree, which x100's sandbox lets nobody write, and one in it,
+        // which the model writes without asking.
         patch("../escaped.md"),
         patch("todo.md"),
         exec(format!(
@@ -485,19 +507,26 @@ async fn a_brief_runs_on_codexs_terminal_and_is_followed_live() {
         !worktree.join("../escaped.md").exists(),
         "a write left the worktree"
     );
-    let told = r.provider.requests().iter().any(|q| {
-        q.body["input"]
-            .to_string()
-            .contains("patch rejected: writing outside of the project")
-    });
-    assert!(told, "the patch outside the worktree was refused");
+    // The CEO's report on the builder's task merged its work into the project's main branch.
+    assert_eq!(
+        std::fs::read_to_string(r.projects_root().join(NAME.1).join("todo.md")).unwrap(),
+        "- buy milk\n"
+    );
+    // Codex's own sandbox is off, so it tries; x100's lets nothing outside the worktree be
+    // written, and the model is told the write failed.
+    let told = r
+        .provider
+        .requests()
+        .iter()
+        .any(|q| q.body["input"].to_string().contains("Failed to write file"));
+    assert!(told, "the patch outside the worktree failed in the sandbox");
     let pids = pids_of(&r, ran.driver);
     assert_eq!(
         pids.len(),
         2,
         "the app-server and the terminal attached to it: {pids:?}"
     );
-    stop_and_check_nothing_is_left(r, &pids).await;
+    stop_and_check_nothing_is_left(r, ran.project, &pids).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -528,7 +557,7 @@ async fn a_codex_terminal_driver_left_by_a_killed_daemon_is_gone_after_a_restart
         })
         .await
         .expect("the log shows the driver ended");
-    stop_and_check_nothing_is_left(r, &pids).await;
+    stop_and_check_nothing_is_left(r, ran.project, &pids).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

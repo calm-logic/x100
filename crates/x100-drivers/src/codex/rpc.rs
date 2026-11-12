@@ -40,7 +40,6 @@ pub(crate) struct CodexRpc {
     effort: &'static str,
     cwd: String,
     approval: &'static str,
-    sandbox: &'static str,
     expects_tools: bool,
     attached: bool,
     name: String,
@@ -85,11 +84,9 @@ impl CodexRpc {
             effort: effort_name(spec.effort),
             cwd: spec.dir.display().to_string(),
             approval: match spec.permissions {
-                // A command its sandbox refuses fails, and the model is told so.
-                Permissions::AllowAll | Permissions::Worktree => "never",
+                Permissions::AllowAll => "never",
                 Permissions::AskDaemon => "untrusted",
             },
-            sandbox: super::sandbox_mode(spec.permissions),
             expects_tools: spec.tools.is_some(),
             attached,
             name: format!("x100 driver {}", spec.driver),
@@ -148,7 +145,8 @@ impl CodexRpc {
                     "model": self.model,
                     "cwd": self.cwd,
                     "approvalPolicy": self.approval,
-                    "sandbox": self.sandbox,
+                    // Codex's own sandbox is off: the driver runs in x100's.
+                    "sandbox": "danger-full-access",
                     "developerInstructions": self.start_pack,
                     "ephemeral": !self.attached,
                 });
@@ -514,7 +512,10 @@ mod tests {
             model: ModelName("gpt-6-luna".into()),
             effort: Effort::Low,
             dir: "/work".into(),
+            state: "/state".into(),
             wrap: CommandWrapper::identity(),
+            expose: crate::Expose::nothing(),
+            tmp: None,
             start_pack: String::new(),
             tools: None,
             env: Vec::new(),

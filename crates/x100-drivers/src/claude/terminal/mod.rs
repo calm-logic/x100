@@ -34,7 +34,8 @@ use x100_core::time::Clock;
 use super::{TOOLS_SERVER, effort_flag, models};
 use crate::handle::DriverHandle;
 use crate::harness::{
-    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError, check_offered,
+    CommandLine, DEFAULT_INHERITED_ENV, DriverSpec, Harness, Permissions, StartError,
+    check_offered, url_host,
 };
 use crate::supervisor::{self, Launch};
 use crate::terminal::{Size, pty};
@@ -60,6 +61,15 @@ const HOOKS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// Anthropic's API, its console and claude.ai: where Claude Code takes its account's profile,
+/// refreshes its login and sends its requests on that login.
+const LOGIN_HOSTS: &[&str] = &[
+    "api.anthropic.com",
+    "console.anthropic.com",
+    "platform.claude.com",
+    "claude.ai",
+];
+
 /// How long a held tool call may wait on the daemon before Claude Code gives up on the hook. A
 /// builder may take a while to approve.
 const PERMISSION_WAIT_SECS: u64 = 24 * 60 * 60;
@@ -74,15 +84,19 @@ pub struct ClaudeTerminalConfig {
     /// always the driver's own.
     pub inherit_env: Vec<String>,
     pub max_retries: u32,
-    /// Each driver's home and settings are made under this one and removed when it ends.
-    pub state_dir: PathBuf,
     pub models: Vec<ModelOffer>,
     /// The terminal's starting size.
     pub size: Size,
 }
 
+impl Default for ClaudeTerminalConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeTerminalConfig {
-    pub fn new(state_dir: impl Into<PathBuf>) -> Self {
+    pub fn new() -> Self {
         Self {
             program: PathBuf::from("claude"),
             base_url: None,
@@ -91,7 +105,6 @@ impl ClaudeTerminalConfig {
                 .map(|s| (*s).to_owned())
                 .collect(),
             max_retries: 1,
-            state_dir: state_dir.into(),
             models: models(),
             size: Size::default(),
         }
@@ -266,6 +279,12 @@ impl Harness for ClaudeTerminal {
         View::Terminal
     }
 
+    fn login_hosts(&self) -> Vec<String> {
+        let mut hosts: Vec<String> = LOGIN_HOSTS.iter().map(|h| (*h).to_owned()).collect();
+        hosts.extend(self.config.base_url.as_deref().and_then(url_host));
+        hosts
+    }
+
     async fn start(&self, spec: DriverSpec) -> Result<DriverHandle, StartError> {
         check_offered(self.kind(), &self.config.models, &spec, self.supports())?;
         let login = spec.login.clone().ok_or(StartError::NoLogin)?;
@@ -283,7 +302,7 @@ impl Harness for ClaudeTerminal {
             .expect("checked as offered");
         let window = offer.context_window;
 
-        let driver_dir = self.config.state_dir.join(spec.driver.to_string());
+        let driver_dir = spec.state.clone();
         let cleanup = Some(driver_dir.clone());
         let prepared = async {
             let home = driver_dir.join("home");
@@ -322,6 +341,12 @@ impl Harness for ClaudeTerminal {
             }
         };
         wire.tasks.push(server);
+        // The program posts its hooks from where it runs, which must reach this port first.
+        if let Err(e) = spec.expose.expose(([127, 0, 0, 1], port).into()).await {
+            wire.abandon().await;
+            remove_dir(cleanup.as_ref()).await;
+            return Err(StartError::Prepare(e));
+        }
 
         let write = |name: &str, content: &str| {
             let path = own.join(name);
@@ -394,9 +419,6 @@ impl Harness for ClaudeTerminal {
             match spec.permissions {
                 Permissions::AllowAll => "bypassPermissions",
                 Permissions::AskDaemon => "manual",
-                // Claude Code's own sandbox needs `socat` on Linux and is not relied on: its
-                // commands are asked of the daemon through the permission hook instead.
-                Permissions::Worktree => "acceptEdits",
             }
             .into(),
         ]);

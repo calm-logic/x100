@@ -191,7 +191,7 @@ fn prefix(
     // The skeleton bubblewrap built to hold the mounts is the sandbox's own, but nothing should
     // be written there either.
     a.extend(["--remount-ro".into(), "/".into()]);
-    for (k, v) in sandbox_env(spec) {
+    for (k, v) in sandbox_env() {
         a.extend(["--setenv".into(), k, v]);
     }
     a.extend([

@@ -554,7 +554,7 @@ fn controls_whose_method_is_not_available_yet_say_so() {
 }
 
 #[test]
-fn credentials_are_added_with_a_value_and_a_scope_and_say_so_while_unavailable() {
+fn credentials_are_added_with_a_value_and_a_scope() {
     let mut o = script();
     let settings = o.open::<SettingsView>(Tab::Settings);
     let creds = vcx_read(&o.vcx, |cx| settings.read(cx).credentials().clone());
@@ -575,10 +575,36 @@ fn credentials_are_added_with_a_value_and_a_scope_and_say_so_while_unavailable()
     });
     let outcome = vcx_read(&o.vcx, |cx| creds.read(cx).outcome().cloned());
     let after = vcx_read(&o.vcx, |cx| creds.read(cx).shown().len());
-    says_so_or_worked(outcome, after == before);
-    // Whatever the daemon says, the value is not on screen or in the state the app holds.
+    assert_eq!(outcome, None, "the daemon took it");
+    assert_eq!(after, before + 1);
+    let added = vcx_read(&o.vcx, |cx| creds.read(cx).shown().last().cloned()).unwrap();
+    assert_eq!(added.name, "Stripe test key");
+    // The value is not on screen or in the state the app holds.
     let held: Vec<_> = vcx_read(&o.vcx, |cx| creds.read(cx).shown().to_vec());
     assert!(!format!("{held:?}").contains("sk_test_not_a_real_key"));
+}
+
+/// The daemon's one unsafe setting is off and the sandbox works here, and it turns on and off
+/// again from Settings.
+#[test]
+fn running_without_a_sandbox_is_shown_and_set_from_settings() {
+    let mut o = script();
+    let settings = o.open::<SettingsView>(Tab::Settings);
+    let part = vcx_read(&o.vcx, |cx| settings.read(cx).sandbox().clone());
+    let shown = vcx_read(&o.vcx, |cx| part.read(cx).shown().clone());
+    assert!(!shown.uncontained);
+    assert_eq!(shown.missing, None, "a sandbox can be made on this machine");
+    for on in [true, false] {
+        scroll_down(&mut o.vcx);
+        o.click("run-without-sandbox".into());
+        o.pump_until("the setting changes", |vcx| {
+            vcx.read(|cx| part.read(cx).shown().uncontained == on)
+        });
+        assert_eq!(
+            vcx_read(&o.vcx, |cx| part.read(cx).outcome().cloned()),
+            None
+        );
+    }
 }
 
 #[test]

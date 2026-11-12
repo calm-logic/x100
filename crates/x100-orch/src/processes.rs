@@ -28,6 +28,7 @@ struct Entry {
 /// What the daemon found left over by a daemon that died.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reaped {
+    /// The driver, or the sandbox, whose process it was.
     pub driver: String,
     pub pid: u32,
 }
@@ -76,19 +77,28 @@ impl ProcessRegistry {
 
     /// Adds a process to the driver's list.
     pub fn record(&self, driver: DriverId, pid: u32) -> std::io::Result<()> {
+        self.record_named(&driver.to_string(), pid)
+    }
+
+    /// Crosses off every process of the driver, once they are all gone.
+    pub fn forget(&self, driver: DriverId) -> std::io::Result<()> {
+        self.forget_named(&driver.to_string())
+    }
+
+    /// Adds a process to the list under `owner`, such as the process that holds a sandbox.
+    pub fn record_named(&self, owner: &str, pid: u32) -> std::io::Result<()> {
         let entry = Entry {
             pid,
             started: start_time(pid).unwrap_or_default(),
         };
         let mut live = self.live.lock().expect("registry lock");
-        live.entry(driver.to_string()).or_default().push(entry);
+        live.entry(owner.to_owned()).or_default().push(entry);
         self.write(&live)
     }
 
-    /// Crosses off every process of the driver, once they are all gone.
-    pub fn forget(&self, driver: DriverId) -> std::io::Result<()> {
+    pub fn forget_named(&self, owner: &str) -> std::io::Result<()> {
         let mut live = self.live.lock().expect("registry lock");
-        live.remove(&driver.to_string());
+        live.remove(owner);
         self.write(&live)
     }
 

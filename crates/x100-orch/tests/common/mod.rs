@@ -27,7 +27,7 @@ use x100_core::time::{Clock, FakeClock, Timestamp};
 use x100_drivers::fake::{DaemonTools, FakeHarness};
 use x100_drivers::{DriverHandle, DriverSpec, Harness, StartError, ToolEndpoint};
 use x100_jobs::Scheduler;
-use x100_orch::{AllowAll, Config, Desk, NoSandbox, Orchestrator, ProcessRegistry, ToolServer};
+use x100_orch::{AllowAll, Config, Containment, Desk, Orchestrator, ProcessRegistry, ToolServer};
 use x100_store::{DaemonLog, ProjectStore};
 
 pub const FAKE: &str = env!("CARGO_BIN_EXE_x100-orch-fake-harness");
@@ -182,6 +182,8 @@ fn all_settings(s: &DaemonSettings) -> Vec<DaemonSetting> {
         D::TurnsWithoutProgress(s.turns_without_progress),
         D::CoolOff(s.cool_off),
         D::TerminalDriversPerLogin(s.terminal_drivers_per_login),
+        D::RunWithoutSandbox(s.run_without_sandbox),
+        D::SandboxPrograms(s.sandbox_programs.clone()),
     ]
     .into_iter()
     .chain(s.projects_root.clone().map(D::ProjectsRoot))
@@ -202,6 +204,9 @@ impl World {
             .settings
             .projects_root
             .get_or_insert_with(|| dir.path().join("projects"));
+        // These tests are about the organisation and run in-process, where the fake harness's
+        // drivers need no sandbox to be told apart; containment is checked through the daemon.
+        setup.settings.run_without_sandbox = true;
         let project = ProjectId::from_u128(1);
         let clock = FakeClock::new(START);
         let shared: Arc<dyn Clock> = Arc::new(clock.clone());
@@ -272,7 +277,11 @@ impl World {
             &setup.settings,
         );
         let settings = settings_of(&daemon);
-        let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
+        let desk = Desk::new(
+            Arc::new(AllowAll),
+            Arc::clone(&settings),
+            x100_vault::Redactor::for_values(&[]),
+        );
         let tools = match setup.serve {
             true => Some(
                 ToolServer::start(Arc::clone(&desk))
@@ -317,7 +326,8 @@ impl World {
             settings,
             processes: Arc::new(processes),
             desk: Arc::clone(&desk),
-            sandbox: Arc::new(NoSandbox),
+            containment: uncontained(dir.path()),
+            redactor: x100_vault::Redactor::for_values(&[]),
             serial: true,
         });
         let scheduler = Scheduler::new(store.log.clone(), shared);
@@ -540,6 +550,18 @@ pub fn read(path: &Path) -> Option<String> {
 
 /// A harness that notes the tools endpoint each driver is started with, as a test reading the
 /// harness's side of the wire would.
+/// No sandbox and no proxy: the in-process tests run their drivers with the daemon's
+/// `run_without_sandbox` setting on.
+pub fn uncontained(dir: &Path) -> Containment {
+    Containment {
+        backend: Err("in-process tests make no sandbox".into()),
+        dir: dir.join("sb"),
+        tag: "t".into(),
+        programs: Vec::new(),
+        proxy: None,
+    }
+}
+
 pub struct Recording {
     pub inner: Arc<dyn Harness>,
     pub endpoints: Endpoints,
