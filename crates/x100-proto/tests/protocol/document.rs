@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use serde_json::Value;
+use x100_core::transcript::{self, Item, Pos};
 use x100_proto::*;
 
 use crate::samples::{id, samples};
@@ -411,11 +412,11 @@ fn notice_sample(name: &str) -> Notice {
         }),
         "transcript.entry" => Notice::TranscriptEntry(TranscriptNotice {
             subscription: SubscriptionId(2),
-            position: Position(42),
-            entry: TranscriptEntry {
+            position: Pos(42),
+            entry: transcript::Entry {
                 at: crate::samples::at(30),
                 driver: id(x100_core::id::DriverId::new, 4),
-                item: TranscriptItem::ToolCall {
+                item: Item::ToolCall {
                     call: "toolu_01".into(),
                     name: "bash".into(),
                     input: serde_json::json!({"command": "cargo test"}),

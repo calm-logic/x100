@@ -75,6 +75,12 @@ An agent's **transcript** is too large for the event log and has a subscription 
 as they are written, with none missed or repeated. Positions count from 1 per agent. `unsubscribe` ends
 either kind of subscription, and closing the connection ends all of them.
 
+An entry has `at`, the `driver` it came from, and an `item` whose `type` is one of `turn_started`, `text`,
+`tool_call`, `tool_output`, `tool_result`, `usage`, `turn_ended` and `driver_changed`. A `tool_output` is a
+piece of a running tool's terminal output, `chunk`, paired by `call` with its `tool_call`. It is how the
+Team tab shows a tool live; the `tool_result` that follows carries the whole output. The types are
+`x100_core::transcript::Entry` and `Item`.
+
 ## Worked example
 
 The client says hello. The daemon answers with the version both will use.

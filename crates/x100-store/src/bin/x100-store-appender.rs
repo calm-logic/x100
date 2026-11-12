@@ -16,8 +16,8 @@ use x100_core::money::{Money, Percent};
 use x100_core::party::Actor;
 use x100_core::project::Settings;
 use x100_core::time::{Clock, Timestamp};
+use x100_core::transcript::{Entry, Item};
 use x100_store::ProjectStore;
-use x100_store::transcript::{Entry, Item};
 
 struct SystemClock;
 

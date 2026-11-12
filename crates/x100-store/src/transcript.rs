@@ -9,11 +9,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, params};
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use x100_core::id::{AgentId, DriverId};
-use x100_core::money::Usage;
-use x100_core::time::Timestamp;
+use x100_core::id::AgentId;
+use x100_core::transcript::{Entry, Pos};
 
 use crate::db::{self, Durability};
 use crate::error::{Error, Result};
@@ -25,66 +23,6 @@ CREATE TABLE IF NOT EXISTS transcript (
     entry TEXT NOT NULL,
     PRIMARY KEY (agent, pos)
 ) STRICT, WITHOUT ROWID;";
-
-/// An entry's place in one agent's transcript. Counts from 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct Pos(pub u64);
-
-/// One thing in an agent's transcript, and the driver it came from.
-///
-/// This shape is also defined, field for field, in `x100-proto`, because clients may not depend on
-/// this crate. A test here keeps the two serialisations identical.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Entry {
-    pub at: Timestamp,
-    pub driver: DriverId,
-    pub item: Item,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Item {
-    TurnStarted,
-    /// Text the model wrote.
-    Text {
-        text: String,
-    },
-    ToolCall {
-        /// Pairs the call with its result.
-        call: String,
-        name: String,
-        input: serde_json::Value,
-    },
-    ToolResult {
-        call: String,
-        output: String,
-        is_error: bool,
-    },
-    /// What the turn used, as the harness reported it.
-    Usage {
-        usage: Usage,
-    },
-    TurnEnded {
-        how: TurnEnd,
-    },
-    /// The first entry of a new driver: the agent's work carries on in the same transcript, with
-    /// the change marked. `from` is `None` for the agent's first driver.
-    DriverChanged {
-        from: Option<DriverId>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TurnEnd {
-    Completed,
-    Failed {
-        detail: String,
-    },
-    /// Stopped while running, by the daemon or the builder.
-    Interrupted,
-}
 
 /// What a transcript follower receives.
 pub type FollowEntries = UnboundedReceiver<(Pos, Entry)>;

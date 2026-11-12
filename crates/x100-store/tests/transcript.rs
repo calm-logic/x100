@@ -5,8 +5,8 @@ use std::thread;
 use x100_core::id::{AgentId, DriverId};
 use x100_core::money::Usage;
 use x100_core::time::Timestamp;
+use x100_core::transcript::{Entry, Item, Pos, TurnEnd};
 use x100_store::ProjectStore;
-use x100_store::transcript::{Entry, Item, Pos, TurnEnd};
 
 fn entry(driver: DriverId, i: u64, item: Item) -> Entry {
     Entry {
@@ -146,51 +146,4 @@ fn following_from_a_position_gets_the_stored_entries_then_new_ones_with_none_mis
         .map(|(p, _)| p.0)
         .collect();
     assert_eq!(got, (16..=500).collect::<Vec<_>>());
-}
-
-/// The wire type in `x100-proto` mirrors this one because clients cannot depend on the store.
-#[test]
-fn every_kind_of_entry_serialises_into_the_protocols_own_type_and_back() {
-    let d = DriverId::from_u128(1);
-    let items = [
-        Item::TurnStarted,
-        Item::Text { text: "t".into() },
-        Item::ToolCall {
-            call: "c".into(),
-            name: "n".into(),
-            input: serde_json::json!({"a": [1, 2]}),
-        },
-        Item::ToolResult {
-            call: "c".into(),
-            output: "o".into(),
-            is_error: true,
-        },
-        Item::Usage {
-            usage: Usage {
-                input: 1,
-                output: 2,
-                cache_read: 3,
-                cache_write_short: 4,
-                cache_write_long: 5,
-            },
-        },
-        Item::TurnEnded {
-            how: TurnEnd::Completed,
-        },
-        Item::TurnEnded {
-            how: TurnEnd::Failed { detail: "x".into() },
-        },
-        Item::TurnEnded {
-            how: TurnEnd::Interrupted,
-        },
-        Item::DriverChanged { from: None },
-        Item::DriverChanged { from: Some(d) },
-    ];
-    for item in items {
-        let mine = entry(d, 5, item);
-        let json = serde_json::to_value(&mine).unwrap();
-        let theirs: x100_proto::TranscriptEntry = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&theirs).unwrap(), json);
-        assert_eq!(serde_json::from_value::<Entry>(json).unwrap(), mine);
-    }
 }

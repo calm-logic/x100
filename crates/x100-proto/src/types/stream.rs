@@ -7,7 +7,7 @@ use x100_core::event::{DaemonEvent, Envelope, ProjectEvent, Seq};
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::{AgentId, ProjectId};
 
-use crate::transcript::{Position, PositionedEntry, TranscriptEntry};
+use x100_core::transcript::{Entry, Pos};
 
 /// Names one log: the daemon's, or one project's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -96,8 +96,15 @@ pub enum LogPage {
 pub struct ReadTranscript {
     pub project: ProjectId,
     pub agent: AgentId,
-    pub after: Option<Position>,
+    pub after: Option<Pos>,
     pub limit: u32,
+}
+
+/// An entry and where it sits in its agent's transcript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PositionedEntry {
+    pub position: Pos,
+    pub entry: Entry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,7 +117,7 @@ pub struct SubscribeTranscript {
     pub project: ProjectId,
     pub agent: AgentId,
     /// The entries after this position are notified first, then new ones as they are written.
-    pub after: Option<Position>,
+    pub after: Option<Pos>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,8 +152,8 @@ pub enum EventNotice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscriptNotice {
     pub subscription: SubscriptionId,
-    pub position: Position,
-    pub entry: TranscriptEntry,
+    pub position: Pos,
+    pub entry: Entry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

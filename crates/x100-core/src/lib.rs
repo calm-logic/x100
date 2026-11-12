@@ -35,6 +35,7 @@ pub mod team;
 pub mod testing;
 pub mod time;
 pub mod tool;
+pub mod transcript;
 pub mod trial;
 pub mod wait;
 

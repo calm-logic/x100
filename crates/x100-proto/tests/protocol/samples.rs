@@ -24,6 +24,7 @@ use x100_core::project::{SettingChange, Settings};
 use x100_core::settings::DaemonSetting;
 use x100_core::testing::fernleaf;
 use x100_core::time::Timestamp;
+use x100_core::transcript::{Entry, Item, Pos};
 use x100_core::wait::{Wait, WaitOn};
 use x100_proto::*;
 
@@ -185,16 +186,16 @@ pub fn samples() -> Vec<Sample> {
             ReadTranscript {
                 project: prj,
                 agent: agt,
-                after: Some(Position(40)),
+                after: Some(Pos(40)),
                 limit: 100,
             },
             TranscriptPage {
                 entries: vec![PositionedEntry {
-                    position: Position(41),
-                    entry: TranscriptEntry {
+                    position: Pos(41),
+                    entry: Entry {
                         at: at(30),
                         driver: drv,
-                        item: TranscriptItem::Text {
+                        item: Item::Text {
                             text: "Reading the migration.".into(),
                         },
                     },

@@ -50,10 +50,8 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-- Follow-up to M2, after M3 reports: the transcript entry type is defined in both the store and the protocol.
-  Move it into `x100-core` and add an item for a tool's live output, which the Team tab's live view needs.
-- M3, drivers and harnesses. Opus subagent, owns `crates/x100-drivers`. Real harnesses are tested against a
-  local fake provider. The paid runs wait for the owner.
+- M5, daemon and client library. Sonnet subagent, owns `crates/x100d`, `crates/x100-client` and the turn
+  loop in `crates/x100-orch`.
 
 ## Waiting on the owner
 
@@ -136,6 +134,9 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Codex** is driven through `codex app-server`, not `codex exec`.
 
 From M2 to M4:
+
+- **The transcript entry type** was defined in both the store and the protocol. It now lives once in
+  `x100-core`, with a new item for a tool's live output. 198 tests pass after the move.
 
 - **A flaky test in M2, fixed by the orchestrator.** Under load the kill test's helper was killed before its
   first commit, and the test demanded one. It was a wrong assertion, not lost data: the message was "reported

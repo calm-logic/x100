@@ -6,6 +6,7 @@ use x100_core::event::Envelope;
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::money::Usage;
 use x100_core::testing::{daemon_log, fernleaf};
+use x100_core::transcript::{Entry, Item, Pos, TurnEnd};
 use x100_proto::*;
 
 use crate::samples::{at, id, samples};
@@ -98,21 +99,25 @@ fn every_notification_round_trips() {
     let project_event = fernleaf().log.remove(0);
     let daemon_event = daemon_log(at(0)).remove(0);
     let items = vec![
-        TranscriptItem::TurnStarted,
-        TranscriptItem::Text {
+        Item::TurnStarted,
+        Item::Text {
             text: "hi\nthere".into(),
         },
-        TranscriptItem::ToolCall {
+        Item::ToolCall {
             call: "c1".into(),
             name: "bash".into(),
             input: json!({"command": "ls -la"}),
         },
-        TranscriptItem::ToolResult {
+        Item::ToolOutput {
+            call: "c1".into(),
+            chunk: "total 0\r\n".into(),
+        },
+        Item::ToolResult {
             call: "c1".into(),
             output: "total 0\n".into(),
             is_error: false,
         },
-        TranscriptItem::Usage {
+        Item::Usage {
             usage: Usage {
                 input: 1,
                 output: 2,
@@ -121,19 +126,19 @@ fn every_notification_round_trips() {
                 cache_write_long: 5,
             },
         },
-        TranscriptItem::TurnEnded {
+        Item::TurnEnded {
             how: TurnEnd::Completed,
         },
-        TranscriptItem::TurnEnded {
+        Item::TurnEnded {
             how: TurnEnd::Failed {
                 detail: "boom".into(),
             },
         },
-        TranscriptItem::TurnEnded {
+        Item::TurnEnded {
             how: TurnEnd::Interrupted,
         },
-        TranscriptItem::DriverChanged { from: None },
-        TranscriptItem::DriverChanged {
+        Item::DriverChanged { from: None },
+        Item::DriverChanged {
             from: Some(id(x100_core::id::DriverId::new, 2)),
         },
     ];
@@ -159,8 +164,8 @@ fn every_notification_round_trips() {
     for (i, item) in items.into_iter().enumerate() {
         notices.push(Notice::TranscriptEntry(TranscriptNotice {
             subscription: sub,
-            position: Position(i as u64 + 1),
-            entry: TranscriptEntry {
+            position: Pos(i as u64 + 1),
+            entry: Entry {
                 at: at(i as u64),
                 driver: id(x100_core::id::DriverId::new, 2),
                 item,

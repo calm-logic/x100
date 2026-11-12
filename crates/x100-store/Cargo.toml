@@ -21,5 +21,4 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [dev-dependencies]
 x100-core = { path = "../x100-core", features = ["testing"] }
-x100-proto = { path = "../x100-proto" }
 tempfile = "3"

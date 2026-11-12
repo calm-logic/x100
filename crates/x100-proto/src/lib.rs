@@ -8,7 +8,6 @@ mod bytes;
 mod error;
 mod methods;
 pub mod secret;
-mod transcript;
 mod types;
 mod wire;
 
@@ -16,7 +15,6 @@ pub use bytes::Bytes;
 pub use error::{ErrorCode, RpcError};
 pub use methods::{Call, METHODS, Method, MethodInfo, NOTICES, Notice, reserialize_result};
 pub use secret::Secret;
-pub use transcript::{Position, PositionedEntry, TranscriptEntry, TranscriptItem, TurnEnd};
 pub use types::*;
 pub use wire::{BadLine, Id, Message, Request, Response};
 
