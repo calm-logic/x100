@@ -27,7 +27,7 @@ library is to check that the library does what this document assumes, on the tar
 ## Shape
 
 ```
- x100 (desktop app, GPUI)          x100 (terminal interface)          V2: mobile app
+ x100-app (desktop app, GPUI)      x100 (terminal interface)          V2: mobile app
           │                               │                                   │
           └────────────── local socket, JSON-RPC + event stream ──────────────┘
                                           │
@@ -71,6 +71,16 @@ daemon. Closing the window does not stop the agents.
 | `x100-app` | The desktop interface, in GPUI. |
 | `x100-tui` | The terminal interface. |
 
+**proposed** Three binaries: `x100d` (the daemon), `x100` (the terminal interface and its single commands, from
+`x100-tui`) and `x100-app` (the desktop app).
+
+**proposed** Dependencies point one way. `x100-core` is at the bottom. `x100-store` and `x100-proto` sit on it.
+`x100-drivers`, `x100-jobs`, `x100-router`, `x100-sandbox`, `x100-vault`, `x100-gate` and `x100-memory` sit on
+`x100-core`, use `x100-store` where they persist anything, and do not depend on each other. `x100-orch` sits on
+all of those, `x100-lab` on `x100-orch`, and `x100d` on everything. The daemon routes the reflection tools to
+`x100-lab`, so `x100-orch` never depends on it. `x100-client` depends on `x100-core` and `x100-proto` only, and
+the two interfaces depend on `x100-client`.
+
 ## Domain model
 
 **proposed** Event sourced. Every change is an event appended to the project's log. What a tab shows is
@@ -79,31 +89,40 @@ This gives the Log tab, sync between devices and "reading the log back" during r
 
 Core entities: `Project`, `Agent` (kind: CEO, lead or worker; parent; role; charter; effort range; budget for a
 lead), `Driver` (one harness running one model at one effort level on one machine, for one agent), `Harness`,
-`Machine`, `Task` (what is asked; delegator; assignee; effort needed; status; progress note; report),
+`Machine`, `Task` (what is asked; delegator; assignee; effort needed; status; progress note and share done;
+report),
 `Message`, `Job`, `Wait`, `Spec` (BRD, PRD, ADD; revision; status), `FileRef`, `Ledger`, `Action` (what an
 agent wants to do, with its classification and decision), `Skill`, `Memory`.
 
 State machines to make explicit and verify:
 
 - **Agent**: Planned → Working when its first inbox item arrives. Working → Waiting when it waits, or when no
-  driver can be found for it; Waiting → Working when anything reaches its inbox. Working → Idle when it has no
-  open task and nothing to wait for; Idle → Working when anything reaches its inbox. Idle → Retired. An agent
-  has no Failed state: its drivers fail, and its tasks can end in a failure report.
-- **Driver**: Starting → Running → Warm → Running again, or Warm → Compacting → Warm. Running → Handing off →
-  Ended for a planned handoff. Warm → Ended when retired. Any live state → Ended when stopped, or → Failed.
-  Ended and Failed are final and record why.
+  driver can be found for it; Waiting → Working when anything reaches its inbox, or, for an agent waiting for a
+  driver, when one can be found. Working → Idle when it has no open task and nothing to wait for; Idle → Working
+  when anything reaches its inbox. Idle → Retired. An agent has no Failed state: its drivers fail, and its tasks
+  can end in a failure report.
+- **Driver**: Starting → Running → Warm → Running again, or Warm → Compacting → Warm. A driver is Running during
+  a turn and Warm between turns. Warm → Handing off → Ended for a planned handoff: the turn in progress ends
+  first, and the driver's last turn runs in Handing off. Warm → Ended when retired. Any state that is not final
+  → Ended when stopped, or → Failed. Ended and Failed are final and record why. A **live** driver is one in any
+  state that is not final, Warm included, since it still holds a process. A machine's cap counts live drivers.
 - **Job**: Scheduled → Done when a one-off job fires, or back to Scheduled with its next time when a repeating
   job fires. Scheduled → Cancelled.
-- **Action**: Proposed → Classified → Allowed, or Held → Approved or Denied.
+- **Action**: Proposed → Classified → Allowed, or Held → Approved or Denied. Allowed or Approved → Carried out
+  or Failed. Only an Allowed or Approved action is ever carried out.
 - **Task**: New idea → In progress → In review → Promoting → Done. A task delegated new starts In progress.
-- **Trial**: Proposed → Running → Scored → Committed or Discarded.
-  In review → In progress when the delegator sends it back, a failed task included.
+  `report` moves it to In review. Accepting it moves it to Promoting while the assignee's branch is merged, then
+  to Done. In review → In progress when the delegator sends it back, a failed task included. Promoting → In
+  progress when the merge fails.
+- **Trial**: Proposed → Running → Scored → Committed or Discarded. Running → Stopped when the lab's cap would be
+  passed.
 
 Invariants worth proving:
 
 - Every delegated task ends in a report to its delegator, even when the assignee's drivers fail.
 - A Held action never runs before it is Approved.
-- Spend never exceeds the budget.
+- No turn starts once the budget that pays for it is reached, so spend passes a budget by at most the turns
+  already running.
 - An agent has exactly one parent and the tree has one root.
 - At most one driver acts for an agent at any time, and a driver acts for one agent only, for its whole life.
 - Every driver is compatible when it starts: inside its agent's effort range, at or above its task's effort, on
@@ -175,7 +194,18 @@ retired instead.
 
 **proposed** First harnesses: Claude Code and Codex, each run headless as a child process with structured
 output. A custom harness around an LLM is one more implementation of the trait. Consider the Agent Client
-Protocol as a third harness, since it would bring in every agent that speaks it.
+Protocol as a third harness after v1, since it would bring in every agent that speaks it.
+
+**proposed** Two parts of the daemon need a model's answer without an agent: the gate's classifier and the
+lab's judge. Each makes a **one-off call**: a single turn with no tools, through the cheapest allowed harness
+and model at Low effort. A one-off call is not a driver and belongs to no agent. It is an event and a charge:
+the classifier's to the acting agent's lead or the project, the judge's to the lab line. Tests script both
+through the fake harness.
+
+**proposed** A harness logs in to its provider with a credential from the vault, like any other credential: the
+driver's environment holds a reference, and the proxy swaps it for the value on the provider's hosts only. The
+builder adds each provider's key or long-lived token to the vault once. M3 confirms what each harness accepts,
+and until M11 the real harnesses run with the builder's own login, outside any sandbox, in tests only.
 
 ## What lives outside a driver
 
@@ -231,6 +261,11 @@ agent's work when all of these hold:
 4. Its machine can run the agent's sandbox and is under its cap on live drivers. In v1 there is one machine.
 5. The lead's budget and the project's both allow it.
 
+Every turn needs a compatible driver, a further turn on a warm one included, so a budget that is reached stops
+the next turn, not only the next driver.
+
+**proposed** A worker has its parent's effort range unless the CEO sets one for it.
+
 The router first tries to find one: the agent's warm driver, if it is compatible. Failing that, it allocates
 one: it starts the cheapest compatible harness, model and effort level. The choice and its cost go in the log
 and the ledger. If nothing is compatible, the agent waits for a driver and its parent is told why. A change that
@@ -245,6 +280,12 @@ cool-off is a job.
 budget and one budget per lead, set by the CEO or by the builder. A driver's cost is charged to the lead at the
 top of its agent's branch of the tree, and the CEO's own drivers to the project. Before a driver starts, the
 router checks both the lead's budget and the project's.
+
+**proposed** A worker the CEO runs directly, with no lead above it, is charged to the project like the CEO.
+The cost of a turn is what its harness reports, or the tokens it reports at the model's listed price. Under a
+subscription login that figure is what the same work would cost at list price, not what the builder pays.
+When a lead reaches its budget the daemon puts a notice in the CEO's inbox, and when the project reaches its
+total the daemon posts the notice in the chat itself, since a CEO turn to say so could not be paid for.
 
 ## Reuse, compaction and retirement
 
@@ -270,7 +311,7 @@ router checks both the lead's budget and the project's.
   retiring loses nothing. A warm driver needs no extra turn for this: an idle agent has reported its task, and a
   waiting one wrote its progress note when it called `wait`.
 
-The thresholds are settings with defaults, measured and tuned in M16.
+The thresholds are settings with defaults, measured and tuned in M17.
 
 ## Handoff
 
@@ -290,14 +331,16 @@ reason, except for whether the old driver can help:
 **proposed** A handoff runs in this order:
 
 1. A planned handoff waits for the current turn to end, then gives the old driver one last turn, with a time
-   limit, to bring its progress note up to date and remember what it should. If that turn fails, the handoff
-   becomes a takeover.
+   limit, to bring its progress note up to date and remember what it should. The driver is in Handing off for
+   that turn. If the turn fails or runs out of time, the handoff becomes a takeover.
 2. The old driver is fenced off. It is marked Ended or Failed and stopped, with the command it was running in
    the foreground. Each driver reaches the daemon's tools at its own address, and the daemon refuses calls from
    any driver that is not the agent's current one, so a driver that is slow to die changes nothing.
 3. The worktree is checkpointed as it stands.
-4. The router finds a compatible driver as for any start, skipping a harness and model that already failed on
-   this task or are cooling off.
+4. The router finds a compatible driver as for any start, skipping any that are cooling off, and skipping a
+   harness and model whose driver already failed on this task. A driver the builder replaced or a daemon
+   restart ended does not count against its harness. If that skip leaves nothing compatible, it is dropped,
+   so the limit of three failures below is what ends the attempts.
 5. The new driver starts from the start pack, which says why the last one stopped and what was in flight: a
    daemon tool call, which the daemon finishes and whose result is in the pack, or a command, whose outcome is
    unknown.
@@ -313,8 +356,8 @@ untouched.
 trying and the task is reported failed to its delegator, with each failure.
 
 **proposed** Drivers are child processes of the daemon and do not outlive it. When the daemon restarts, every
-driver the log shows as live is marked Failed, warm ones are Ended, and every Working agent is taken over as
-above.
+driver the log shows as Starting, Running, Compacting or Handing off is marked Failed, warm ones are Ended,
+and every Working agent is taken over as above.
 
 ## Delegation, the inbox and waiting
 
@@ -327,8 +370,19 @@ to its own workers, starting a new one when needed. A report goes back to whoeve
 
 **proposed** `delegate` gives a task to one of the agent's children, or starts a new worker to take it. The
 task records the delegator, the assignee, what is asked, and the effort it needs. The assignee owns it until it
-reports. The delegator then accepts the report or sends the task back. Meanwhile the delegator carries on with
-other work, or waits for the report.
+reports. The delegator then calls `review` to accept the report or send the task back. Meanwhile the delegator
+carries on with other work, or waits for the report.
+
+**proposed** Accepting a task merges the assignee's branch into the delegator's branch. The merge is an action
+the gate can hold. If it conflicts, the task goes back to the assignee with the conflict stated. When a task is
+delegated to an agent that already exists, the delegator's branch is merged into the agent's first, so it
+starts from current work.
+
+**proposed** The builder delegates to the CEO. The brief opens a task delegated by the builder, and so does
+Reflect now. A later message from the builder is a message, and opens a new task for the CEO only if it has
+none open from the builder, so the CEO always works under a task with a progress note. The builder has no
+review step: a task the builder delegated is accepted when the CEO reports it, the report appears in the chat,
+and the CEO's branch is merged into the project's main branch, which the gate can hold.
 
 **proposed** Everything that can make an agent act reaches it through its **inbox**: a task delegated to it, a
 message, a report on a task it delegated, a reply from the builder, a decision on one of its held actions, a job
@@ -350,10 +404,17 @@ reported nor waited on is followed by another, which asks the agent to carry on,
 number of such turns in a row, the task is reported failed.
 
 **proposed** Agents act on the organisation through tools the daemon serves to each driver over MCP:
-`delegate`, `report`, `message`, `wait`, `schedule`, `cancel_job`, `raise_task`, `update_task`, `write_spec`,
-`add_file`, `load_skill`, `remember`. The CEO gets `form_team` and `set_effort` as well, and only the CEO can
+`delegate`, `review`, `report`, `message`, `wait`, `schedule`, `cancel_job`, `raise_task`, `update_task`,
+`write_spec`, `add_file`, `set_preview`, `load_skill`, `remember`. `update_task` carries the progress note and,
+where the agent can say, the share of the task that is done. The CEO gets `form_team`, `set_effort` and
+`set_budget` as well, and for reflection `read_log`, `read_memories` and `propose_change`. Only the CEO can
 `message` the builder. Waiting for the builder's answer is a wait on the reply. Every such call is an event.
 This is also where the gate sits: a tool call is an `Action`.
+
+**proposed** `form_team` names the leads, each with a role, a charter, an effort range and a budget. A lead it
+names is Planned until work reaches it. The first team needs no approval. In v1 any later change to the team
+(adding a lead, folding one into another, promoting a worker, retiring one) is always a held action, whatever
+the "Ask me about" level, and carries the telemetry that prompted it.
 
 **proposed** In v1 the gate covers the daemon's own tools, network egress, and a deny-list of commands
 enforced through a harness's permission hook where the provider has one. It does not ask about every shell
@@ -364,7 +425,8 @@ command an agent runs inside its sandbox: the sandbox is what contains those.
 **decided (owner, 2026-11-11)** The daemon runs scheduled jobs of its own. A job can wake an agent, and an agent
 can wait for one.
 
-**proposed** A job is a record in the project's log: who scheduled it, when it fires (once at a time, after a
+**proposed** A job is a record in its project's log, or in the daemon's log for a routine that belongs to no
+project, such as the end of a cool-off: who scheduled it, when it fires (once at a time, after a
 delay, or on a repeat), and what it does then. It does one of three things:
 
 - **Wake an agent** with a note, delivered to its inbox. An agent waiting on the job is woken by it, and an idle
@@ -389,8 +451,14 @@ A job firing costs nothing. The work it causes is charged as usual.
 
 ## Sandbox
 
-**proposed** One sandbox per agent, holding a git worktree of the project on its own branch. Work reaches the
-project by merging the branch, which the agent's parent requests and the gate can hold.
+**proposed** One sandbox per agent, holding a git worktree of the project on its own branch, which starts
+from its parent's branch, or from the project's main branch for the CEO. Work reaches the project by merging
+branches up the tree as tasks are accepted, as "Delegation, the inbox and waiting" describes.
+
+**proposed** A sandbox has no network of its own. The backend maps two endpoints into it: the vault's proxy,
+and the driver's own address for the daemon's tools. How each is mapped is the backend's business (a Unix
+socket under bubblewrap, a host port with a per-driver token for containers), and M10 confirms it first. Until
+M10 an agent's sandbox is a plain worktree with no isolation, which is enough for the fake harness.
 
 **proposed** The sandbox belongs to the agent, not to a driver. Every driver the agent has runs in it, so a
 driver that takes over finds the files as the last one left them. Processes the last driver started in the
@@ -413,6 +481,7 @@ command in one, and the overhead on a build, for each backend.
 MicroVMs are out of scope for v1.
 
 Network: sandboxes reach the outside only through the vault's proxy. That is what makes the next section true.
+A harness's own traffic to its provider takes the same route.
 
 ## Vault and auth proxy
 
@@ -420,6 +489,14 @@ Network: sandboxes reach the outside only through the vault's proxy. That is wha
 An agent sees names such as `ref_7f3a`. The sandbox's only route out is an HTTP proxy run by the daemon, which
 replaces references in outbound requests with values for hosts the credential is allowed to reach. Everything
 a driver emits is scanned for known values before it is stored or shown. Every use is an event.
+
+**proposed** To see inside HTTPS requests the proxy ends TLS itself, with a certificate authority the daemon
+creates and only sandboxes trust. Where there is no OS keychain, as on a Linux machine or WSL without a secret
+service, the vault's key is a file only the builder's user can read, and the first-run guide says so.
+
+**proposed** The builder manages credentials from a Credentials part of Settings: add one, limit its hosts,
+name the commands that may receive it, and choose which projects may use it. A value goes from the client to
+the daemon once and is never sent back.
 
 Known limit to state plainly in the docs: command-line tools that need a credential in their environment
 (for example a deploy tool) cannot be served by an HTTP proxy alone. For those, a wrapper run by the daemon
@@ -436,7 +513,7 @@ output, including encoded forms. Its limits:
 
 **proposed** Two stages. Rules first: a table from action kind and target to a risk level (delete data, deploy
 to production, spend, send to people outside, change credentials, force-push). Then, for actions the rules do
-not cover, a small model classifies. The builder's "Ask me about" level is compared with the result. Held
+not cover, a small model classifies, through a one-off call. The builder's "Ask me about" level is compared with the result. Held
 actions are events; the app shows them; approval or denial is an event the orchestrator resumes on.
 
 **proposed** A held action does not hold up a driver. The agent is told the action is held and can wait on the
@@ -455,7 +532,14 @@ reaches the agent even if its driver has changed meanwhile.
   skills/<name>/SKILL.md            shared in the project
   specs/BRD.md  PRD.md  ADD.md
   team.toml                         the team, written from the event log for people to read
+  store.sqlite                      the project's event log and transcripts
+  files/                            attachments and generated files, by content hash
+  worktrees/<agent-id>/             each agent's worktree
 ```
+
+A project is a directory holding a git repository. Creating a project in a directory without one starts one.
+`.x100/` is excluded from the project's own repository. The specs and `team.toml` there are written from the
+event log.
 
 Skills use the Agent Skills `SKILL.md` layout so that providers' agents can load them unchanged. Versions are
 git history plus a `version` field. Reflect now gives the CEO a reflection task: the event log for a span of
@@ -508,15 +592,22 @@ same work twice with two teams.
 
 ## Store
 
-**proposed** SQLite per project for the event log and the agents' transcripts, beside the project's files.
-Attachments and generated files in a content-addressed directory. The app's own settings in the user's config
-directory.
+**proposed** SQLite per project for the event log and the agents' transcripts, in the project's `.x100/`.
+Attachments and generated files in a content-addressed directory beside it. What belongs to the daemon and not
+to a project (machines, harnesses and their cool-offs, credentials, the list of projects, and the jobs for the
+daemon's own routines) is in a daemon log of the same form in the user's data directory, with the vault and
+the app's own settings.
+
+**proposed** A client that finds no daemon on the socket starts one. The daemon keeps running when its clients
+close.
 
 ## Protocol
 
-**proposed** JSON-RPC over a Unix domain socket, with one subscription that streams
-events after a given sequence number. A client starts by asking for a snapshot, then follows the stream. The
-same protocol goes over a network transport later for other devices. The resources it serves are listed in the
+**proposed** JSON-RPC over a Unix domain socket. One event subscription covers the daemon's log and every
+project's, with a sequence number per log, so the sidebar can show every project live. A client starts by
+asking for a snapshot, then follows the stream after the sequence numbers the snapshot gave. An agent's
+transcript is too large for the event log and is followed by a subscription of its own, opened when its view
+is. The same protocol goes over a network transport later for other devices. The resources it serves are listed in the
 next section.
 
 ## API resources
@@ -530,8 +621,8 @@ written as paths here. The first four belong to the daemon, the rest to one proj
 | `/machines/` | Computers or VMs that run drivers, each with the harnesses on it and its cap on live drivers. v1 has one. |
 | `/harnesses/` | Agent programs x100 runs as drivers, with what each supports and its models at each effort level and price. |
 | `/credentials/` | Credentials by reference: the hosts each may reach, the commands that may receive it, the projects that may use it. Values go in and never come out. |
-| `/projects/` | Projects, with the sidebar's live state and agent count, and each project's settings: Ask me about, total budget, allowed harnesses and models. |
-| `/events` | The subscription: a snapshot, then every later event. The Log tab is this stream, rendered. |
+| `/projects/` | Projects, with the sidebar's live state and agent count, each project's settings (Ask me about, total budget, allowed harnesses and models), and the address of its development build. |
+| `/events` | The subscription: a snapshot, then every later event, from the daemon's log and each project's. The Log tab is a project's part of this stream, rendered. |
 | `/agents/` | The team: role, parent, charter, effort range, a lead's budget, sandbox, state, current task, current driver. |
 | `/agents/{id}/inbox` | What has been delivered to the agent and not yet handled. |
 | `/agents/{id}/waits` | What the agent is waiting for, each with its deadline. |
@@ -544,29 +635,19 @@ written as paths here. The first four belong to the daemon, the rest to one proj
 | `/specs/` | BRD, PRD and ADD, with author, revision and status. |
 | `/files/` | Files the project holds outside the code, chat attachments included. |
 | `/ledger/` | Every charge: driver, agent, lead, tokens, cost. With the budgets on projects and leads, it makes the Budget tab. |
-| `/memories/` | Each agent's notes. |
-| `/skills/` | Shared and per-agent skills, with versions. |
+| `/memories/` | Each agent's notes. Read-only in the agent's view. |
+| `/skills/` | Shared and per-agent skills, with versions. Read-only in the agent's view. |
 | `/trials/` | Reflection's tests: the proposed change, the eval set, both arms' runs and scores, the verdict and the decision. |
 
-Agents reach the same resources through their tools: `delegate`, `raise_task`, `update_task` and `report` act
-on `/tasks/`; `message` on `/messages/`; `wait` on an agent's waits; `schedule` and `cancel_job` on `/jobs/`;
-`write_spec` on `/specs/`; `add_file` on `/files/`; `remember` on `/memories/`; `load_skill` on `/skills/`; and
-the CEO's `form_team` and `set_effort` on `/agents/`. Every tool call is also an entry in `/actions/`.
+Agents reach the same resources through their tools: `delegate`, `review`, `raise_task`, `update_task` and
+`report` act on `/tasks/`; `message` on `/messages/`; `wait` on an agent's waits; `schedule` and `cancel_job`
+on `/jobs/`; `write_spec` on `/specs/`; `add_file` on `/files/`; `set_preview` on `/projects/`; `remember` and
+the CEO's `read_memories` on `/memories/`; `load_skill` on `/skills/`; the CEO's `form_team`, `set_effort` and
+`set_budget` on `/agents/`; its `read_log` on `/events`; and its `propose_change` on `/trials/`. Every tool
+call is also an entry in `/actions/`.
 
 Later, not v1: devices, for more than one device on a project; apps and their deployed versions, for the
 Preview selectors; and the Infra map's providers and services.
-
-**Still missing.** The design implies these but does not settle them. Each has a proposed default:
-
-- **Credentials in the product.** The vault is designed, but nothing lets the builder add a credential, limit
-  its hosts, name the commands that may receive it, or choose which projects use it. Proposed: `/credentials/`
-  on the daemon as above, granted per project, managed from a Credentials part of Settings.
-- **Where the Preview link comes from.** Nothing says how the daemon learns the address of the development
-  build. Proposed: a field of `/projects/` that agents set with a tool.
-- **Following every project at once.** The subscription follows one project's log, but the sidebar shows every
-  project live. Proposed: one subscription with a cursor per project.
-- **Memories and skills in the interface.** Reflection changes them, but no view shows them to the builder.
-  Proposed: read-only in the agent's view.
 
 **Not resources of their own.** Each of these looks like one, and another already covers it:
 
@@ -655,10 +736,16 @@ None of these blocks work. Each is built as written unless the owner says otherw
 9. After three driver failures in a row on one task, the task is reported failed to its delegator.
 10. A compatible driver only has to meet the task's effort, so a takeover may run at a lower effort level than
     the driver it replaces when the task needs no more.
-
 11. A trial runs each arm three times, and a change needs to be no worse on every check and at least a tenth
     better on one measure to be committed.
 12. The lab's cap is a tenth of the project budget.
 13. Team changes are not put on trial in v1.
+14. Accepting a task merges the assignee's branch into its delegator's, and the CEO's report merges its branch
+    into the project's main branch.
+15. After the first team, every change to the team is held for the builder in v1.
+16. Budgets count cost at list price, also under a subscription login.
+17. A harness's provider login is a vault credential the builder adds once. x100 does not read a harness's own
+    login files.
+18. Without an OS keychain the vault's key is a file only the builder's user can read.
 
 One question is left for V2: whether a relay run by the x100 project is acceptable for phones.

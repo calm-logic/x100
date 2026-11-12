@@ -48,6 +48,9 @@ engine, theming.
   `cargo build`, `cargo test`, `cargo clippy -- -D warnings` and `cargo fmt --check` for the whole workspace,
   before the next milestone starts.
 - One subagent at a time, except for the pairs marked parallel, which own disjoint crates.
+- A milestone whose crate the daemon must call also owns the calls to it in `x100-orch` and `x100d`. Where its
+  parallel partner owns one of those crates, that wiring is a short step of its own after both are accepted,
+  and the milestone's check is run again through the daemon.
 - Opus where the table says so. Sonnet for the rest.
 - Everything is testable without a paid model: the scripted fake harness from M3 stands in for real ones, and
   the fake clock from M1 stands in for time. Tests that call a real provider run only when asked for.
@@ -62,7 +65,7 @@ engine, theming.
 | M2 | Store and protocol | `x100-store`, `x100-proto` | M1 | Sonnet |
 | M3 | Drivers and harnesses | `x100-drivers` | M1 | Opus |
 | M4 | Jobs and the clock | `x100-jobs` | M2 | Sonnet |
-| M5 | Daemon and client library | `x100d`, `x100-client` | M2, M3, M4 | Sonnet |
+| M5 | Daemon and client library | `x100d`, `x100-client`, the turn loop in `x100-orch` | M2, M3, M4 | Sonnet |
 | M6 | Orchestration: agents, delegation and waiting | `x100-orch` | M5 | Opus |
 | M7 | Terminal interface | `x100-tui` | M6 | Sonnet |
 | M8 | Router, budgets and driver reuse | `x100-router` | M6 | Opus |
@@ -101,7 +104,7 @@ of the three. If the report says GPUI cannot carry the app, stop and bring that 
 ### M1. Domain, events and state machines
 
 All domain types, ids and events, agents and drivers among them. The functions that fold events into the state
-each tab shows, so that the store and every client compute it with the same code. The five state machines as
+each tab shows, so that the store and every client compute it with the same code. The six state machines as
 pure functions `next(state, event) -> Result`. The `Clock` trait and a fake clock that tests move by hand. No
 I/O.
 
@@ -150,11 +153,13 @@ over random schedules, cancels, restarts and clock moves hold the job invariants
 
 `x100d` serving the protocol on a local socket, surviving its clients and restarting cleanly from the store,
 with the job clock running inside it. `x100-client`: connect, take a snapshot, follow events, send requests, and
-hold the state each tab draws from.
+hold the state each tab draws from. The turn loop in `x100-orch`, which M6 builds on: an inbox item starts a
+driver in the agent's worktree, the driver's turn is recorded, and its reply is an event.
 
 Check: an integration test starts the daemon, creates a project and sends a message through the client library
 with the fake harness, and sees the reply arrive as events. Restarting the daemon while a driver is running
-marks every driver that was live as Failed, with the reason, and never leaves one in a live state.
+marks every driver that was mid-turn as Failed, with the reason, ends every warm one, and never leaves one in
+a live state.
 
 ### M6. Orchestration: agents, delegation and waiting
 
@@ -177,7 +182,8 @@ resumes on a new driver started from its start pack, with its progress note.
 ### M7. Terminal interface
 
 A full client in the terminal: projects, the first-run brief, chat with the CEO, all the tabs, the drivers list,
-opening an agent to watch its live output, its waits and jobs, held actions with approve and deny, settings. It
+opening an agent to watch its live output, its waits and jobs, its memories, skills and trials, held actions
+with approve and deny, settings and credentials. It
 also runs single commands without the full screen, for scripts and tests: create a project, send a message,
 follow the log.
 
@@ -205,7 +211,7 @@ harness and model that fail with a provider error are skipped until their cool-o
 
 Handoff between drivers as `ARCHITECTURE.md` describes. Takeover when a driver fails, when the builder replaces
 it, and after a daemon restart. Planned handoff when the context fills mid-task, when the task's effort changes,
-and when the builder disallows the driver's harness or model. Fencing, so the daemon refuses calls from any
+and when the builder disallows the driver's harness or model or narrows the agent's range below it. Fencing, so the daemon refuses calls from any
 driver but the agent's current one. A checkpoint at every turn end. A start pack that says why the last driver
 stopped and what was in flight. The limit of three failures in a row.
 
@@ -294,7 +300,8 @@ project. A screenshot matches the layout of the page's mock.
 
 ### M16. Desktop app: remaining tabs
 
-Specs, Tasks, Files, Budget, Log, Settings, the Preview link, and held actions with Approve and Deny.
+Specs, Tasks, Files, Budget, Log, Settings with its Credentials part, the Preview link, an agent's memories,
+skills and trials in its view, and held actions with Approve and Deny.
 
 Check: each tab matches the state the client library holds for the M6 script. Removing a file logs it.
 Changing an effort range, a lead's budget or the allowed harnesses and models reaches the router. Approving a

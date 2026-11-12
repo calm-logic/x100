@@ -182,6 +182,8 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 - **v1** Harnesses and models x100 may use: a list the builder turns on and off. Turning one off hands the work
   of any driver using it to another driver.
 - **v1** An effort range per lead, set by the CEO and adjustable by the builder.
+- **v1** Credentials: add one, limit the hosts it may reach and the commands that may receive it, and choose
+  which projects may use it. A value can be entered and replaced, never read back.
 - **later** Reflection schedule: every 6 hours, daily, or off.
 
 ### Bring your own tools, agents, stack, O/S
