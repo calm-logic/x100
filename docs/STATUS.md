@@ -35,12 +35,18 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   checkpoint of a worktree with staged, unstaged, untracked, deleted and executable files restores the same
   files without moving the branch or index. Git is the command line, SQLite is rusqlite bundled. 37 protocol
   methods, each checked against `crates/x100-proto/PROTOCOL.md` by a test.
-- **M4, jobs and the clock.** The orchestrator's run with `-p x100-jobs`: 19 tests pass, clippy and rustfmt
-  clean, and the real-clock test passed five times in a row. On the fake clock a one-off job fires once at its
-  time, a repeat fires at each interval, a cancelled job never fires, and a job due across a restart fires
-  once. Property tests over random schedules, cancels, restarts and clock moves hold the job invariants
-  against a real store. **Owed:** the four workspace-wide commands, which could not run while M3 was mid-edit
-  in `x100-drivers`. They are run when M3 is accepted.
+- **M4, jobs and the clock.** 19 tests. On the fake clock a one-off job fires once at its time, a repeat fires
+  at each interval, a cancelled job never fires, and a job due across a restart fires once. Property tests
+  over random schedules, cancels, restarts and clock moves hold the job invariants against a real store.
+- **M3, drivers and harnesses, except its paid check.** 31 tests. The fake harness replays a script
+  deterministically, poses as two providers, and is reported Failed with the reason when told to crash, and
+  when told to stall only once the timeout passes on the fake clock. The real Claude Code 2.1.322 and Codex
+  0.167.1 binaries, against a fake provider on localhost: each edits a file, reports usage, keeps context on a
+  second turn, compacts, asks before a command, is stopped with nothing left running, and reports 401, 429,
+  500 and 529 as the right provider failure. **Not run:** "when asked to, each real harness completes a
+  one-file edit" against a real provider. The tests exist and are ignored by default.
+- **Whole workspace after M3 and M4**, the orchestrator's run, twice: 197 tests pass, 0 fail. Build, clippy
+  with warnings denied and fmt are clean. No harness process was left running.
 
 ## In progress
 
@@ -52,9 +58,10 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 ## Waiting on the owner
 
 1. **Pushing.** Asked once M0 is accepted. Until then everything is local.
-2. **Real-provider runs.** None made yet. M3 needs about six short runs per harness on the cheapest models
-   (Haiku 5.5, gpt-6-luna at low effort), each under about a cent: roughly 25 cents in all with retries. They
-   need an Anthropic API key and an OpenAI API key in the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
+2. **Real-provider runs.** None made yet. M3's paid check is 6 to 8 model calls in all on the cheapest models
+   (Haiku 5.5, gpt-6-luna at low effort), a few cents. It needs `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in the
+   environment, and runs with
+   `X100_REAL_PROVIDERS=1 cargo test -p x100-drivers --test real_providers -- --ignored --test-threads=1`.
    The orchestrator does not read key files. M9 and M17 need more, counted when they come.
 5. **Subscription logins.** v1 supports provider API keys only, see decisions. Say if a Claude or ChatGPT
    subscription must work in v1.
@@ -127,6 +134,14 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Warm period** follows each model's cache lifetime, not one setting.
 - **Retries and compaction.** Harnesses' own retries are set low and their automatic compaction is off.
 - **Codex** is driven through `codex app-server`, not `codex exec`.
+
+From M2 to M4:
+
+- **A flaky test in M2, fixed by the orchestrator.** Under load the kill test's helper was killed before its
+  first commit, and the test demanded one. It was a wrong assertion, not lost data: the message was "reported
+  event 0, stored 0". The first round now waits for one commit. It then passed six runs with every core busy.
+- **Codex approvals** are asked for on the thread, not in its config file, and a denial carries no reason.
+- **The minimum repeat** is passed to the scheduler by the daemon, since a project's log does not hold it.
 
 From M1b:
 

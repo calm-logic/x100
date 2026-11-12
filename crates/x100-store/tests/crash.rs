@@ -58,14 +58,16 @@ fn every_event_and_entry_a_killed_writer_reported_is_there_after_reopening() {
             }
         });
 
-        // Let it run for a random time, long enough to open and write some, then kill it.
+        // The first round waits for one committed event, so there is a project to reopen however
+        // slow the machine is. Later rounds may kill the child while it is still opening.
+        let first = (round == 0).then(|| rx.recv().unwrap());
         thread::sleep(Duration::from_millis(40 + rng.next() % 200));
         child.kill().unwrap();
         child.wait().unwrap();
         reader.join().unwrap();
 
         let (mut event, mut entry) = (last_event, last_entry);
-        for line in rx.try_iter() {
+        for line in first.into_iter().chain(rx.try_iter()) {
             let (kind, n) = line.split_once(' ').unwrap();
             let n: u64 = n.parse().unwrap();
             match kind {

@@ -23,7 +23,7 @@ unknowns are what M3's real runs settle. Delete this file's unknowns as they are
 - **Compaction.** Send `/compact` as a user message. It auto-compacts unless `DISABLE_AUTO_COMPACT=1`. (docs)
 - **Permission hook.** `--permission-prompt-tool stdio` sends each call needing approval as a `can_use_tool`
   control request, answered allow or deny. The turn pauses while it is pending. Calls a rule already allows
-  never reach it. Whether it works under `--bare` is unknown.
+  never reach it. It works under `--bare` (settled against the fake provider).
 - **MCP for one run.** `--mcp-config <file-or-json> --strict-mcp-config`. Server types: stdio, http, sse, ws.
   No Unix socket. Tools appear as `mcp__x100__<tool>`.
 - **Model and effort.** `--model`, `--effort low|medium|high|xhigh|max`. `CLAUDE_CODE_EFFORT_LEVEL` overrides
@@ -60,8 +60,9 @@ unknowns are what M3's real runs settle. Delete this file's unknowns as they are
 - **Further turns.** Yes: `turn/start` again on the thread. `turn/interrupt` cancels.
 - **Cost and context.** Tokens only, no cost, so x100 prices them. `modelContextWindow` gives the window.
 - **Compaction.** `thread/compact/start`. Auto-compaction is set by `model_auto_compact_token_limit`.
-- **Permission hook.** `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`. Whether
-  they fire at all once Codex's own sandbox is off (`danger-full-access`) is unknown, so treat it as partial.
+- **Permission hook.** `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`. With
+  Codex's own sandbox off they fire only when `approvalPolicy: "untrusted"` is sent on `thread/start`. The
+  config file refuses that value. A denial is `decline` and carries no reason.
 - **MCP for one run.** `-c mcp_servers.x100.url=...` with `bearer_token_env_var`, or a per-driver `CODEX_HOME`.
   stdio and HTTP. No Unix socket. Tool timeout defaults to 60 seconds.
 - **Model and effort.** On `thread/start` and `turn/start`. Efforts low to max, plus `ultra`, which starts
@@ -73,11 +74,31 @@ unknowns are what M3's real runs settle. Delete this file's unknowns as they are
   `error{willRetry:true}` means it is still retrying.
 - **Login.** Cleanest for a placeholder: a custom provider in `config.toml` with `base_url` and `env_key`.
   ChatGPT login is OAuth with refresh, not a static token.
-- **Proxy.** `CODEX_CA_CERTIFICATE` for the authority. Whether it honours `HTTPS_PROXY` is unknown.
+- **Proxy.** `CODEX_CA_CERTIFICATE` for the authority. It honours `HTTPS_PROXY`. With its optional features
+  on it reaches for chatgpt.com and github.com. With x100's list turned off it reaches for nothing else.
 - **Isolation.** A per-driver `CODEX_HOME` with a config x100 writes, `project_doc_max_bytes=0`,
   `sandbox_mode="danger-full-access"`, `approval_policy="never"`, `check_for_update_on_startup=false`.
 - **Prices per million tokens** (docs): astra 10 in, 50 out. 6.1-sol 2 and 10. 6.1-terra 1 and 5. luna 0.10 and
   0.50. About double above 272K tokens of input.
+
+## Settled by M3 against a local fake provider
+
+The real binaries, run with a dummy key and their base URL on localhost. No provider was called.
+
+- Further turns keep context, and compaction on request works, for both.
+- Stopping either leaves nothing in its process group, a command running in Codex's PTY included.
+- The key reaches the provider as `x-api-key` (Claude Code) and `Authorization: Bearer` (Codex).
+- Failures, with each harness's own retries set to 1. Claude Code: 401 `authentication_failed`, 429
+  `rate_limit`, 500 and 529 `server_error`. Codex: 401 `httpConnectionFailed{401}`, 429
+  `responseTooManyFailedAttempts{429}`, 500 `internalServerError`, 529 `httpConnectionFailed{529}`, so Codex is
+  classified by the HTTP status inside the variant.
+- Claude Code under `--bare` has only Bash, Edit and Read. Its reported cost matches the price table for
+  Haiku 5.5.
+- Codex on gpt-6-luna gives the model one free-form `exec` tool that runs JavaScript, through which it reaches
+  commands, patches and MCP tools. It reports a window of 258,400 tokens.
+
+Still unknown: the certificate-authority settings (they need M11's proxy), reaping of stdio MCP children (x100
+uses HTTP MCP), and everything on the paid list below.
 
 ## Neither speaks ACP
 
