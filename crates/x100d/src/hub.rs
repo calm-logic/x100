@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use x100_core::event::{DaemonEvent, ProjectEvent};
-use x100_core::fold::ProjectState;
+use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::ProjectId;
 use x100_core::time::Clock;
 use x100_jobs::Scheduler;
@@ -38,6 +38,8 @@ pub struct Hub {
     tasks: Mutex<Vec<JoinHandle<()>>>,
     /// One per project, so a job scheduled through it wakes the clock that fires it.
     schedulers: Mutex<BTreeMap<ProjectId, Scheduler<ProjectState>>>,
+    /// The daemon log's, kept for `daemon.set_clock` on a fake clock.
+    daemon_jobs: Mutex<Option<Scheduler<DaemonState>>>,
 }
 
 /// A subscription's logs, registered together with the snapshot or the cursor's events.
@@ -59,18 +61,23 @@ impl Hub {
             projects: Mutex::new(Projects::default()),
             tasks: Mutex::new(Vec::new()),
             schedulers: Mutex::new(BTreeMap::new()),
+            daemon_jobs: Mutex::new(None),
         }
     }
 
-    /// Starts what runs for a project: its turn loop and its job clock.
+    /// Starts what runs for a project: its turn loop and its job clock. On a fake clock there is
+    /// no job clock to run: `daemon.set_clock` fires what falls due.
     pub fn start_project(&self, id: ProjectId, store: ProjectStore) {
-        self.orch.attach(id, store.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let scheduler = Scheduler::new(store.log.clone(), Arc::clone(&self.clock));
+        self.orch.attach(id, store.clone(), scheduler.clone());
         self.schedulers
             .lock()
             .expect("schedulers lock")
             .insert(id, scheduler.clone());
+        if self.config.fake_clock.is_some() {
+            return;
+        }
         let clock_task = tokio::spawn(async move {
             if let Err(e) = scheduler.run(tx).await {
                 eprintln!("x100d: the job clock of project {id} stopped: {e}");
@@ -95,6 +102,10 @@ impl Hub {
     pub fn start_daemon_jobs(&self) {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let scheduler = Scheduler::new(self.log.clone(), Arc::clone(&self.clock));
+        if self.config.fake_clock.is_some() {
+            *self.daemon_jobs.lock().expect("daemon jobs lock") = Some(scheduler);
+            return;
+        }
         let clock_task = tokio::spawn(async move {
             if let Err(e) = scheduler.run(tx).await {
                 eprintln!("x100d: the daemon's job clock stopped: {e}");
@@ -105,6 +116,21 @@ impl Hub {
             .lock()
             .expect("tasks lock")
             .extend([clock_task, feed]);
+    }
+
+    /// Every project's job clock.
+    pub fn schedulers(&self) -> Vec<(ProjectId, Scheduler<ProjectState>)> {
+        self.schedulers
+            .lock()
+            .expect("schedulers lock")
+            .iter()
+            .map(|(id, s)| (*id, s.clone()))
+            .collect()
+    }
+
+    /// The daemon log's job clock, which the daemon keeps only on a fake clock.
+    pub fn daemon_jobs(&self) -> Option<Scheduler<DaemonState>> {
+        self.daemon_jobs.lock().expect("daemon jobs lock").clone()
     }
 
     pub fn scheduler(&self, id: ProjectId) -> Option<Scheduler<ProjectState>> {

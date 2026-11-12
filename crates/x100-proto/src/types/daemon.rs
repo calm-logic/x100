@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use x100_core::credential::CredentialScope;
 use x100_core::id::{CredentialRef, HarnessId, MachineId};
 use x100_core::settings::DaemonSetting;
+use x100_core::time::Timestamp;
 
 use crate::secret::{self, Secret};
 
@@ -47,6 +48,12 @@ pub struct Rescanned {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetDaemonSetting {
     pub setting: DaemonSetting,
+}
+
+/// Moves a daemon's fake clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetClock {
+    pub at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

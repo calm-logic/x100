@@ -1,6 +1,6 @@
 //! `message`, `wait`, `schedule` and `cancel_job`.
 
-use x100_core::agent::{AgentEvent, AgentState};
+use x100_core::agent::AgentEvent;
 use x100_core::event::ProjectEvent;
 use x100_core::id::{FileId, JobId, MessageId, TaskId, WaitId};
 use x100_core::inbox::InboxItem;
@@ -72,11 +72,6 @@ pub(super) fn wait(
 ) -> Result<Plan, Refusal> {
     let me = at.id();
     at.held_task(task)?;
-    if at.me.state != AgentState::Working {
-        return Err(
-            "you are waiting already: a turn opens one wait, and anything new wakes you".into(),
-        );
-    }
     check_waitable(at, on)?;
     let now = at.ctx.now;
     let deadline = deadline.unwrap_or(now + at.ctx.settings.default_wait_deadline);

@@ -45,7 +45,8 @@ async fn a_message_to_the_ceo_is_answered_as_events() {
     assert_eq!(
         reply.message.body,
         format!(
-            "heard: Message {} from the builder:\nping\nYour task for the builder: {task}",
+            "heard: A message from the builder.\nMessage: {}\nFrom: builder\nTask for the \
+             builder: {task}\nping\n\n---\n\nCurrent task: {task}",
             sent.message
         )
     );
@@ -403,10 +404,14 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
         got.push(next);
     }
     let positions: Vec<u64> = got.iter().map(|(p, _)| p.0).collect();
-    assert_eq!(positions, [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(positions, [1, 2, 3, 4, 5, 6, 7, 8]);
     let kinds: Vec<&str> = got
         .iter()
         .map(|(_, e)| match &e.item {
+            Item::StartPack { text } => {
+                assert!(text.starts_with("ROLE: CEO\n"), "{text}");
+                "start_pack"
+            }
             Item::DriverChanged { from: None } => "driver_changed",
             Item::TurnStarted => "turn_started",
             Item::Text { .. } => "text",
@@ -423,6 +428,7 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
     assert_eq!(
         kinds,
         [
+            "start_pack",
             "driver_changed",
             "turn_started",
             "text",
@@ -442,7 +448,7 @@ async fn the_transcript_subscription_delivers_a_turns_entries_in_order() {
         })
         .await
         .unwrap();
-    assert_eq!(page.entries.len(), 7);
+    assert_eq!(page.entries.len(), 8);
     daemon.terminate();
 }
 

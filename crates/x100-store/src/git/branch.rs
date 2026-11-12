@@ -49,6 +49,27 @@ impl Git {
         run(&self.project, ["worktree", "remove", "--force", &p], &[]).map(drop)
     }
 
+    /// Commits everything in `worktree` (staged, unstaged and untracked changes, deletions,
+    /// modes) to the branch it has checked out, so a merge of that branch carries it. Returns the
+    /// new commit, or `None` when there was nothing to commit. Ignored files are left out, as git
+    /// leaves them out.
+    pub fn commit(&self, worktree: &Path, message: &str) -> Result<Option<CommitId>> {
+        run(worktree, ["add", "-A"], &[])?;
+        let staged = run_raw(worktree, ["diff", "--cached", "--quiet"], &[])?;
+        match staged.status.code() {
+            Some(0) => return Ok(None),
+            Some(1) => {}
+            _ => {
+                return Err(Error::Git {
+                    args: "diff --cached --quiet".into(),
+                    stderr: String::from_utf8_lossy(&staged.stderr).trim().to_owned(),
+                });
+            }
+        }
+        run(worktree, ["commit", "-q", "-m", message], &[])?;
+        out(worktree, ["rev-parse", "HEAD"], &[]).map(|c| Some(CommitId(c)))
+    }
+
     /// Merges branch `from` into whatever branch `into` (a worktree, or the project directory) has
     /// checked out. A merge needs a checked-out target, and x100 keeps every branch in one.
     pub fn merge(&self, into: &Path, from: &str) -> Result<MergeOutcome> {

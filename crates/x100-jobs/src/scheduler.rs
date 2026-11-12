@@ -107,6 +107,13 @@ impl<S: JobHost> Scheduler<S> {
         Ok(())
     }
 
+    /// Tells the runner the jobs changed, for a job appended to the log other than through
+    /// [`Scheduler::schedule`], such as in one batch with other events. Without it the runner
+    /// notices such a job only at its next look at the clock, which may be [`LONGEST_SLEEP`] away.
+    pub fn wake(&self) {
+        self.changed.notify_one();
+    }
+
     /// When the next job falls due, or `None` with nothing scheduled. May be in the past.
     pub fn next_due(&self) -> Option<Timestamp> {
         self.log.with_state(|s| step::next_due(states(s)))

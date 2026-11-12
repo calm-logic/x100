@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use x100_core::time::Clock;
+use x100_core::time::{Clock, FakeClock, Timestamp};
 use x100_jobs::SystemClock;
 
 /// The most a client may send on one line. A file travels as base64 in one request, so this is
@@ -36,6 +36,10 @@ pub struct Config {
     /// How long a connection's queue may stay full before its subscription is cut off.
     pub lag_after: std::time::Duration,
     pub clock: Arc<dyn Clock>,
+    /// Set by `--fake-clock`: `clock` is this one, which moves only by `daemon.set_clock`, and
+    /// each project runs one turn at a time, so a run of fake-harness scripts is the same every
+    /// time. For tests and scripted runs.
+    pub fake_clock: Option<FakeClock>,
 }
 
 impl Config {
@@ -48,6 +52,7 @@ impl Config {
             queue_capacity: QUEUE_CAPACITY,
             lag_after: LAG_AFTER,
             clock: Arc::new(SystemClock),
+            fake_clock: None,
         }
     }
 
@@ -56,32 +61,54 @@ impl Config {
     }
 
     /// From `--data-dir`, `--scripts-dir` and `--fake-harness` arguments, each of which falls back to
-    /// its environment variable. The data directory then falls back to the user's data directory.
+    /// its environment variable, and `--fake-clock`. The data directory then falls back to the
+    /// user's data directory.
     pub fn from_args(
         args: impl IntoIterator<Item = OsString>,
         env: impl Fn(&str) -> Option<OsString>,
     ) -> Result<Self, String> {
-        let (mut data, mut scripts, mut fake) = (None, None, None);
+        let (mut data, mut scripts, mut fake, mut clock) = (None, None, None, None);
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let slot = match arg.to_str() {
                 Some("--data-dir") => &mut data,
                 Some("--scripts-dir") => &mut scripts,
                 Some("--fake-harness") => &mut fake,
+                Some("--fake-clock") => &mut clock,
                 _ => return Err(format!("unknown argument {arg:?}")),
             };
             let value = args
                 .next()
                 .ok_or_else(|| format!("{arg:?} needs a value"))?;
-            *slot = Some(PathBuf::from(value));
+            *slot = Some(value);
         }
         let data_dir = data
+            .map(PathBuf::from)
             .or_else(|| env(DATA_DIR_ENV).map(PathBuf::from))
             .or_else(default_data_dir)
             .ok_or("no data directory: set --data-dir or X100_DATA_DIR")?;
         let mut config = Config::new(data_dir);
-        config.scripts_dir = scripts.or_else(|| env(SCRIPTS_ENV).map(PathBuf::from));
-        config.fake_program = fake.or_else(|| env(FAKE_PROGRAM_ENV).map(PathBuf::from));
+        config.scripts_dir = scripts
+            .map(PathBuf::from)
+            .or_else(|| env(SCRIPTS_ENV).map(PathBuf::from));
+        config.fake_program = fake
+            .map(PathBuf::from)
+            .or_else(|| env(FAKE_PROGRAM_ENV).map(PathBuf::from));
+        if let Some(start) = clock {
+            // A real harness bills real time, so only scripted ones run on a fake clock.
+            if config.scripts_dir.is_none() {
+                return Err(
+                    "--fake-clock needs --scripts-dir: only fake harnesses run on it".into(),
+                );
+            }
+            let start: u64 = start
+                .to_str()
+                .and_then(|s| s.parse().ok())
+                .ok_or("--fake-clock needs a time in milliseconds since 1970")?;
+            let fake = FakeClock::new(Timestamp::from_millis(start));
+            config.clock = Arc::new(fake.clone());
+            config.fake_clock = Some(fake);
+        }
         Ok(config)
     }
 }
@@ -127,6 +154,38 @@ mod tests {
         let env = |k: &str| (k == SCRIPTS_ENV).then(|| OsString::from("/e"));
         let c = Config::from_args(["--data-dir".into(), "/d".into()], env).unwrap();
         assert_eq!(c.scripts_dir, Some(PathBuf::from("/e")));
+    }
+
+    #[test]
+    fn a_fake_clock_starts_where_it_is_told_and_only_with_fake_harnesses() {
+        let args = |extra: &[&str]| -> Vec<OsString> {
+            ["--data-dir", "/d"]
+                .iter()
+                .chain(extra)
+                .map(OsString::from)
+                .collect()
+        };
+        let c = Config::from_args(
+            args(&["--scripts-dir", "/s", "--fake-clock", "1794387600000"]),
+            no_env,
+        )
+        .unwrap();
+        assert_eq!(c.clock.now(), Timestamp::from_millis(1_794_387_600_000));
+        assert!(c.fake_clock.is_some());
+        assert!(Config::from_args(args(&["--fake-clock", "1794387600000"]), no_env).is_err());
+        assert!(
+            Config::from_args(
+                args(&["--scripts-dir", "/s", "--fake-clock", "soon"]),
+                no_env
+            )
+            .is_err()
+        );
+        assert!(
+            Config::from_args(args(&[]), no_env)
+                .unwrap()
+                .fake_clock
+                .is_none()
+        );
     }
 
     #[test]

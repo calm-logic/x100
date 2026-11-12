@@ -24,7 +24,6 @@ mod gate;
 mod ids;
 mod jobs;
 pub mod pack;
-mod packs;
 mod processes;
 mod project;
 mod recover;
@@ -38,12 +37,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, oneshot};
+use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, DriverId, FileId, HarnessId, JobId, MessageId, ProjectId, TaskId};
 use x100_core::job::{Job, ProjectJob};
 use x100_core::settings::DaemonSettings;
 use x100_core::time::{Clock, Timestamp};
 use x100_core::wait::Wait;
 use x100_drivers::Harness;
+use x100_jobs::Scheduler;
 use x100_store::ProjectStore;
 
 pub use builder::Refused;
@@ -131,9 +132,10 @@ impl Orchestrator {
 
     /// Starts the turn loop of a project whose store is open. Any driver the log shows as live
     /// must have been dealt with by [`recover`] first. An agent that already has inbox items gets
-    /// a driver at once.
-    pub fn attach(&self, project: ProjectId, store: ProjectStore) {
-        let ctx = ProjectCtx::new(project, store, Arc::clone(&self.shared.clock));
+    /// a driver at once. `jobs` is the scheduler that fires the project's jobs, told of each job
+    /// the orchestrator appends.
+    pub fn attach(&self, project: ProjectId, store: ProjectStore, jobs: Scheduler<ProjectState>) {
+        let ctx = ProjectCtx::new(project, store, Arc::clone(&self.shared.clock), jobs);
         let (ctl, task) = project::spawn(Arc::clone(&self.shared), Arc::clone(&ctx));
         self.projects
             .lock()
@@ -226,10 +228,10 @@ impl Orchestrator {
             .with_state(|s| s.agent(agent).map(|a| a.waits.values().cloned().collect()))
     }
 
-    /// The start pack a driver was given.
+    /// The start pack a driver was given, from its agent's transcript. Blocks on the store.
     pub fn start_pack(&self, project: ProjectId, driver: DriverId) -> Option<String> {
         let ctx = self.ctx(project).ok()?;
-        packs::read(&ctx.store, driver)
+        pack::recorded(&ctx.store, driver)
     }
 
     /// Stops a driver the builder chose, and records it. Whatever turn it was in is lost and its

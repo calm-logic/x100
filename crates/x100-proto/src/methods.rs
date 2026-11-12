@@ -135,6 +135,11 @@ methods! {
     /// Changes one of the daemon's settings.
     SetDaemonSetting, "daemon.set_setting", SetDaemonSetting => Done, [Rejected];
 
+    /// Moves the clock of a daemon started with `--fake-clock` to `at`, fires every job then due,
+    /// and answers once each has been acted on. For tests and scripted runs: a daemon on the real
+    /// clock answers `wrong_state`, and a time before the clock's is `rejected`.
+    SetClock, "daemon.set_clock", SetClock => Done, [WrongState, Rejected];
+
     /// Sets the most live drivers a machine may run.
     SetMachineCap, "machines.set_cap", SetMachineCap => Done, [NotFound];
 

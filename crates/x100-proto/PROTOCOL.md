@@ -82,8 +82,10 @@ An agent's **transcript** is too large for the event log and has a subscription 
 as they are written, with none missed or repeated. Positions count from 1 per agent. `unsubscribe` ends
 either kind of subscription, and closing the connection ends all of them.
 
-An entry has `at`, the `driver` it came from, and an `item` whose `type` is one of `turn_started`, `text`,
-`tool_call`, `tool_output`, `tool_result`, `usage`, `turn_ended` and `driver_changed`. A `tool_output` is a
+An entry has `at`, the `driver` it came from, and an `item` whose `type` is one of `start_pack`,
+`turn_started`, `text`, `tool_call`, `tool_output`, `tool_result`, `usage`, `turn_ended` and `driver_changed`.
+Each driver's first entry is its `start_pack`, the `text` it was started from, followed by `driver_changed`.
+A `tool_output` is a
 piece of a running tool's terminal output, `chunk`, paired by `call` with its `tool_call`. It is how the
 Team tab shows a tool live; the `tool_result` that follows carries the whole output. The types are
 `x100_core::transcript::Entry` and `Item`.
@@ -562,6 +564,27 @@ Errors: rejected
       "secs": 600
     }
   }
+}
+```
+
+```json result
+{}
+```
+
+### `daemon.set_clock`
+
+Moves the clock of a daemon started with `--fake-clock` to `at`, fires every job then due, and answers once
+each has been acted on. For tests and scripted runs, where a fake clock and one turn at a time make a run of
+fake-harness scripts the same every time. A daemon on the real clock answers `wrong_state`, and a time before
+the clock's is `rejected`.
+
+Params type `SetClock`, result type `Done`.
+
+Errors: wrong_state, rejected
+
+```json params
+{
+  "at": 1794391200000
 }
 ```
 
@@ -1259,7 +1282,7 @@ Errors: not_found, wrong_state
 
 ### `drivers.start_pack`
 
-The start pack a driver was given.
+The start pack a driver was given: the `start_pack` entry of its agent's transcript.
 
 Params type `ReadStartPack`, result type `StartPack`.
 

@@ -14,6 +14,7 @@ use x100_core::fold::ProjectState;
 use x100_core::id::ProjectId;
 use x100_core::party::Actor;
 use x100_core::time::Clock;
+use x100_jobs::Scheduler;
 use x100_store::ProjectStore;
 
 use crate::settle::settle;
@@ -24,15 +25,23 @@ pub(crate) struct ProjectCtx {
     pub id: ProjectId,
     pub store: ProjectStore,
     pub clock: Arc<dyn Clock>,
+    /// The project's job clock, which learns of a job only from `schedule` or a wake.
+    jobs: Scheduler<ProjectState>,
     lock: Mutex<()>,
 }
 
 impl ProjectCtx {
-    pub fn new(id: ProjectId, store: ProjectStore, clock: Arc<dyn Clock>) -> Arc<Self> {
+    pub fn new(
+        id: ProjectId,
+        store: ProjectStore,
+        clock: Arc<dyn Clock>,
+        jobs: Scheduler<ProjectState>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             id,
             store,
             clock,
+            jobs,
             lock: Mutex::new(()),
         })
     }
@@ -72,13 +81,21 @@ impl Writer<'_> {
         &*self.ctx.clock
     }
 
-    /// Appends `events` as one unit, with the end of every wait they end.
+    /// Appends `events` as one unit, with the end of every wait they end, and wakes the job clock
+    /// for any job among them.
     pub fn append(&self, mut events: Events) -> x100_store::Result<Vec<Envelope<ProjectEvent>>> {
         if events.is_empty() {
             return Ok(Vec::new());
         }
         let ended = self.read(|s| settle(s, &events, &*self.ctx.clock));
         events.extend(ended);
-        self.ctx.store.log.append_all(events)
+        let scheduled = events
+            .iter()
+            .any(|(_, e)| matches!(e, ProjectEvent::JobScheduled(_)));
+        let appended = self.ctx.store.log.append_all(events)?;
+        if scheduled {
+            self.ctx.jobs.wake();
+        }
+        Ok(appended)
     }
 }

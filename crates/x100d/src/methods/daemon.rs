@@ -5,10 +5,10 @@ use x100_core::party::Actor;
 use x100_core::settings::DaemonSetting;
 use x100_proto::{
     Done, ErrorCode, LogId, LogPage, Page, PositionedEntry, ReadLog, ReadTranscript, RpcError,
-    SetDaemonSetting, TranscriptPage,
+    SetClock, SetDaemonSetting, TranscriptPage,
 };
 
-use super::{blocking, project, store_error};
+use super::{blocking, project, refused, store_error};
 use crate::hub::Hub;
 
 /// The most a page holds, whatever the client asks for.
@@ -100,4 +100,36 @@ fn invalid(setting: &DaemonSetting) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// Moves the fake clock, then fires what fell due and waits for the orchestrator to act on each,
+/// as the job clocks do on the real clock, so the caller sees the reaction once this answers.
+pub async fn set_clock(hub: &Hub, p: SetClock) -> Result<Done, RpcError> {
+    let fake = hub.config.fake_clock.as_ref().ok_or_else(|| {
+        RpcError::new(
+            ErrorCode::WrongState,
+            "the daemon runs on the real clock: start it with --fake-clock to move time",
+        )
+    })?;
+    fake.set(p.at)
+        .map_err(|e| RpcError::new(ErrorCode::Rejected, e.to_string()))?;
+    let job_error = |e: x100_jobs::Error| RpcError::new(ErrorCode::Internal, e.to_string());
+    for (id, jobs) in hub.schedulers() {
+        let fired = blocking(move || {
+            let mut fired = Vec::new();
+            jobs.fire_due(|f| fired.push(f)).map(|()| fired)
+        })
+        .await
+        .map_err(job_error)?;
+        for f in fired {
+            hub.orch.job_fired(id, f.job, f.at).await.map_err(refused)?;
+        }
+    }
+    // The daemon's own jobs have nothing to act on yet, as on the real clock.
+    if let Some(jobs) = hub.daemon_jobs() {
+        blocking(move || jobs.fire_due(|_| {}))
+            .await
+            .map_err(job_error)?;
+    }
+    Ok(Done {})
 }

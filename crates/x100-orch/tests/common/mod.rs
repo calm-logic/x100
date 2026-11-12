@@ -8,22 +8,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use x100_core::driver::{DriverState, Incompatible};
 use x100_core::effort::EffortRange;
 use x100_core::event::{Envelope, ProjectEvent};
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessModel, ModelName};
-use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, MessageId, ProjectId, TaskId};
-use x100_core::inbox::InboxItem;
+use x100_core::id::{AgentId, HarnessId, MachineId, ProjectId, TaskId};
 use x100_core::money::{Money, Percent};
-use x100_core::party::{Actor, Party};
+use x100_core::party::Actor;
 use x100_core::project::Settings as ProjectSettings;
 use x100_core::settings::DaemonSettings;
-use x100_core::task::TaskState;
 use x100_core::time::{Clock, FakeClock, Timestamp};
-use x100_core::tool::ToolCall;
-use x100_drivers::ToolEndpoint;
 use x100_drivers::fake::{DaemonTools, FakeHarness};
 use x100_jobs::Scheduler;
 use x100_orch::{
@@ -37,24 +32,6 @@ pub const FAKE: &str = env!("CARGO_BIN_EXE_x100-orch-fake-harness");
 pub const START: Timestamp = Timestamp::from_millis(1_794_387_600_000);
 pub const WAIT: Duration = Duration::from_secs(60);
 pub const HOUR: Duration = Duration::from_secs(3600);
-
-/// The fake harness cannot read an id out of its input or its start pack: `{{name}}` only reaches
-/// what its own earlier calls returned. A model reads its start pack; these stand-in ids, which
-/// [`StandIn`] resolves before a call reaches the desk, do that reading for the scripts.
-pub mod stand_in {
-    /// The caller's current task.
-    pub const MY_TASK: &str = "tsk_00000000000000000000000001";
-    /// The task the caller delegated that is in review.
-    pub const REPORTED: &str = "tsk_00000000000000000000000002";
-    /// The raised task nobody holds.
-    pub const NEW_IDEA: &str = "tsk_00000000000000000000000003";
-    /// The message from another agent that the caller's turn was given.
-    pub const LAST_MESSAGE: &str = "msg_00000000000000000000000001";
-    /// The caller itself.
-    pub const ME: &str = "agt_00000000000000000000000009";
-    /// The lead with the given role: `agt_..01` Tech, `..02` Product, `..03` Marketing.
-    pub const LEADS: [&str; 3] = ["Tech", "Product", "Marketing"];
-}
 
 pub struct World {
     pub dir: tempfile::TempDir,
@@ -129,12 +106,13 @@ impl World {
         let settings = setup.settings;
         let settings: x100_orch::Settings = Arc::new(move || settings);
         let desk = Desk::new(Arc::new(AllowAll), Arc::clone(&settings));
-        let stand_in = Arc::new(StandIn {
-            desk: Arc::clone(&desk),
-            store: store.clone(),
-        });
-        let harness = FakeHarness::new(FAKE, &script, Arc::clone(&shared), Some(stand_in))
-            .expect("the fake harness");
+        let harness = FakeHarness::new(
+            FAKE,
+            &script,
+            Arc::clone(&shared),
+            Some(Arc::clone(&desk) as Arc<dyn DaemonTools>),
+        )
+        .expect("the fake harness");
         let default_model = models[0].model.clone();
         let by_role: HashMap<String, ModelName> = setup
             .models
@@ -160,8 +138,8 @@ impl World {
             serial: true,
         });
         let project = ProjectId::from_u128(1);
-        orch.attach(project, store.clone());
         let scheduler = Scheduler::new(store.log.clone(), shared);
+        orch.attach(project, store.clone(), scheduler.clone());
         World {
             dir,
             clock,
@@ -349,93 +327,6 @@ impl DriverChooser for ByRole {
             machine: MachineId::from_u128(1),
         })
     }
-}
-
-/// Resolves the stand-in ids of [`stand_in`] for the calling driver, then hands the call to the
-/// desk as a real harness's call would arrive.
-struct StandIn {
-    desk: Arc<Desk>,
-    store: ProjectStore,
-}
-
-#[async_trait]
-impl DaemonTools for StandIn {
-    async fn call(
-        &self,
-        driver: DriverId,
-        endpoint: Option<ToolEndpoint>,
-        call: ToolCall,
-    ) -> Result<String, String> {
-        let call = self.store.log.with_state(|s| resolve(s, driver, call));
-        self.desk.call(driver, endpoint, call).await
-    }
-}
-
-fn resolve(s: &ProjectState, driver: DriverId, call: ToolCall) -> ToolCall {
-    let Some(me) = s.driver(driver).map(|d| d.driver.agent) else {
-        return call;
-    };
-    let mut text = serde_json::to_string(&call).expect("a call serialises");
-    let swap = |text: &mut String, from: &str, to: Option<String>| {
-        if text.contains(from)
-            && let Some(to) = to
-        {
-            *text = text.replace(from, &to);
-        }
-    };
-    swap(
-        &mut text,
-        stand_in::MY_TASK,
-        s.current_task(me).map(|t| t.task.id.to_string()),
-    );
-    let in_review: Vec<_> = s
-        .tasks()
-        .filter(
-            |t| matches!(&t.state, TaskState::InReview(a, _) if a.delegator == Party::Agent(me)),
-        )
-        .map(|t| t.task.id.to_string())
-        .collect();
-    if text.contains(stand_in::REPORTED) {
-        assert_eq!(
-            in_review.len(),
-            1,
-            "one task in review for the script to mean"
-        );
-    }
-    swap(&mut text, stand_in::REPORTED, in_review.first().cloned());
-    let ideas: Vec<_> = s
-        .tasks()
-        .filter(|t| t.state == TaskState::NewIdea)
-        .map(|t| t.task.id.to_string())
-        .collect();
-    swap(&mut text, stand_in::NEW_IDEA, ideas.first().cloned());
-    let given: Vec<MessageId> = s
-        .agent(me)
-        .map(|a| {
-            a.items
-                .values()
-                .filter_map(|i| match i {
-                    InboxItem::Message { message } => Some(*message),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    swap(
-        &mut text,
-        stand_in::LAST_MESSAGE,
-        given.last().map(|m| m.to_string()),
-    );
-    swap(&mut text, stand_in::ME, Some(me.to_string()));
-    for (i, role) in stand_in::LEADS.iter().enumerate() {
-        let placeholder = AgentId::from_u128(i as u128 + 1).to_string();
-        let found = s
-            .agents()
-            .find(|a| a.role == *role)
-            .map(|a| a.id.to_string());
-        swap(&mut text, &placeholder, found);
-    }
-    serde_json::from_str(&text).expect("a resolved call is still a call")
 }
 
 pub fn read(path: &Path) -> Option<String> {

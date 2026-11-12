@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use x100_core::agent::{AgentEvent, AgentState};
+use x100_core::agent::{AgentEvent, AgentState, Waiting};
 use x100_core::driver::{DriverEvent, DriverState, EndReason, StopReason};
 use x100_core::event::ProjectEvent;
 use x100_core::inbox::InboxItem;
@@ -38,15 +38,15 @@ async fn a_wait_past_its_deadline_wakes_the_agent_and_says_so() {
 [[turn]]
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Check the site" }
 steps = [
-  { call = { schedule = { when = { once = { at = 1794423600000 } }, does = { wake = { agent = "agt_00000000000000000000000009", note = "Look at the site again." } } } }, save = "later" },
-  { call = { wait = { on = { job = "{{later.job}}" }, deadline = 1794391200000, task = "tsk_00000000000000000000000001", progress = { note = "Waiting for the site to come back.", done = 10 } } } },
+  { call = { schedule = { when = { once = { at = 1794423600000 } }, does = { wake = { agent = "{{pack:Your id}}", note = "Look at the site again." } } } }, save = "later" },
+  { call = { wait = { on = { job = "{{later.job}}" }, deadline = 1794391200000, task = "{{input:Current task}}", progress = { note = "Waiting for the site to come back.", done = 10 } } } },
 ]
 
 [[turn]]
 when = { input_contains = "ran out" }
 steps = [
   { call = { cancel_job = { job = "{{later.job}}" } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "The site stayed down; gave up waiting." } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "The site stayed down; gave up waiting." } } },
 ]
 "#,
     );
@@ -109,14 +109,14 @@ async fn an_agent_whose_driver_is_stopped_during_a_long_wait_resumes_from_its_st
 [[turn]]
 when = { start_pack_contains = "Progress note (25% done): Waiting for the morning check.", input_contains = "Time for the morning check." }
 steps = [
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Checked in the morning." } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Checked in the morning." } } },
 ]
 
 [[turn]]
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Morning check" }
 steps = [
-  { call = { schedule = { when = { once = { at = 1794394800000 } }, does = { wake = { agent = "agt_00000000000000000000000009", note = "Time for the morning check." } } } }, save = "morning" },
-  { call = { wait = { on = { job = "{{morning.job}}" }, task = "tsk_00000000000000000000000001", progress = { note = "Waiting for the morning check.", done = 25 } } } },
+  { call = { schedule = { when = { once = { at = 1794394800000 } }, does = { wake = { agent = "{{pack:Your id}}", note = "Time for the morning check." } } } }, save = "morning" },
+  { call = { wait = { on = { job = "{{morning.job}}" }, task = "{{input:Current task}}", progress = { note = "Waiting for the morning check.", done = 25 } } } },
 ]
 "#,
     );
@@ -168,7 +168,7 @@ async fn an_item_given_to_a_driver_stopped_before_its_turn_completes_reaches_the
 [[turn]]
 when = { start_pack_contains = "was stopped (ReplacedByBuilder)" }
 steps = [
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Done on the next driver." } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Done on the next driver." } } },
 ]
 
 [[turn]]
@@ -223,5 +223,70 @@ steps = [{ text = "Starting the long job." }, { stall = true }]
     assert!(entries.iter().any(
         |(_, e)| e.driver == drivers[1] && e.item == Item::DriverChanged { from: Some(first) }
     ));
+    w.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_holds_several_waits_and_waits_on_the_rest_when_one_ends() {
+    // Two jobs and a wait on each, opened in the same turn.
+    let script = script(
+        r#"
+[[turn]]
+when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Watch both" }
+steps = [
+  { call = { schedule = { when = { once = { at = 1794391200000 } }, does = { wake = { agent = "{{pack:Your id}}", note = "The first check is due." } } } }, save = "first" },
+  { call = { schedule = { when = { once = { at = 1794394800000 } }, does = { wake = { agent = "{{pack:Your id}}", note = "The second check is due." } } } }, save = "second" },
+  { call = { wait = { on = { job = "{{first.job}}" }, task = "{{input:Current task}}", progress = { note = "Waiting on two checks.", done = 10 } } } },
+  { call = { wait = { on = { job = "{{second.job}}" }, task = "{{input:Current task}}", progress = { note = "Waiting on two checks.", done = 10 } } } },
+]
+
+# Woken by the first, it does not wait again: its other wait is still open.
+[[turn]]
+when = { input_contains = "The first check is due." }
+steps = [{ text = "The first check is fine." }]
+
+[[turn]]
+when = { input_contains = "The second check is due." }
+steps = [
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Both checks are fine." } } },
+]
+"#,
+    );
+    let w = World::new(Setup::new(&script)).await;
+    let brief = w.brief("Watch both").await;
+    w.settle().await;
+    let ceo = w.state().agent(w.ceo).unwrap().clone();
+    assert_eq!(ceo.state, AgentState::Waiting(Waiting::OnWaits));
+    assert_eq!(ceo.waits.len(), 2, "both waits are open");
+
+    w.clock_to(START + HOUR).await;
+    w.settle().await;
+    let s = w.state();
+    let ceo = s.agent(w.ceo).unwrap();
+    assert_eq!(
+        ceo.state,
+        AgentState::Waiting(Waiting::OnWaits),
+        "after its turn it waits on what is left, not working on nothing"
+    );
+    assert_eq!(ceo.waits.len(), 1);
+    assert!(
+        !w.log().iter().any(|e| matches!(
+            &e.event,
+            ProjectEvent::Agent {
+                event: AgentEvent::Delivered {
+                    what: InboxItem::Nudge { .. },
+                    ..
+                },
+                ..
+            }
+        )),
+        "an agent with a wait open is not nudged"
+    );
+
+    w.clock_to(START + 2 * HOUR).await;
+    w.settle().await;
+    let s = w.state();
+    assert!(matches!(s.task(brief).unwrap().state, TaskState::Done(..)));
+    assert!(s.agent(w.ceo).unwrap().waits.is_empty());
     w.finish().await;
 }

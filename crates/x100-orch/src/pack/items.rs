@@ -1,4 +1,7 @@
 //! Inbox items in words, for a turn's input and the start pack's list of what is unhandled.
+//!
+//! Every id an agent needs to act on an item is on a labelled line, `Task: tsk_...`, ahead of any
+//! text someone else wrote, so a model reads it as prose and a script can look it up.
 
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, FileId, InboxItemId, MessageId};
@@ -10,8 +13,9 @@ use x100_core::wait::WaitEnd;
 
 use crate::tools::who;
 
-/// The text of one turn: what the given items say, then anything the daemon must add, and the
-/// builder's message it answers, if any, so the CEO's reply can be recorded as one.
+/// The text of one turn: what the given items say, then anything the daemon must add, then the
+/// agent's current task; and the builder's message it answers, if any, so the CEO's reply can be
+/// recorded as one.
 pub fn turn_input(
     state: &ProjectState,
     agent: AgentId,
@@ -37,6 +41,11 @@ pub fn turn_input(
         parts.push(describe(state, item));
     }
     parts.extend(notes.iter().cloned());
+    // A warm driver's start pack may name a task that is over, so each turn says which is current.
+    // Its id only: the title would read as if the task had just arrived.
+    if let Some(t) = state.current_task(agent) {
+        parts.push(format!("Current task: {}", t.task.id));
+    }
     (parts.join("\n\n---\n\n"), reply_to)
 }
 
@@ -45,11 +54,11 @@ pub fn describe(state: &ProjectState, item: &InboxItem) -> String {
     match item {
         InboxItem::Task { task } => match state.task(*task) {
             Some(t) => {
-                let mut text = format!("Task {task}: {}", t.task.title);
+                let mut text = format!("A task for you: {}\nTask: {task}", t.task.title);
                 if let Some(a) = t.state.assignment() {
                     text.push_str(&format!(
-                        "\nFrom {}, at {:?} effort.",
-                        who(state, a.delegator),
+                        "\nDelegated by: {}\nEffort: {:?}",
+                        party(state, a.delegator),
                         a.effort
                     ));
                 }
@@ -68,44 +77,43 @@ pub fn describe(state: &ProjectState, item: &InboxItem) -> String {
                 }
                 text
             }
-            None => format!("A task ({task}) that is not in the log."),
+            None => format!("A task that is not in the log.\nTask: {task}"),
         },
         InboxItem::Message { message } => match state.message(*message) {
             Some(m) => {
                 let from = match m.message.route {
-                    Route::BuilderToCeo => "the builder".to_owned(),
-                    Route::Between { from, .. } => who(state, Party::Agent(from)),
-                    Route::CeoToBuilder | Route::DaemonToBuilder => "the daemon".to_owned(),
+                    Route::BuilderToCeo => Party::Builder,
+                    Route::Between { from, .. } => Party::Agent(from),
+                    Route::CeoToBuilder | Route::DaemonToBuilder => Party::Builder,
                 };
-                let answers = m
-                    .message
-                    .in_reply_to
-                    .map(|r| format!(" in reply to {r}"))
-                    .unwrap_or_default();
                 let mut text = format!(
-                    "Message {message} from {from}{answers}:\n{}{}",
-                    m.message.body,
-                    attachments(state, &m.message.attachments)
+                    "A message from {}.\nMessage: {message}\nFrom: {}",
+                    who(state, from),
+                    party(state, from)
                 );
+                if let Some(r) = m.message.in_reply_to {
+                    text.push_str(&format!("\nIn reply to: {r}"));
+                }
                 // The task a builder's message opened, or the one it belongs to, so the CEO knows
                 // what to report or wait on.
                 if m.message.route == Route::BuilderToCeo
                     && let Some(ceo) = state.project().map(|p| p.ceo)
                     && let Some(task) = crate::builder::builder_task_open(state, ceo)
                 {
-                    text.push_str(&format!("\nYour task for the builder: {task}"));
+                    text.push_str(&format!("\nTask for the builder: {task}"));
                 }
+                text.push_str(&format!(
+                    "\n{}{}",
+                    m.message.body,
+                    attachments(state, &m.message.attachments)
+                ));
                 text
             }
-            None => format!("A message ({message}) that is not in the log."),
+            None => format!("A message that is not in the log.\nMessage: {message}"),
         },
         InboxItem::Report { task } => match state.task(*task) {
             Some(t) => {
-                let from = t
-                    .state
-                    .assignment()
-                    .map(|a| who(state, Party::Agent(a.assignee)))
-                    .unwrap_or_default();
+                let from = t.state.assignment().map(|a| Party::Agent(a.assignee));
                 let report = match &t.state {
                     x100_core::task::TaskState::InReview(_, r)
                     | x100_core::task::TaskState::Promoting(_, r)
@@ -117,39 +125,58 @@ pub fn describe(state: &ProjectState, item: &InboxItem) -> String {
                         Outcome::Completed => "completed".to_owned(),
                         Outcome::Failed(f) => format!("failed: {}", failure(f)),
                     });
-                let summary = report.map(|r| r.summary.as_str()).unwrap_or_default();
-                format!(
-                    "Report on task {task} ({}) from {from}: {outcome}.\n{summary}\nAccept it or \
-                     send it back with `review`.",
+                let mut text = format!(
+                    "A report on {}: {outcome}.\nReport on: {task}",
                     t.task.title
-                )
+                );
+                if let Some(from) = from {
+                    text.push_str(&format!("\nFrom: {}", party(state, from)));
+                }
+                let summary = report.map(|r| r.summary.as_str()).unwrap_or_default();
+                text.push_str(&format!(
+                    "\n{summary}\nAccept it or send it back with `review`."
+                ));
+                text
             }
-            None => format!("A report on a task ({task}) that is not in the log."),
+            None => format!("A report on a task that is not in the log.\nReport on: {task}"),
         },
         InboxItem::Decision { action, decision } => {
-            format!("Your held action {action} was {decision:?} by the builder.")
+            format!("Your held action was {decision:?} by the builder.\nAction: {action}")
         }
-        InboxItem::Job { note, .. } => format!("A scheduled job woke you: {note}"),
-        InboxItem::WaitEnded { wait, end } => match end {
-            WaitEnd::Expired => {
-                format!("Your wait {wait} ran out: its deadline passed before it was over.")
-            }
-            WaitEnd::CannotHappen => {
-                format!("Your wait {wait} ended: what it waited for can no longer happen.")
-            }
-            WaitEnd::Satisfied => format!("Your wait {wait} is over: what it waited for happened."),
-        },
+        InboxItem::Job { job, note } => {
+            format!("A scheduled job woke you: {note}\nJob: {job}")
+        }
+        InboxItem::WaitEnded { wait, end } => {
+            let what = match end {
+                WaitEnd::Expired => "ran out: its deadline passed before it was over",
+                WaitEnd::CannotHappen => "ended: what it waited for can no longer happen",
+                WaitEnd::Satisfied => "is over: what it waited for happened",
+            };
+            format!("Your wait {what}.\nWait: {wait}")
+        }
         InboxItem::NoDriver { agent, why } => format!(
-            "{} is waiting for a driver: {why:?}",
+            "{} is waiting for a driver: {why:?}\nAgent: {agent}",
             who(state, Party::Agent(*agent))
         ),
-        InboxItem::BudgetReached { lead } => {
-            format!("{} reached its budget.", who(state, Party::Agent(*lead)))
-        }
-        InboxItem::Nudge { task, turns } => format!(
-            "Your last {turns} turn(s) ended with task {task} neither reported nor waited on. \
-             Carry on, wait for what it needs with `wait`, or `report` it."
+        InboxItem::BudgetReached { lead } => format!(
+            "{} reached its budget.\nLead: {lead}",
+            who(state, Party::Agent(*lead))
         ),
+        InboxItem::Nudge { task, turns } => format!(
+            "Your last {turns} turn(s) ended with your task neither reported nor waited on. \
+             Carry on, wait for what it needs with `wait`, or `report` it.\nTask: {task}"
+        ),
+    }
+}
+
+/// A party as the value of a labelled line: its id first, so a lookup reads the id, or `builder`.
+pub(crate) fn party(state: &ProjectState, party: Party) -> String {
+    match party {
+        Party::Builder => "builder".into(),
+        Party::Agent(a) => match state.agent(a) {
+            Some(r) => format!("{a} ({})", r.role),
+            None => a.to_string(),
+        },
     }
 }
 

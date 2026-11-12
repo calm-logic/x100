@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use x100_core::agent::Position;
 use x100_core::driver::{DriverState, EndReason, StartReason};
 use x100_core::fold::ProjectState;
-use x100_core::id::AgentId;
+use x100_core::id::{AgentId, DriverId};
 use x100_core::job::{JobState, ProjectJob};
 use x100_core::message::Route;
 use x100_core::party::Party;
@@ -27,6 +27,8 @@ use x100_core::wait::WaitOn;
 use x100_store::ProjectStore;
 
 pub use items::{describe, turn_input};
+
+use items::party;
 
 use crate::branches;
 use crate::tools::who;
@@ -82,7 +84,8 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
     };
     let mut p = String::new();
     let _ = writeln!(p, "ROLE: {}", a.role);
-    let _ = writeln!(p, "You are {} ({agent}), an agent of an x100 team.", a.role);
+    let _ = writeln!(p, "Your id: {agent}");
+    let _ = writeln!(p, "You are {}, an agent of an x100 team.", a.role);
     if let Some(project) = state.project() {
         let team = &project.team;
         let place = match team.position(agent) {
@@ -112,7 +115,7 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
         if !children.is_empty() {
             p.push_str("\nYOUR AGENTS (delegate to them, or start new workers):\n");
             for c in children {
-                let _ = writeln!(p, "- {}", who(state, Party::Agent(c)));
+                p.push_str(&member(state, c));
             }
         }
         let leads: Vec<_> = team
@@ -125,24 +128,21 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
         if matches!(team.position(agent), Some(Position::Lead { .. })) && !leads.is_empty() {
             p.push_str("\nTHE OTHER LEADS (message them directly):\n");
             for l in leads {
-                let _ = writeln!(p, "- {}", who(state, Party::Agent(l)));
+                p.push_str(&member(state, l));
             }
         }
     }
     if let Some(t) = state.current_task(agent) {
         let _ = write!(
             p,
-            "\nCURRENT TASK {}: {}\n{}\n",
-            t.task.id, t.task.title, t.task.ask
+            "\nCURRENT TASK:\nTask: {} ({})\n",
+            t.task.id, t.task.title
         );
         if let Some(a) = t.state.assignment() {
-            let _ = writeln!(
-                p,
-                "From {}, at {:?} effort.",
-                who(state, a.delegator),
-                a.effort
-            );
+            let _ = writeln!(p, "Delegated by: {}", party(state, a.delegator));
+            let _ = writeln!(p, "Effort: {:?}", a.effort);
         }
+        let _ = writeln!(p, "{}", t.task.ask);
         match &t.progress {
             Some(pr) => {
                 let done = pr
@@ -184,6 +184,17 @@ fn head(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
         reason(state, agent, why)
     );
     p
+}
+
+/// A member of the team as a labelled line: `Lead Tech: agt_...` or `Worker Backend: agt_...`.
+fn member(state: &ProjectState, agent: AgentId) -> String {
+    let position = match state.project().and_then(|p| p.team.position(agent)) {
+        Some(Position::Ceo { .. }) => "CEO",
+        Some(Position::Lead { .. }) => "Lead",
+        _ => "Worker",
+    };
+    let role = state.agent(agent).map_or("", |a| a.role.as_str());
+    format!("{position} {role}: {agent}\n")
 }
 
 /// Waits, jobs it scheduled, tasks it delegated and has not accepted, and messages awaiting a
@@ -292,6 +303,29 @@ fn reason(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
     text
 }
 
+/// The start pack `driver` was given: the first entry it wrote in its agent's transcript.
+pub(crate) fn recorded(store: &ProjectStore, driver: DriverId) -> Option<String> {
+    let agent = store
+        .log
+        .with_state(|s| s.driver(driver).map(|d| d.driver.agent))?;
+    let mut after = None;
+    loop {
+        let page = store
+            .transcripts
+            .read(agent, after, TRANSCRIPT_ENTRIES as usize)
+            .ok()?;
+        let (last, _) = page.last()?;
+        after = Some(*last);
+        let found = page.into_iter().find_map(|(_, e)| match e.item {
+            Item::StartPack { text } if e.driver == driver => Some(text),
+            _ => None,
+        });
+        if found.is_some() {
+            return found;
+        }
+    }
+}
+
 /// As much of the transcript's end as fits in `room` characters, oldest first.
 fn transcript_tail(store: &ProjectStore, agent: AgentId, room: usize) -> String {
     let Ok(Some(last)) = store.transcripts.last(agent) else {
@@ -347,6 +381,7 @@ fn entry_line(entry: &Entry) -> Option<String> {
         }
         Item::TurnEnded { how } => format!("[turn ended: {how:?}]"),
         Item::DriverChanged { .. } => format!("[driver {}]", entry.driver),
-        Item::ToolOutput { .. } | Item::Usage { .. } => return None,
+        // A pack the agent was given before is already in what this one says.
+        Item::StartPack { .. } | Item::ToolOutput { .. } | Item::Usage { .. } => return None,
     })
 }

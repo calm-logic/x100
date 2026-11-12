@@ -220,6 +220,12 @@ pub fn samples() -> Vec<Sample> {
             Done {},
         ),
         s(
+            SetClock {
+                at: Timestamp::from_millis(1_794_391_200_000),
+            },
+            Done {},
+        ),
+        s(
             SetMachineCap {
                 machine: id(MachineId::new, 12),
                 cap: 8,

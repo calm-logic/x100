@@ -106,12 +106,7 @@ impl Env {
 
     /// A daemon whose drivers are started by `fake_harness` instead of the usual program.
     pub fn spawn_with(&self, fake_harness: &Path) -> DaemonProc {
-        let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
-            .args(self.daemon_args(fake_harness))
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("x100d starts");
-        DaemonProc { child: Some(child) }
+        DaemonProc::spawn(self.daemon_args(fake_harness))
     }
 
     pub async fn client(&self) -> Client {
@@ -141,6 +136,15 @@ pub struct DaemonProc {
 }
 
 impl DaemonProc {
+    pub fn spawn(args: Vec<std::ffi::OsString>) -> DaemonProc {
+        let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
+            .args(args)
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("x100d starts");
+        DaemonProc { child: Some(child) }
+    }
+
     pub fn pid(&self) -> u32 {
         self.child.as_ref().expect("running").id()
     }
@@ -207,9 +211,9 @@ pub async fn gone(pids: &[u32]) {
 
 /// Creates a project and waits for the client to hold it.
 ///
-/// The fake harness cannot read its task's id from its input, so these scripts never report or
-/// wait. With the daemon's usual limit the CEO would be nudged for three turns before its task is
-/// given up; one turn keeps each exchange to the turn a test is about.
+/// These scripts never report or wait. With the daemon's usual limit the CEO would be nudged for
+/// three turns before its task is given up; one turn keeps each exchange to the turn a test is
+/// about.
 pub async fn create_project(client: &Client, env: &Env, name: &str) -> ProjectId {
     client
         .request(x100_proto::SetDaemonSetting {

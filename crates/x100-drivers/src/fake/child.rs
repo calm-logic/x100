@@ -188,11 +188,15 @@ impl Player {
 
     async fn step(&mut self, step: &Step) -> Flow {
         match step {
-            Step::Text(text) => out(&FromFake::Text {
-                text: self.fill(text),
-            }),
+            Step::Text(text) => match self.fill(text) {
+                Ok(text) => out(&FromFake::Text { text }),
+                Err(e) => return lookup_failed(e),
+            },
             Step::Call { call, save } => {
-                let input = self.fill_json(call);
+                let input = match self.fill_json(call) {
+                    Ok(input) => input,
+                    Err(e) => return lookup_failed(e),
+                };
                 let name = input
                     .as_object()
                     .and_then(|o| o.keys().next().cloned())
@@ -215,8 +219,10 @@ impl Player {
                 }
             }
             Step::Write { path, content } => {
-                let path = self.fill(path);
-                let content = self.fill(content);
+                let (path, content) = match (self.fill(path), self.fill(content)) {
+                    (Ok(path), Ok(content)) => (path, content),
+                    (Err(e), _) | (_, Err(e)) => return lookup_failed(e),
+                };
                 let id = self.id("write");
                 out(&FromFake::ToolCall {
                     id: id.clone(),
@@ -231,10 +237,14 @@ impl Player {
                     is_error: written.is_err(),
                 });
             }
-            Step::Run(command) => return self.run(self.fill(command)).await,
-            Step::Ask { tool, input } => {
-                return self.ask(tool.clone(), self.fill_json(input)).await;
-            }
+            Step::Run(command) => match self.fill(command) {
+                Ok(command) => return self.run(command).await,
+                Err(e) => return lookup_failed(e),
+            },
+            Step::Ask { tool, input } => match self.fill_json(input) {
+                Ok(input) => return self.ask(tool.clone(), input).await,
+                Err(e) => return lookup_failed(e),
+            },
             Step::Usage(usage) => out(&FromFake::Usage(*usage)),
             Step::Context(used) => out(&FromFake::Context { used: *used }),
             Step::Sleep(duration) => {
@@ -247,10 +257,13 @@ impl Player {
             // Silent from here on; it still exits when its stdin closes, as a hung harness's
             // process would when killed.
             Step::Stall => return Flow::Park,
-            Step::Fail { kind, detail } => {
-                fail(*kind, self.fill(detail));
-                return Flow::Park;
-            }
+            Step::Fail { kind, detail } => match self.fill(detail) {
+                Ok(detail) => {
+                    fail(*kind, detail);
+                    return Flow::Park;
+                }
+                Err(e) => return lookup_failed(e),
+            },
         }
         Flow::Done
     }
@@ -358,9 +371,10 @@ impl Player {
         }
     }
 
-    /// Replaces `{{name}}` with a saved value, `{{name.field}}` with a field of a saved JSON
-    /// object, and `{{input}}` with the turn's input. Anything else is left as written.
-    fn fill(&self, text: &str) -> String {
+    /// Fills in the placeholders the module docs of [`super::script`] describe. A lookup in the
+    /// input or the start pack that finds nothing is an error saying so; any other placeholder
+    /// that names nothing is left as written.
+    fn fill(&self, text: &str) -> Result<String, String> {
         let mut result = String::new();
         let mut rest = text;
         while let Some(start) = rest.find("{{") {
@@ -369,43 +383,75 @@ impl Player {
             };
             let name = &rest[start + 2..start + len];
             result.push_str(&rest[..start]);
-            match self.lookup(name.trim()) {
+            match self.lookup(name.trim())? {
                 Some(value) => result.push_str(&value),
                 None => result.push_str(&rest[start..start + len + 2]),
             }
             rest = &rest[start + len + 2..];
         }
         result.push_str(rest);
-        result
+        Ok(result)
     }
 
-    fn lookup(&self, name: &str) -> Option<String> {
+    fn lookup(&self, name: &str) -> Result<Option<String>, String> {
         if name == "input" {
-            return Some(self.input.clone());
+            return Ok(Some(self.input.clone()));
+        }
+        for (prefix, text, what) in [
+            ("input:", &self.input, "the turn's input"),
+            ("pack:", &self.start_pack, "the start pack"),
+        ] {
+            if let Some(label) = name.strip_prefix(prefix) {
+                return labelled(text, label)
+                    .map(|v| Some(v.to_owned()))
+                    .ok_or_else(|| format!("{{{{{name}}}}}: {what} has no line \"{label}: ...\""));
+            }
         }
         if let Some(value) = self.vars.get(name) {
-            return Some(value.clone());
+            return Ok(Some(value.clone()));
         }
-        let (var, field) = name.split_once('.')?;
-        let json: Value = serde_json::from_str(self.vars.get(var)?).ok()?;
-        match json.get(field)? {
-            Value::String(s) => Some(s.clone()),
-            other => Some(other.to_string()),
-        }
+        let field = name.split_once('.').and_then(|(var, field)| {
+            let json: Value = serde_json::from_str(self.vars.get(var)?).ok()?;
+            Some(match json.get(field)? {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+        });
+        Ok(field)
     }
 
-    fn fill_json(&self, value: &Value) -> Value {
-        match value {
-            Value::String(s) => Value::String(self.fill(s)),
-            Value::Array(items) => Value::Array(items.iter().map(|v| self.fill_json(v)).collect()),
+    fn fill_json(&self, value: &Value) -> Result<Value, String> {
+        Ok(match value {
+            Value::String(s) => Value::String(self.fill(s)?),
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|v| self.fill_json(v))
+                    .collect::<Result<_, _>>()?,
+            ),
             Value::Object(map) => Value::Object(
                 map.iter()
-                    .map(|(k, v)| (k.clone(), self.fill_json(v)))
-                    .collect(),
+                    .map(|(k, v)| Ok((k.clone(), self.fill_json(v)?)))
+                    .collect::<Result<_, String>>()?,
             ),
             other => other.clone(),
-        }
+        })
     }
+}
+
+/// The value of the first line of `text` that reads `<label>: <value>`, leading spaces aside: the
+/// first word after the colon.
+fn labelled<'a>(text: &'a str, label: &str) -> Option<&'a str> {
+    text.lines().find_map(|line| {
+        let value = line.trim_start().strip_prefix(label)?.strip_prefix(':')?;
+        value.split_whitespace().next()
+    })
+}
+
+/// A lookup found nothing: the script cannot go on, so the driver fails, saying why.
+fn lookup_failed(detail: String) -> Flow {
+    fail(FailKind::Run, detail);
+    Flow::Park
 }
 
 fn fail(kind: FailKind, detail: String) {

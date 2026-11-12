@@ -328,3 +328,51 @@ fn a_daemon_event_on_a_record_it_does_not_know_is_an_error() {
     assert_eq!(err.record, Some(Record::Harness(x100_core::testing::CODEX)));
     assert_eq!(err.cause, Corrupt::Unknown);
 }
+
+#[test]
+fn an_agent_goes_back_to_waiting_only_with_a_wait_open() {
+    use x100_core::agent::AgentState;
+    use x100_core::id::InboxItemId;
+    use x100_core::inbox::InboxItem;
+
+    let f = fernleaf();
+    let state = ProjectState::fold(&f.log).unwrap();
+    let agent = state
+        .agents()
+        .find(|a| a.waits.is_empty() && a.state != AgentState::Retired)
+        .map(|a| a.id)
+        .expect("an agent with no wait open");
+    let woken = ProjectEvent::Agent {
+        agent,
+        event: AgentEvent::Delivered {
+            item: InboxItemId::from_u128(9999),
+            what: InboxItem::Task { task: f.smoke },
+        },
+    };
+    let (mut state, e) = appended(&f, Actor::Daemon, woken);
+    state.apply(&e).unwrap();
+    let back = Envelope {
+        seq: Seq(e.seq.0 + 1),
+        at: e.at,
+        by: Actor::Daemon,
+        event: ProjectEvent::Agent {
+            agent,
+            event: AgentEvent::StillWaiting,
+        },
+    };
+    let err = state.apply(&back).unwrap_err();
+    assert_eq!(err.record, Some(Record::Agent(agent)));
+    assert_eq!(
+        err.cause,
+        Corrupt::Rejected(Rejected {
+            machine: MachineKind::Agent,
+            state: "Working",
+            event: "StillWaiting",
+        })
+    );
+    assert_eq!(
+        state.agent(agent).unwrap().state,
+        AgentState::Working,
+        "a refused event changes nothing"
+    );
+}

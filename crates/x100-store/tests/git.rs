@@ -336,3 +336,51 @@ fn merging_reports_up_to_date_a_merge_and_a_conflict_as_values() {
     );
     assert_eq!(sh(&a, &["status", "--porcelain"]), "");
 }
+
+#[test]
+fn a_commit_puts_a_worktrees_work_on_its_branch_so_a_merge_carries_it() {
+    let (dir, git) = project_with_history();
+    let main = dir.path();
+    let wt = git
+        .create_worktree(AgentId::from_u128(3), "x100/c", "main")
+        .unwrap();
+    let before = sh(&wt, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    // Nothing changed: no commit, and the branch stays where it was.
+    assert_eq!(git.commit(&wt, "nothing").unwrap(), None);
+    assert_eq!(sh(&wt, &["rev-parse", "HEAD"]).trim(), before);
+
+    write(&wt.join(".gitignore"), "*.log\n");
+    write(&wt.join("new/file.txt"), "untracked\n");
+    write(&wt.join("README.md"), "edited\n");
+    fs::remove_file(wt.join("src/old.rs")).unwrap();
+    chmod(&wt.join("src/main.rs"), 0o755);
+    write(&wt.join("debug.log"), "ignored\n");
+    write(&wt.join("staged.txt"), "staged\n");
+    sh(&wt, &["add", "staged.txt"]);
+
+    let commit = git
+        .commit(&wt, "x100: work of c")
+        .unwrap()
+        .expect("a commit");
+    assert_eq!(sh(&wt, &["rev-parse", "x100/c"]).trim(), commit.0);
+    assert_eq!(sh(&wt, &["rev-parse", "HEAD^"]).trim(), before);
+    assert_eq!(
+        sh(&wt, &["log", "-1", "--format=%s"]).trim(),
+        "x100: work of c"
+    );
+    // Everything but the ignored file is committed.
+    assert_eq!(sh(&wt, &["status", "--porcelain", "-uall"]), "");
+    assert!(!sh(&wt, &["ls-files"]).contains("debug.log"));
+
+    // The merge of the branch carries all of it to main.
+    let MergeOutcome::Merged { .. } = git.merge(main, "x100/c").unwrap() else {
+        panic!("expected a fast-forward");
+    };
+    let tree = files_of(main);
+    assert_eq!(tree["new/file.txt"].1, b"untracked\n");
+    assert_eq!(tree["README.md"].1, b"edited\n");
+    assert_eq!(tree["staged.txt"].1, b"staged\n");
+    assert_eq!(tree["src/main.rs"].0, 0o755);
+    assert!(!tree.contains_key("src/old.rs") && !tree.contains_key("debug.log"));
+}

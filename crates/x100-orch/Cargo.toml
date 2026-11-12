@@ -19,6 +19,7 @@ test = false
 x100-core = { path = "../x100-core" }
 x100-store = { path = "../x100-store" }
 x100-drivers = { path = "../x100-drivers" }
+x100-jobs = { path = "../x100-jobs" }
 async-trait = "0.1"
 nix = { version = "0.29", features = ["signal"] }
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +31,5 @@ ulid = "3"
 
 [dev-dependencies]
 x100-core = { path = "../x100-core", features = ["testing"] }
-x100-jobs = { path = "../x100-jobs" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

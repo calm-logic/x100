@@ -56,6 +56,7 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ReadTranscript(p) => out(daemon::read_transcript(hub, p).await),
         Call::GetDaemon(_) => out(Ok(hub.log.state())),
         Call::SetDaemonSetting(p) => out(daemon::set_setting(hub, p).await),
+        Call::SetClock(p) => out(daemon::set_clock(hub, p).await),
         Call::ListProjects(_) => out(Ok(projects::list(hub))),
         Call::GetProject(p) => out(projects::get(hub, p)),
         Call::CreateProject(p) => out(projects::create(hub, p).await),

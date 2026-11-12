@@ -13,6 +13,9 @@ fn driver(n: u128) -> DriverId {
 
 fn items() -> Vec<Item> {
     vec![
+        Item::StartPack {
+            text: "ROLE: CEO\nYour id: agt_1\n".into(),
+        },
         Item::TurnStarted,
         Item::Text {
             text: "hi\nthere".into(),
@@ -60,6 +63,7 @@ fn items() -> Vec<Item> {
 /// here.
 fn variant(item: &Item) -> &'static str {
     match item {
+        Item::StartPack { .. } => "StartPack",
         Item::TurnStarted => "TurnStarted",
         Item::Text { .. } => "Text",
         Item::ToolCall { .. } => "ToolCall",
@@ -75,7 +79,7 @@ fn variant(item: &Item) -> &'static str {
 fn every_transcript_item_round_trips() {
     let items = items();
     let names: BTreeSet<_> = items.iter().map(variant).collect();
-    assert_eq!(names.len(), 8, "a variant has no sample");
+    assert_eq!(names.len(), 9, "a variant has no sample");
     for item in items {
         let entry = Entry {
             at: Timestamp::from_millis(5),
@@ -97,5 +101,14 @@ fn a_tool_output_is_written_as_its_call_and_chunk() {
     assert_eq!(
         serde_json::to_value(&item).unwrap(),
         serde_json::json!({"type": "tool_output", "call": "c1", "chunk": "x"})
+    );
+}
+
+#[test]
+fn a_start_pack_is_written_as_its_text() {
+    let item = Item::StartPack { text: "x".into() };
+    assert_eq!(
+        serde_json::to_value(&item).unwrap(),
+        serde_json::json!({"type": "start_pack", "text": "x"})
     );
 }

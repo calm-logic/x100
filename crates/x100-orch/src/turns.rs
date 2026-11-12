@@ -116,12 +116,18 @@ pub(crate) fn ended(state: &ProjectState, clock: &dyn Clock, e: Ending) -> Event
         // After `TurnEnded` the inbox holds only what waits for a turn, since this turn's items
         // are then handled.
         let nothing_waiting = a.inbox.waiting().next().is_none();
-        if a.state == AgentState::Working && !open && a.waits.is_empty() && nothing_waiting {
+        // An agent woken from its waits that did not wait again still has them open.
+        let next = if !a.waits.is_empty() {
+            Some(AgentEvent::StillWaiting)
+        } else {
+            (!open).then_some(AgentEvent::WentIdle)
+        };
+        if let Some(event) = next.filter(|_| a.state == AgentState::Working && nothing_waiting) {
             out.push((
                 Actor::Daemon,
                 ProjectEvent::Agent {
                     agent: e.agent,
-                    event: AgentEvent::WentIdle,
+                    event,
                 },
             ));
         }

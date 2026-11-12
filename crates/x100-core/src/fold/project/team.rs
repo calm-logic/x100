@@ -8,6 +8,7 @@ use crate::fold::records::{AgentRecord, DriverRecord, RunningProcess, Spent};
 use crate::fold::{Corrupt, Fail, Record, on, unknown};
 use crate::id::{AgentId, DriverId};
 use crate::ledger::{Charge, ChargeSource, Payer};
+use crate::machine::{MachineKind, Rejected};
 use crate::party::Party;
 use crate::process::{Process, ProcessName};
 use crate::team::{TeamError, TeamOp};
@@ -154,6 +155,17 @@ impl ProjectState {
             }
             AgentEvent::WaitEnded { wait, .. } => {
                 rec.waits.remove(wait).ok_or(unknown(record))?;
+            }
+            // Waiting on its waits with none open would be waiting on nothing, for ever.
+            AgentEvent::StillWaiting if rec.waits.is_empty() => {
+                return Err((
+                    Some(record),
+                    Corrupt::Rejected(Rejected {
+                        machine: MachineKind::Agent,
+                        state: rec.state.name(),
+                        event: event.name(),
+                    }),
+                ));
             }
             AgentEvent::EffortSet(_) => {
                 ch.part(ProjectPart::Settings);

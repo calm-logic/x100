@@ -26,37 +26,37 @@ price = { input = 1.0, output = 5.0 }
 
 # The CEO hands each kind of trouble to a new worker and waits on its report.
 [[turn]]
-when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Task " }
+when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Trouble: " }
 steps = [
-  { call = { delegate = { to = { new_worker = { role = "Worker", charter = "Does what it is given." } }, task = { new = { title = "{{input}}", ask = "As the brief says.", attachments = [] } }, effort = "low" } }, save = "job" },
-  { call = { wait = { on = { report = "{{job.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "Delegated; waiting on the worker.", done = 10 } } } },
+  { call = { delegate = { to = { new_worker = { role = "Worker", charter = "Does what it is given." } }, task = { new = { title = "{{input:Trouble}}", ask = "As the brief says.", attachments = [] } }, effort = "low" } }, save = "job" },
+  { call = { wait = { on = { report = "{{job.task}}" }, task = "{{input:Current task}}", progress = { note = "Delegated; waiting on the worker.", done = 10 } } } },
 ]
 
 [[turn]]
-when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Report on task" }
+when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Report on: " }
 steps = [
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "The worker's report is in." } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "The worker's report is in." } } },
 ]
 
 # A worker's second driver, after the first crashed.
 [[turn]]
 when = { start_pack_contains = "failed (ProcessExited { code: Some(3) })" }
 steps = [
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Done on the second driver." } } },
+  { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "Done on the second driver." } } },
 ]
 
 [[turn]]
-when = { input_contains = "crash once" }
+when = { input_contains = "crash-once" }
 steps = [{ text = "Working." }, { crash = 3 }]
 
 [[turn]]
-when = { input_contains = "crash always" }
+when = { input_contains = "crash-always" }
 repeat = true
 steps = [{ crash = 4 }]
 
 [[turn]]
-when = { input_contains = "never finish" }
+when = { input_contains = "never-finish" }
 repeat = true
 steps = [{ text = "Still thinking." }]
 
@@ -66,10 +66,10 @@ repeat = true
 steps = [{ text = "Still thinking." }]
 "#;
 
-/// The brief names the trouble; the CEO passes it on as the worker's task title.
+/// The brief names the trouble in one word; the CEO passes it on as the worker's task title.
 async fn delegate(trouble: &str) -> (World, TaskId) {
     let w = World::new(Setup::new(SCRIPT)).await;
-    let brief = w.brief(&format!("Task {trouble}")).await;
+    let brief = w.brief(&format!("Trouble: {trouble}")).await;
     (w, brief)
 }
 
@@ -109,7 +109,7 @@ fn reached_delegator(w: &World, task: TaskId) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_task_whose_driver_crashes_is_finished_by_the_next_and_reported() {
-    let (w, brief) = delegate("crash once").await;
+    let (w, brief) = delegate("crash-once").await;
     w.settle().await;
     let s = w.state();
     let (worker, task) = worker_task(&s);
@@ -131,7 +131,7 @@ async fn a_task_whose_driver_crashes_is_finished_by_the_next_and_reported() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_task_whose_drivers_keep_failing_is_reported_failed_after_three() {
-    let (w, brief) = delegate("crash always").await;
+    let (w, brief) = delegate("crash-always").await;
     w.until("the CEO has the failure report and finishes", |s| {
         matches!(s.task(brief).map(|t| &t.state), Some(TaskState::Done(..)))
     })
@@ -162,7 +162,7 @@ async fn a_task_whose_drivers_keep_failing_is_reported_failed_after_three() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_task_never_reported_nor_waited_on_is_nudged_then_reported_failed() {
-    let (w, brief) = delegate("never finish").await;
+    let (w, brief) = delegate("never-finish").await;
     w.settle().await;
     let s = w.state();
     let (worker, task) = worker_task(&s);

@@ -481,6 +481,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "agents.waits",
         "drivers.start_pack",
         "drivers.stop",
+        "daemon.set_clock",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);

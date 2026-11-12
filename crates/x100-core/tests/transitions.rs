@@ -165,6 +165,7 @@ fn agent_transitions() {
         wait_ended.clone(),
         no_driver.clone(),
         E::DriverFound,
+        E::StillWaiting,
         E::WentIdle,
         E::Retired,
     ];
@@ -172,6 +173,10 @@ fn agent_transitions() {
 
     let mut accepted = vec![
         (S::Working, events[1].clone(), on_waits.clone()),
+        // Another wait, in the turn that waited already.
+        (on_waits.clone(), events[1].clone(), on_waits.clone()),
+        // Woken from a wait, it ended a turn with its waits open and nothing else to do.
+        (S::Working, E::StillWaiting, on_waits.clone()),
         (
             S::Working,
             no_driver,

@@ -147,8 +147,6 @@ impl Actor_ {
                 provider: None,
             });
         }
-        self.transcript(Item::DriverChanged { from: previous })
-            .await;
         let Some(harness) = harness else {
             let detail = format!("harness {} is not registered", choice.harness);
             return self.fail(error(detail)).await;
@@ -158,6 +156,13 @@ impl Actor_ {
             Err(detail) => return self.fail(error(detail)).await,
         };
         let start_pack = self.start_pack(why).await;
+        // The pack is the driver's first entry, so it is on record before the driver can act.
+        self.transcript(Item::StartPack {
+            text: start_pack.clone(),
+        })
+        .await;
+        self.transcript(Item::DriverChanged { from: previous })
+            .await;
         let dir = self.ctx.store.git.worktree_path(agent);
         let spec = DriverSpec {
             driver,
@@ -268,19 +273,11 @@ impl Actor_ {
         .await
     }
 
-    /// Builds the start pack and keeps it beside the log, as the driver was given it.
     async fn start_pack(&self, why: StartReason) -> String {
-        let (ctx, agent, driver) = (Arc::clone(&self.ctx), self.agent, self.driver);
+        let (ctx, agent) = (Arc::clone(&self.ctx), self.agent);
         let window = self.offer.as_ref().map_or(200_000, |o| o.context_window);
         let share = (self.shared.settings)().start_pack_share.value();
-        blocking(move || {
-            let text = pack::build(&ctx.store, agent, &why, window, share);
-            if let Err(e) = crate::packs::keep(&ctx.store, driver, &text) {
-                eprintln!("x100: could not keep the start pack of {driver}: {e}");
-            }
-            text
-        })
-        .await
+        blocking(move || pack::build(&ctx.store, agent, &why, window, share)).await
     }
 
     async fn event(&self, event: DriverEvent) -> Result<(), String> {

@@ -141,6 +141,9 @@ fn every_notification_round_trips() {
         Item::DriverChanged {
             from: Some(id(x100_core::id::DriverId::new, 2)),
         },
+        Item::StartPack {
+            text: "ROLE: Tech\nYour id: agt_2\n".into(),
+        },
     ];
     let mut notices = vec![
         Notice::Event(EventNotice::Daemon {

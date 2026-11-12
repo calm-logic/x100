@@ -6,9 +6,6 @@
 //!
 //! These block on git, so they run on a blocking thread.
 
-use std::path::Path;
-use std::process::Command;
-
 use x100_core::event::ProjectEvent;
 use x100_core::git::CommitId;
 use x100_core::id::AgentId;
@@ -40,34 +37,28 @@ pub(crate) enum Merged {
 /// Commits everything in the agent's worktree to its branch, if it has a worktree and anything to
 /// commit. Called when the agent is between turns or blocked on the tool call that needs it, so
 /// nothing writes to the worktree meanwhile.
-///
-/// The store's `Git` checkpoints a worktree to a hidden ref without moving its branch, and has no
-/// way to commit to the branch itself, which a merge needs. This is the smallest form of that, run
-/// with the same care as the store's own git (no hooks, no prompts, a fixed identity); it belongs
-/// in `x100-store` as `Git::commit`.
 pub(crate) fn commit(store: &ProjectStore, agent: AgentId) -> Result<(), String> {
     let dir = store.git.worktree_path(agent);
     if !dir.exists() {
         return Ok(());
     }
-    git(&dir, &["add", "-A"])?;
-    let staged = git_status(&dir, &["diff", "--cached", "--quiet"])?;
-    if staged {
-        return Ok(());
-    }
-    let message = format!("x100: work of {agent}");
-    git(&dir, &["commit", "-q", "-m", &message]).map(drop)
+    store
+        .git
+        .commit(&dir, &format!("x100: work of {agent}"))
+        .map(drop)
+        .map_err(|e| format!("could not commit {agent}'s work: {e}"))
 }
 
 /// Merges `from`'s branch into `into`. A conflict is a result: the merge is undone and the
 /// conflict stated.
 pub(crate) fn merge(store: &ProjectStore, from: AgentId, into: Target) -> Result<Merged, String> {
-    let dir = match into {
+    let (dir, head) = match into {
         Target::Agent(a) => {
             commit(store, a)?;
-            store.git.worktree_path(a)
+            (store.git.worktree_path(a), branch(a))
         }
-        Target::Main => store.git.project_dir().to_path_buf(),
+        // The project's checkout, on whatever branch the builder has it.
+        Target::Main => (store.git.project_dir().to_path_buf(), "HEAD".to_owned()),
     };
     let from_branch = branch(from);
     let outcome = store
@@ -76,7 +67,7 @@ pub(crate) fn merge(store: &ProjectStore, from: AgentId, into: Target) -> Result
         .map_err(|e| format!("merging {from_branch} could not run: {e}"))?;
     Ok(match outcome {
         MergeOutcome::Merged { commit } => Merged::Into(commit),
-        MergeOutcome::UpToDate => Merged::Into(head_of(&dir)?),
+        MergeOutcome::UpToDate => Merged::Into(head_of(store, &head)?),
         MergeOutcome::Conflict { files, detail } => Merged::Conflict(format!(
             "merging {from_branch} conflicts in {}: {detail}",
             files.join(", ")
@@ -139,7 +130,7 @@ fn refreshed(store: &ProjectStore, agent: AgentId, from: Party) -> Result<Projec
     Ok(ProjectEvent::BranchRefreshed {
         agent,
         from,
-        commit: head_of(&store.git.worktree_path(agent))?,
+        commit: head_of(store, &branch(agent))?,
     })
 }
 
@@ -160,59 +151,11 @@ fn branch_of(store: &ProjectStore, party: Party) -> Result<String, String> {
     }
 }
 
-fn head_of(dir: &Path) -> Result<CommitId, String> {
-    git(dir, &["rev-parse", "HEAD"]).map(CommitId)
-}
-
-fn command(dir: &Path, args: &[&str]) -> Command {
-    let mut c = Command::new("git");
-    c.arg("-C")
-        .arg(dir)
-        .args([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("LC_ALL", "C")
-        .env("GIT_AUTHOR_NAME", "x100")
-        .env("GIT_AUTHOR_EMAIL", "x100@localhost")
-        .env("GIT_COMMITTER_NAME", "x100")
-        .env("GIT_COMMITTER_EMAIL", "x100@localhost");
-    c
-}
-
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = command(dir, args)
-        .output()
-        .map_err(|e| format!("could not run git: {e}"))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-    } else {
-        Err(format!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ))
-    }
-}
-
-/// Runs a git command whose exit status is the answer: true for 0, false for 1.
-fn git_status(dir: &Path, args: &[&str]) -> Result<bool, String> {
-    let out = command(dir, args)
-        .output()
-        .map_err(|e| format!("could not run git: {e}"))?;
-    match out.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(format!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        )),
-    }
+fn head_of(store: &ProjectStore, rev: &str) -> Result<CommitId, String> {
+    store
+        .git
+        .resolve(rev)
+        .map_err(|e| format!("could not read {rev}: {e}"))
 }
 
 /// What the agent's worktree has changed since `base`, for its start pack.

@@ -45,8 +45,17 @@
 //! steps = []
 //! ```
 //!
-//! `{{name}}` in any string is replaced by a value saved earlier in the same driver; `{{input}}`
-//! is the current turn's input. A turn ends by itself after its last step.
+//! Placeholders in any string of a step:
+//!
+//! - `{{name}}` is a value saved earlier in the same driver, and `{{name.field}}` a field of a
+//!   saved JSON object. One that names nothing is left as written.
+//! - `{{input}}` is the current turn's input.
+//! - `{{input:<label>}}` reads a labelled line of the turn's input, and `{{pack:<label>}}` one of
+//!   the start pack: the first line that reads `<label>: <value>`, leading spaces aside, gives the
+//!   first word of its value. `{{input:Task}}` on the line `Task: tsk_01 (Build the site)` gives
+//!   `tsk_01`. No such line fails the driver, saying which lookup found nothing.
+//!
+//! A turn ends by itself after its last step.
 
 use std::collections::BTreeSet;
 use std::path::Path;

@@ -110,7 +110,8 @@ impl Daemon {
             processes: Arc::new(processes),
             desk,
             sandbox: Arc::new(NoSandbox),
-            serial: false,
+            // Turns run side by side, except where a fake clock asks for a repeatable run.
+            serial: config.fake_clock.is_some(),
         });
         let hub = Arc::new(Hub::new(config.clone(), log, orch));
 

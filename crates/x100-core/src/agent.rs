@@ -87,7 +87,8 @@ pub enum AgentEvent {
         item: InboxItemId,
         what: InboxItem,
     },
-    /// It called `wait`.
+    /// It called `wait`. An agent may hold several waits, and may wait again in a turn that already
+    /// waited.
     WaitOpened(Wait),
     /// A wait ended. Waking is done by the inbox item that says so, not by this.
     WaitEnded {
@@ -96,6 +97,8 @@ pub enum AgentEvent {
     },
     NoDriver(Vec<Incompatible>),
     DriverFound,
+    /// A turn ended with waits still open and nothing else to do: the agent waits on them again.
+    StillWaiting,
     WentIdle,
     Retired,
     EffortSet(EffortRange),
@@ -119,6 +122,7 @@ impl AgentEvent {
             AgentEvent::WaitEnded { .. } => "WaitEnded",
             AgentEvent::NoDriver(_) => "NoDriver",
             AgentEvent::DriverFound => "DriverFound",
+            AgentEvent::StillWaiting => "StillWaiting",
             AgentEvent::WentIdle => "WentIdle",
             AgentEvent::Retired => "Retired",
             AgentEvent::EffortSet(_) => "EffortSet",
@@ -131,8 +135,10 @@ impl AgentEvent {
 
 /// The agent machine. Planned → Working when its first inbox item arrives. Working → Waiting when
 /// it waits, or when no driver can be found; Waiting → Working when anything reaches its inbox, or,
-/// waiting for a driver, when one is found. Working → Idle; Idle → Working when anything reaches
-/// its inbox. Waiting for a driver → Idle when that wait reached its deadline and the task was
+/// waiting for a driver, when one is found. Its other waits stay open when it wakes, so a turn that
+/// ends with waits open and nothing else to do takes it from Working back to Waiting, and it may
+/// open another wait while it is Waiting on its waits. Working → Idle; Idle → Working when
+/// anything reaches its inbox. Waiting for a driver → Idle when that wait reached its deadline and the task was
 /// reported failed. Idle → Retired, and Planned → Retired for a lead a team change removes before
 /// any work reached it. There is no Failed state: drivers fail, agents do not.
 ///
@@ -144,7 +150,8 @@ pub fn next(state: &AgentState, event: &AgentEvent) -> Result<AgentState, Reject
     let next = match (state, event) {
         (S::Retired, _) => None,
         (_, E::Delivered { .. }) => Some(S::Working),
-        (S::Working, E::WaitOpened(_)) => Some(S::Waiting(Waiting::OnWaits)),
+        (S::Working | S::Waiting(Waiting::OnWaits), E::WaitOpened(_))
+        | (S::Working, E::StillWaiting) => Some(S::Waiting(Waiting::OnWaits)),
         (S::Working | S::Waiting(_), E::WaitEnded { .. }) => Some(state.clone()),
         (S::Working, E::NoDriver(why)) => Some(S::Waiting(Waiting::ForDriver(why.clone()))),
         (S::Waiting(Waiting::ForDriver(_)), E::DriverFound) => Some(S::Working),

@@ -205,6 +205,48 @@ async fn a_script_branches_on_markers_in_the_start_pack_and_the_input() {
     lead.stop().await;
 }
 
+const LOOKING_UP: &str = r#"
+[[turn]]
+when = { input_contains = "Task:" }
+steps = [
+  { text = "I am {{pack:Your id}}, on {{input:Task}} from {{input:Delegated by}}" },
+  { call = { set_preview = { url = "http://localhost/{{input:Task}}" } } },
+  { text = "next: {{input:Nothing here}}" },
+  { text = "never said" },
+]
+"#;
+
+#[tokio::test]
+async fn a_script_reads_labelled_lines_of_its_input_and_start_pack() {
+    let s = setup(LOOKING_UP);
+    let mut lookup_spec = spec_in(&s.work);
+    lookup_spec.start_pack = "ROLE: Tech\nYour id: agt_7\n\nCHARTER:\nBuild.\n".into();
+    let mut handle = s.harness.start(lookup_spec).await.unwrap();
+    handle
+        .turn("A task for you.\n  Task: tsk_3 (Build the site)\nDelegated by: agt_1 (CEO)\nTask: tsk_9")
+        .await
+        .unwrap();
+    let seen = until_end(&mut handle).await;
+    // The first matching line gives the first word of its value, indented or not.
+    assert_eq!(texts(&seen), ["I am agt_7, on tsk_3 from agt_1"]);
+    let calls = s.tools.calls.lock().unwrap().clone();
+    assert!(
+        matches!(&calls[0].2, x100_core::tool::ToolCall::SetPreview { url } if url == "http://localhost/tsk_3")
+    );
+    // A label the input lacks fails the driver, and says which lookup found nothing.
+    match seen.last() {
+        Some(DriverOutput::Failed(Failure::Error {
+            detail,
+            provider: None,
+        })) => assert_eq!(
+            detail,
+            "{{input:Nothing here}}: the turn's input has no line \"Nothing here: ...\""
+        ),
+        other => panic!("expected a failure naming the lookup, got {other:?}"),
+    }
+    handle.stop().await;
+}
+
 #[tokio::test]
 async fn one_binary_poses_as_two_providers_with_their_own_models_and_prices() {
     let other = r#"

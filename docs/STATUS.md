@@ -70,11 +70,10 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-- Contract fixes M6a asked for, then M6b. Opus subagent. The fake harness's scripts cannot read an id from
-  what a turn is given, so M6a's tests pass ids through an adapter in the test code. The daemon cannot run the
-  Fernleaf script until that is fixed, and M7 needs it to. Also: a commit to a branch in the store, the start
-  pack recorded in the transcript, a second wait while waiting, and a wake for the scheduler.
-- M6b after that: the tools served to real harnesses over MCP.
+- M6b: the daemon's tools served to real harnesses over MCP. Opus subagent, owns `crates/x100-orch` and
+  `crates/x100d`. It also fixes a race CI found on macOS: shutdown did not wait for a crashed driver's task,
+  so its pid could still be on record when a test looked (`x100-orch` test `failures`, run of 585032e).
+- The terminal stream in the contract (core, store, proto), for M3T and the interfaces. Sonnet subagent.
 
 ## Waiting on the owner
 
@@ -169,6 +168,15 @@ From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted
 - **Codex** is driven through `codex app-server`, not `codex exec`.
 
 From M6a:
+
+- **Contract fixes after M6a**, verified by the orchestrator (255 tests pass twice, all 7 models proved and 10
+  broken variants refuted). Scripts read ids from labelled lines of the turn input and start pack
+  (`{{input:Task}}`, `{{pack:Your id}}`), and the test adapter is gone. The Fernleaf script now runs through
+  the real daemon as a child process. For that the daemon has a fake-clock mode (`--fake-clock`, only with a
+  scripts directory) that runs one turn at a time, and a protocol method `daemon.set_clock` to move it. The
+  start pack is the first transcript entry of each driver. An agent may hold several open waits
+  (`StillWaiting` moves it back to Waiting after a turn). The store commits a worktree to its branch. The
+  scheduler can be woken.
 
 - **Seams left for later milestones** in `x100-orch`: `DriverChooser` (M8), `Sandbox::wrap` (M10), `Gate::rule`
   (M12). Tool calls and merges both pass the gate.

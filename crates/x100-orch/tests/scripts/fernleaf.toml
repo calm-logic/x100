@@ -3,11 +3,12 @@
 # waiting on a job of its own, a daily job delegating smoke tests, and the final report.
 #
 # Every agent plays this one script; a turn is picked by the role in its start pack and by what its
-# input says. Ids a model would read from its start pack are the stand-ins of tests/common:
-#   tsk_..01 my current task    tsk_..02 the task I delegated that is in review
-#   tsk_..03 the raised task    msg_..01 the message my turn was given
-#   agt_..01 Tech  agt_..02 Product  agt_..03 Marketing  agt_..09 me
-# Times are on the fake clock, which starts at 1794387600000.
+# input says. Ids come from labelled lines, as a model would read them: `{{pack:Your id}}` and
+# `{{pack:Lead Tech}}` from the start pack, `{{input:Current task}}`, `{{input:Task}}`,
+# `{{input:Report on}}` and `{{input:Message}}` from the turn's input. A value saved from a call
+# lasts only as long as the driver that made it, so a turn after the clock moves uses lookups.
+# Times are on a fake clock that starts at 1794387600000. The orchestrator's test runs this script
+# in its own process; the daemon's test runs it through the daemon.
 
 [harness]
 name = "fake-fernleaf"
@@ -40,7 +41,7 @@ steps = [
   { call = { delegate = { to = { child = "{{team.Tech}}" }, task = { new = { title = "Build the site", ask = "An Astro site with a waitlist.", attachments = [] } }, effort = "medium" } }, save = "site" },
   { call = { delegate = { to = { child = "{{team.Product}}" }, task = { new = { title = "Write the PRD", ask = "From the BRD.", attachments = [] } }, effort = "low" } }, save = "prd" },
   { call = { message = { to = "builder", body = "Forest greens or ocean blues?", attachments = [] } }, save = "question" },
-  { call = { wait = { on = { reply = { message = "{{question.message}}", from = "builder" } }, task = "tsk_00000000000000000000000001", progress = { note = "BRD drafted, team formed. Waiting on the palette.", done = 15 } } } },
+  { call = { wait = { on = { reply = { message = "{{question.message}}", from = "builder" } }, task = "{{input:Current task}}", progress = { note = "BRD drafted, team formed. Waiting on the palette.", done = 15 } } } },
   { usage = { input = 4200, output = 900, cost_micros = 42000 } },
 ]
 
@@ -51,7 +52,7 @@ steps = [
   { call = { write_spec = { spec = "add", status = "draft", body = "# ADD\nAstro, Tailwind, Workers." } } },
   { call = { delegate = { to = { new_worker = { role = "Backend", charter = "Backend for the site." } }, task = { new = { title = "Build the API", ask = "The waitlist API.", attachments = [] } }, effort = "medium" } }, save = "api" },
   { call = { delegate = { to = { new_worker = { role = "Frontend", charter = "Frontend for the site." } }, task = { new = { title = "Build the landing page", ask = "From the sketch.", attachments = [] } }, effort = "high" } }, save = "landing" },
-  { call = { wait = { on = { report = "{{landing.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "API and landing page delegated.", done = 10 } } } },
+  { call = { wait = { on = { report = "{{landing.task}}" }, task = "{{input:Current task}}", progress = { note = "API and landing page delegated.", done = 10 } } } },
   { usage = { input = 3100, output = 700, cost_micros = 31000 } },
 ]
 
@@ -59,10 +60,10 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "ROLE: Product\n", input_contains = "Write the PRD" }
 steps = [
-  { call = { delegate = { to = { child = "agt_00000000000000000000000001" }, task = { new = { title = "Pick the stack", ask = "For the PRD.", attachments = [] } }, effort = "low" } } },
+  { call = { delegate = { to = { child = "{{pack:Lead Tech}}" }, task = { new = { title = "Pick the stack", ask = "For the PRD.", attachments = [] } }, effort = "low" } } },
   { call = { delegate = { to = { new_worker = { role = "Research", charter = "Research for the PRD." } }, task = { new = { title = "Research competitors", ask = "Three plant shops.", attachments = [] } }, effort = "low" } }, save = "competitors" },
-  { call = { message = { to = { agent = "agt_00000000000000000000000001" }, body = "Which framework is the site on?", attachments = [] } }, save = "question" },
-  { call = { wait = { on = { reply = { message = "{{question.message}}", from = { agent = "agt_00000000000000000000000001" } } }, task = "tsk_00000000000000000000000001", progress = { note = "Outline done; waiting on Tech for the stack.", done = 20 } } } },
+  { call = { message = { to = { agent = "{{pack:Lead Tech}}" }, body = "Which framework is the site on?", attachments = [] } }, save = "question" },
+  { call = { wait = { on = { reply = { message = "{{question.message}}", from = { agent = "{{pack:Lead Tech}}" } } }, task = "{{input:Current task}}", progress = { note = "Outline done; waiting on Tech for the stack.", done = 20 } } } },
   { usage = { input = 1200, output = 300, cost_micros = 12000 } },
 ]
 
@@ -72,7 +73,7 @@ when = { start_pack_contains = "ROLE: Backend\n", input_contains = "Build the AP
 steps = [
   { write = "api/waitlist.ts", content = "export const waitlist: string[] = [];\n" },
   { call = { delegate = { to = { new_worker = { role = "Migrations", charter = "Schema migrations." } }, task = { new = { title = "Write the schema migrations", ask = "The waitlist table.", attachments = [] } }, effort = "medium" } }, save = "schema" },
-  { call = { wait = { on = { report = "{{schema.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "Routes sketched; schema delegated.", done = 30 } } } },
+  { call = { wait = { on = { report = "{{schema.task}}" }, task = "{{input:Current task}}", progress = { note = "Routes sketched; schema delegated.", done = 30 } } } },
   { usage = { input = 1500, output = 400, cost_micros = 15000 } },
 ]
 
@@ -81,8 +82,8 @@ steps = [
 when = { start_pack_contains = "ROLE: Frontend\n", input_contains = "Build the landing page" }
 steps = [
   { write = "site/index.html", content = "<h1>Fernleaf</h1>\n" },
-  { call = { raise_task = { title = "Check the mobile layout", ask = "The grid breaks under 400px.", attachments = [] } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Landing page built." } } },
+  { call = { raise_task = { title = "Check the mobile layout", ask = "The grid breaks under 400px.", attachments = [] } }, save = "idea" },
+  { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "Landing page built.\nRaised: {{idea.task}}" } } },
   { usage = { input = 2000, output = 600, cost_micros = 20000 } },
 ]
 
@@ -90,8 +91,8 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "ROLE: Research\n", input_contains = "Research competitors" }
 steps = [
-  { call = { schedule = { when = { once = { at = 1794391200000 } }, does = { wake = { agent = "agt_00000000000000000000000009", note = "Pricing pages update at noon; look again." } } } }, save = "recheck" },
-  { call = { wait = { on = { job = "{{recheck.job}}" }, task = "tsk_00000000000000000000000001", progress = { note = "Three found; pricing to recheck.", done = 70 } } } },
+  { call = { schedule = { when = { once = { at = 1794391200000 } }, does = { wake = { agent = "{{pack:Your id}}", note = "Pricing pages update at noon; look again." } } } }, save = "recheck" },
+  { call = { wait = { on = { job = "{{recheck.job}}" }, task = "{{input:Current task}}", progress = { note = "Three found; pricing to recheck.", done = 70 } } } },
   { usage = { input = 900, output = 200, cost_micros = 4000 } },
 ]
 
@@ -100,10 +101,10 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "ROLE: Tech\n", input_contains = "Which framework is the site on?" }
 steps = [
-  { call = { message = { to = { agent = "agt_00000000000000000000000002" }, body = "Astro with Tailwind.", attachments = [], in_reply_to = "msg_00000000000000000000000001" } } },
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
-  { call = { delegate = { to = { child = "{{landing.agent}}" }, task = { raised = "tsk_00000000000000000000000003" }, effort = "medium" } }, save = "mobile" },
-  { call = { wait = { on = { report = "{{api.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "Landing page in; waiting on the API.", done = 50 } } } },
+  { call = { message = { to = { agent = "{{pack:Lead Product}}" }, body = "Astro with Tailwind.", attachments = [], in_reply_to = "{{input:Message}}" } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
+  { call = { delegate = { to = { child = "{{landing.agent}}" }, task = { raised = "{{input:Raised}}" }, effort = "medium" } }, save = "mobile" },
+  { call = { wait = { on = { report = "{{api.task}}" }, task = "{{input:Current task}}", progress = { note = "Landing page in; waiting on the API.", done = 50 } } } },
   { usage = { input = 1800, output = 400, cost_micros = 18000 } },
 ]
 
@@ -112,7 +113,7 @@ steps = [
 when = { start_pack_contains = "ROLE: Product\n", input_contains = "Astro with Tailwind." }
 steps = [
   { call = { write_spec = { spec = "prd", status = "draft", body = "# PRD\nWaitlist, plant grid." } } },
-  { call = { wait = { on = { report = "{{competitors.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "PRD drafted; waiting on research.", done = 50 } } } },
+  { call = { wait = { on = { report = "{{competitors.task}}" }, task = "{{input:Current task}}", progress = { note = "PRD drafted; waiting on research.", done = 50 } } } },
   { usage = { input = 1100, output = 300, cost_micros = 9000 } },
 ]
 
@@ -120,7 +121,7 @@ steps = [
 when = { start_pack_contains = "ROLE: Migrations\n", input_contains = "Write the schema migrations" }
 steps = [
   { write = "migrations/0001.sql", content = "create table waitlist (email text primary key);\n" },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "One table, one key." } } },
+  { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "One table, one key." } } },
   { usage = { input = 700, output = 200, cost_micros = 3000 } },
 ]
 
@@ -128,15 +129,15 @@ steps = [
 when = { start_pack_contains = "ROLE: Frontend\n", input_contains = "Check the mobile layout" }
 steps = [
   { write = "site/mobile.css", content = "@media (max-width: 400px) { .grid { display: block; } }\n" },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Mobile layout fixed." } } },
+  { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "Mobile layout fixed." } } },
   { usage = { input = 800, output = 200, cost_micros = 6000 } },
 ]
 
 [[turn]]
 when = { start_pack_contains = "ROLE: Backend\n", input_contains = "One table, one key." }
 steps = [
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "The API is built." } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "The API is built." } } },
   { usage = { input = 900, output = 200, cost_micros = 7000 } },
 ]
 
@@ -146,7 +147,7 @@ when = { start_pack_contains = "ROLE: Tech\n", input_contains = "The API is buil
 steps = [
   { call = { review = { task = "{{mobile.task}}", verdict = "accept" } } },
   { call = { review = { task = "{{api.task}}", verdict = "accept" } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "The site is built." } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "The site is built." } } },
   { usage = { input = 1600, output = 300, cost_micros = 16000 } },
 ]
 
@@ -154,7 +155,7 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "The site is built." }
 steps = [
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
   { usage = { input = 1000, output = 100, cost_micros = 10000 } },
 ]
 
@@ -165,7 +166,7 @@ steps = [
   { call = { write_spec = { spec = "brd", status = "approved", body = "# BRD\nForest greens." } } },
   { call = { delegate = { to = { child = "{{team.Marketing}}" }, task = { new = { title = "Write the launch copy", ask = "Short and warm.", attachments = [] } }, effort = "low" } }, save = "copy" },
   { call = { schedule = { when = { every = { first = 1794394800000, every = { secs = 86400, nanos = 0 } } }, does = { delegate = { to = "{{team.Tech}}", title = "Run the smoke tests", ask = "Every morning.", effort = "low" } } } }, save = "smoke" },
-  { call = { wait = { on = { report = "{{copy.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "BRD approved; smoke tests daily.", done = 40 } } } },
+  { call = { wait = { on = { report = "{{copy.task}}" }, task = "{{input:Current task}}", progress = { note = "BRD approved; smoke tests daily.", done = 40 } } } },
   { usage = { input = 2000, output = 400, cost_micros = 20000 } },
 ]
 
@@ -173,15 +174,15 @@ steps = [
 when = { start_pack_contains = "ROLE: Marketing\n", input_contains = "Write the launch copy" }
 steps = [
   { write = "copy/launch.md", content = "Grow something.\n" },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Launch copy written." } } },
+  { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "Launch copy written." } } },
   { usage = { input = 600, output = 300, cost_micros = 2000 } },
 ]
 
 [[turn]]
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Launch copy written." }
 steps = [
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
-  { call = { wait = { on = { report = "{{prd.task}}" }, task = "tsk_00000000000000000000000001", progress = { note = "Copy in; waiting on the PRD.", done = 60 } } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
+  { call = { wait = { on = { report = "{{prd.task}}" }, task = "{{input:Current task}}", progress = { note = "Copy in; waiting on the PRD.", done = 60 } } } },
   { usage = { input = 900, output = 150, cost_micros = 9000 } },
 ]
 
@@ -190,16 +191,16 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "Progress note (70% done): Three found; pricing to recheck.", input_contains = "Pricing pages update at noon" }
 steps = [
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Two of three price per seat." } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Two of three price per seat." } } },
   { usage = { input = 700, output = 150, cost_micros = 3000 } },
 ]
 
 [[turn]]
 when = { start_pack_contains = "ROLE: Product\n", input_contains = "Two of three price per seat." }
 steps = [
-  { call = { review = { task = "{{competitors.task}}", verdict = "accept" } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
   { call = { write_spec = { spec = "prd", status = "approved", body = "# PRD\nApproved." } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "PRD approved." } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "PRD approved." } } },
   { usage = { input = 1000, output = 250, cost_micros = 8000 } },
 ]
 
@@ -207,8 +208,8 @@ steps = [
 [[turn]]
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "PRD approved." }
 steps = [
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Fernleaf is ready: the site, the copy and the PRD are in." } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Fernleaf is ready: the site, the copy and the PRD are in." } } },
   { usage = { input = 1200, output = 200, cost_micros = 12000 } },
 ]
 
@@ -217,7 +218,7 @@ steps = [
 when = { start_pack_contains = "ROLE: Tech\n", input_contains = "Run the smoke tests" }
 repeat = true
 steps = [
-  { call = { report = { task = "tsk_00000000000000000000000001", outcome = "completed", summary = "Smoke tests pass." } } },
+  { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "Smoke tests pass." } } },
   { usage = { input = 500, output = 100, cost_micros = 2000 } },
 ]
 
@@ -225,6 +226,6 @@ steps = [
 when = { start_pack_contains = "ROLE: CEO\n", input_contains = "Smoke tests pass." }
 repeat = true
 steps = [
-  { call = { review = { task = "tsk_00000000000000000000000002", verdict = "accept" } } },
+  { call = { review = { task = "{{input:Report on}}", verdict = "accept" } } },
   { usage = { input = 500, output = 50, cost_micros = 1000 } },
 ]

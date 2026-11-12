@@ -24,6 +24,11 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Item {
+    /// The first entry of each driver: the start pack it was started from, as it was given. It is
+    /// the only record of it, so a driver's start can be read back whatever happened since.
+    StartPack {
+        text: String,
+    },
     TurnStarted,
     /// Text the model wrote.
     Text {
@@ -53,7 +58,7 @@ pub enum Item {
     TurnEnded {
         how: TurnEnd,
     },
-    /// The first entry of a new driver: the agent's work carries on in the same transcript, with
+    /// Follows a new driver's start pack: the agent's work carries on in the same transcript, with
     /// the change marked. `from` is `None` for the agent's first driver.
     DriverChanged {
         from: Option<DriverId>,
