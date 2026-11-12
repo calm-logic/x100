@@ -7,3 +7,19 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+x100-core = { path = "../x100-core" }
+# `bundled` so the SQLite version is the same on every machine and no system library is needed.
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+# Only the channels: no runtime, so the store works under any executor.
+tokio = { version = "1", default-features = false, features = ["sync"] }
+
+[dev-dependencies]
+x100-core = { path = "../x100-core", features = ["testing"] }
+x100-proto = { path = "../x100-proto" }
+tempfile = "3"

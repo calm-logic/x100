@@ -28,10 +28,18 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   (takeover now 288,835 states after the agent machine change) and refutes all ten broken variants.
   `x100-core` is now the contract: only the orchestrator changes it. Later crates get the scenario builder
   through the `testing` feature.
+- **M2, store and protocol.** The orchestrator's run with `-p x100-store -p x100-proto` (M3 was mid-build in
+  its own crate): store 25 tests and proto 20 tests plus 3 doctests pass, clippy and fmt clean. Replay of the
+  670-event log gives identical state. Six late subscribers under four writer threads each get a snapshot,
+  then every later event once. A helper process killed with SIGKILL 40 times loses no reported event. A
+  checkpoint of a worktree with staged, unstaged, untracked, deleted and executable files restores the same
+  files without moving the branch or index. Git is the command line, SQLite is rusqlite bundled. 37 protocol
+  methods, each checked against `crates/x100-proto/PROTOCOL.md` by a test.
 
 ## In progress
 
-- M2, store and protocol. Sonnet subagent, owns `crates/x100-store` and `crates/x100-proto`.
+- Follow-up to M2, after M3 reports: the transcript entry type is defined in both the store and the protocol.
+  Move it into `x100-core` and add an item for a tool's live output, which the Team tab's live view needs.
 - M3, drivers and harnesses. Opus subagent, owns `crates/x100-drivers`. Real harnesses are tested against a
   local fake provider. The paid runs wait for the owner.
 
@@ -135,6 +143,8 @@ From M1a, where the documents were silent:
 
 ## Could not be verified, and why
 
-- Anything on macOS. There is no Mac, and nothing is pushed, so hosted CI has not run.
+- Anything on macOS. There is no Mac, and nothing is pushed, so hosted CI has not run. That includes the
+  store's git plumbing.
+- Durability against power loss. Only a killed process was tested.
 - S1 on macOS and native Linux. Under WSL nobody saw the window on the real screen (the Windows session was
   locked) and no input was sent to it, so flicker by eye, clicks, keys and scrolling are unchecked.
