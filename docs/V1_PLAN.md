@@ -64,6 +64,7 @@ engine, theming.
 | M1 | Domain, events and state machines | `x100-core` | M0 | Opus |
 | M2 | Store and protocol | `x100-store`, `x100-proto` | M1 | Sonnet |
 | M3 | Drivers and harnesses | `x100-drivers` | M1 | Opus |
+| M3T | Terminal drivers on local logins | `x100-drivers` | M3, M6 | Opus |
 | M4 | Jobs and the clock | `x100-jobs` | M2 | Sonnet |
 | M5 | Daemon and client library | `x100d`, `x100-client`, the turn loop in `x100-orch` | M2, M3, M4 | Sonnet |
 | M6 | Orchestration: agents, delegation and waiting | `x100-orch` | M5 | Opus |
@@ -79,7 +80,7 @@ engine, theming.
 | M16 | Desktop app: remaining tabs | `x100-app` | M15 | Sonnet |
 | M17 | Hardening and release | all | everything | Opus |
 
-Parallel pairs: S1 with M1. M3 with M2, then with M4. M7 with M8. M9 with M10. M11 with M12. M15 may run beside
+Parallel pairs: S1 with M1. M3 with M2, then with M4. M7 with M8. M3T beside M7 to M9. M9 with M10. M11 with M12. M15 may run beside
 M8 to M14.
 
 The terminal interface comes before the desktop app on purpose. It is the cheaper client, it proves the client
@@ -139,6 +140,24 @@ Check: the fake replays a script deterministically. When asked to, each real har
 in a temporary directory and reports usage. A second turn given to the same driver keeps the first turn's
 context. Stopping a driver stops its child process. A fake told to crash is reported Failed with the reason.
 One told to stall is reported Failed once the stall timeout passes on the fake clock, and not before.
+
+### M3T. Terminal drivers on local logins
+
+Each harness's own interactive program run in a pseudo-terminal as a driver, on the builder's local login:
+start it, give it the start pack and later turns, give it the daemon's tools, learn of turn ends, usage and
+context fill, compact it, stop it, and notice when it fails. Its terminal recorded per driver and followed
+live through the protocol.
+
+First task: confirm how `claude` and `codex` are driven as terminal programs today: how a prompt is given at
+start and typed later, which hook or signal says a turn ended, where usage and context fill can be read, how
+MCP servers and settings are given for one run without loading the builder's own hooks and memory files while
+keeping the builder's login, how first-run and trust prompts are avoided, and what the harness's own terms
+say. Report before building.
+
+Check: against a fake provider on localhost, each real program in a pseudo-terminal completes a one-file
+edit, calls one of the daemon's tools, takes a second turn that keeps the first turn's context, and is
+stopped with nothing left running. The recorded terminal replays to the same screen. A client following the
+terminal sees output as it arrives. When asked to, the same on the builder's local login for each harness.
 
 ### M4. Jobs and the clock
 

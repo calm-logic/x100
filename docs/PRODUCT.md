@@ -188,8 +188,9 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 
 ### Bring your own tools, agents, stack, O/S
 
-- **v1** x100 runs the agent harnesses the builder already has, as drivers. First targets are Claude Code and
-  Codex. Others, including a custom harness around any LLM, plug in through one harness interface.
+- **v1** x100 runs the agent harnesses the builder already has, as drivers, on the logins the builder already
+  has, subscriptions included. Each such driver runs in a terminal of its own, which the builder sees by
+  opening the agent in the Team tab. First targets are Claude Code and Codex. Others, including a custom harness around any LLM, plug in through one harness interface.
 - **v1** Agents use the builder's own tools and accounts: git hosting, cloud, databases.
 - **v1** Runs on the builder's operating system. See `ARCHITECTURE.md` for which ones come first.
 - **page only** The fifty-odd logos are illustrative. They are not a list of integrations to build.

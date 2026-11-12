@@ -65,18 +65,24 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## Waiting on the owner
 
-1. **Pushing.** Asked once M0 is accepted. Until then everything is local.
-2. **Real-provider runs.** None made yet. M3's paid check is 6 to 8 model calls in all on the cheapest models
-   (Haiku 5.5, gpt-6-luna at low effort), a few cents. It needs `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in the
-   environment, and runs with
-   `X100_REAL_PROVIDERS=1 cargo test -p x100-drivers --test real_providers -- --ignored --test-threads=1`.
-   The orchestrator does not read key files. M9 and M17 need more, counted when they come.
-5. **Subscription logins.** v1 supports provider API keys only, see decisions. Say if a Claude or ChatGPT
-   subscription must work in v1.
-3. **Credentials in Settings.** Added to `PRODUCT.md` as v1, because condition 6 cannot be met unless the
-   builder can add a credential. Say if it should be done another way.
+1. **The login file inside the sandbox.** Running a harness on a local subscription means its login file is
+   readable inside that agent's sandbox, an exception to "agents never hold credential values" for the
+   provider login only. Built that way, with the limits in ARCHITECTURE "Harnesses", unless the owner objects.
+2. **Typing into an agent's terminal.** PRODUCT says opening an agent is for watching only. Kept. Say if the
+   builder should be able to take the keyboard.
+3. **Real-provider runs.** None made yet. M3's check has a part that must run against the real providers:
+   each real harness makes a one-file edit and takes a second turn. It is written and has not run, because
+   real runs need the owner's say-so. With local logins now wanted, it runs on those once M3T exists, and
+   uses a little of each subscription's allowance: about four short turns per harness. Needs a yes.
 4. **Open questions 1 and 2 in `PRODUCT.md`.** The build uses the recommended answers: the CEO may invent any
    role with a charter, and team changes need the builder's agreement.
+
+## Owner's decisions during the build
+
+- **2026-11-12. Push to `origin`.** Allowed. Pushed after each accepted milestone from now on.
+- **2026-11-12. Local subscriptions.** x100 must run the builder's local agents on their own subscriptions,
+  as Orca, herdr and T3 Code do, each in a dedicated terminal reachable from the Team tab by drilldown. This
+  replaced "API keys only". It added milestone M3T and the two ways of running a harness in ARCHITECTURE.
 
 ## Toolchain, checked 2026-11-11
 
@@ -131,8 +137,9 @@ All in **proposed** parts, made in the review before M0. Reasons in brief.
 
 From M3's first task, the research in `docs/HARNESSES.md`, where it contradicted the architecture:
 
-- **Logins.** API keys only in v1. Claude Code's isolated mode reads no subscription token, Anthropic's terms
-  restrict third-party use of claude.ai login, and Codex's ChatGPT login is OAuth with refresh.
+- **Logins.** Headless drivers take API keys only: Claude Code's isolated mode reads no subscription token and
+  Codex's ChatGPT login is OAuth with refresh. Subscriptions are served by terminal drivers, see the owner's
+  decisions.
 - **Background processes.** A harness kills its own on stop, so `start_process` and `stop_process` are daemon
   tools and the sandbox owns what they start.
 - **Sandbox endpoints.** Neither harness takes a Unix socket for MCP or its proxy, so bubblewrap needs a

@@ -213,12 +213,31 @@ and model at Low effort. A one-off call is not a driver and belongs to no agent.
 the classifier's to the acting agent's lead or the project, the judge's to the lab line. Tests script both
 through the fake harness.
 
-**proposed** A harness logs in to its provider with a credential from the vault, like any other credential: the
-driver's environment holds a reference, and the proxy swaps it for the value on the provider's hosts only. The
-builder adds each provider's API key to the vault once. A subscription login is not supported in v1: Claude
-Code's cannot be given as a placeholder in its isolated mode and Anthropic's terms restrict third-party use
-of it, and Codex's is OAuth with refresh. Until M11 the real harnesses run with a key from the builder's
-environment, outside any sandbox, in tests only.
+**decided (owner, 2026-11-12)** x100 runs the builder's local agents on their own subscriptions, the way Orca,
+herdr and T3 Code do. Such a driver is the harness's own terminal interface, run in a terminal of its own, and
+the builder reaches that terminal from the Team tab by opening the agent.
+
+**proposed** So each harness can be run in two ways, and the router treats them as two harnesses with their
+own models and prices:
+
+- **In a terminal, on the builder's local login.** The daemon starts the harness's own interactive program
+  (`claude`, `codex`) in a pseudo-terminal in the agent's sandbox, exactly as the builder would run it, with
+  the login the builder already has. It gives it the start pack as its first prompt and later turns as typed
+  input, gives it the daemon's tools through the harness's MCP settings, and learns of turn ends, usage and
+  context fill through the harness's own hooks and status output. The terminal's bytes are recorded per
+  driver and followed live, which is what opening the agent shows. This is the default where a local login
+  exists. Milestone M3T builds it, and its first task is to confirm how each program is driven this way.
+- **Headless, on an API key from the vault.** As M3 built: stream-json for Claude Code and `codex app-server`
+  for Codex, the key held by reference and swapped in by the proxy. Its output is structured, so the agent's
+  view shows the transcript rendered as a terminal.
+
+**proposed, needs the owner** A harness on a local login reads its own login file, and that file has to be
+visible inside the agent's sandbox for the harness to start. Commands the agent runs there could read it. This
+is an exception to "agents never hold credential values", for the provider login only. Every other credential
+still goes through the vault. What limits it: the file is mounted read-only and nowhere else in the home
+directory is, the harness is told to refuse reads of it, and anything a driver emits is scanned for its
+contents. The owner chose local logins, and this follows from that choice, so it is built this way unless the
+owner says otherwise.
 
 ## What lives outside a driver
 
@@ -652,6 +671,7 @@ written as paths here. The first four belong to the daemon, the rest to one proj
 | `/agents/{id}/inbox` | What has been delivered to the agent and not yet handled. |
 | `/agents/{id}/waits` | What the agent is waiting for, each with its deadline. |
 | `/agents/{id}/transcript` | The agent's work across all its drivers, in x100's own format, with each handoff marked. Following it is the live view. |
+| `/drivers/{id}/terminal` | A terminal driver's screen: the bytes its program wrote, recorded and followed live. |
 | `/drivers/` | Every driver, live or ended: agent, harness, model, effort, machine, state, context fill, cost, its start pack, the driver it replaced, and why it ended. Stopping one hands its work on. |
 | `/tasks/` | Raised and delegated work: what is asked, delegator, assignee, effort needed, status, progress note, report. |
 | `/messages/` | Messages between agents, and between the builder and the CEO, which is the chat. |
@@ -778,8 +798,9 @@ None of these blocks work. Each is built as written unless the owner says otherw
     into the project's main branch.
 15. After the first team, every change to the team is held for the builder in v1.
 16. Budgets count cost at list price, also under a subscription login.
-17. A harness's provider login is a vault credential the builder adds once. x100 does not read a harness's own
-    login files.
+17. A headless driver's provider login is an API key in the vault. A terminal driver uses the builder's local
+    login, whose file is visible inside that agent's sandbox, read-only. x100 itself never reads it.
+19. Opening an agent shows its terminal for watching. The builder does not type into it.
 18. Without an OS keychain the vault's key is a file only the builder's user can read.
 
 One question is left for V2: whether a relay run by the x100 project is acceptable for phones.
