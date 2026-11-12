@@ -221,23 +221,31 @@ the builder reaches that terminal from the Team tab by opening the agent.
 own models and prices:
 
 - **In a terminal, on the builder's local login.** The daemon starts the harness's own interactive program
-  (`claude`, `codex`) in a pseudo-terminal in the agent's sandbox, exactly as the builder would run it, with
-  the login the builder already has. It gives it the start pack as its first prompt and later turns as typed
-  input, gives it the daemon's tools through the harness's MCP settings, and learns of turn ends, usage and
-  context fill through the harness's own hooks and status output. The terminal's bytes are recorded per
-  driver and followed live, which is what opening the agent shows. This is the default where a local login
-  exists. Milestone M3T builds it, and its first task is to confirm how each program is driven this way.
+  (`claude`, `codex`), unmodified, in a pseudo-terminal in the agent's sandbox, on the login the builder
+  already has. The start pack goes in as appended instructions and each turn as typed input. The daemon's
+  tools go in through the harness's MCP settings. Turn ends, failures and usage come from the harness's own
+  hooks, which post to the daemon, and from the state the program reports on its terminal. For Codex the
+  daemon also runs Codex's own app-server on the same login and attaches the terminal to it, which gives
+  structured events as well as the terminal. The terminal's bytes are recorded per driver and followed live,
+  which is what opening the agent shows. The daemon keeps a terminal emulator per driver, since the program
+  asks its terminal questions and expects answers whether or not anyone is watching. This is the default
+  where a local login exists. `docs/HARNESSES.md` records how each program is driven.
 - **Headless, on an API key from the vault.** As M3 built: stream-json for Claude Code and `codex app-server`
   for Codex, the key held by reference and swapped in by the proxy. Its output is structured, so the agent's
   view shows the transcript rendered as a terminal.
 
-**proposed, needs the owner** A harness on a local login reads its own login file, and that file has to be
-visible inside the agent's sandbox for the harness to start. Commands the agent runs there could read it. This
-is an exception to "agents never hold credential values", for the provider login only. Every other credential
-still goes through the vault. What limits it: the file is mounted read-only and nowhere else in the home
-directory is, the harness is told to refuse reads of it, and anything a driver emits is scanned for its
-contents. The owner chose local logins, and this follows from that choice, so it is built this way unless the
-owner says otherwise.
+**proposed, needs the owner** A harness on a local login reads its own login, and rewrites it when the token
+refreshes, so it must be reachable and writable inside the agent's sandbox. Commands the agent runs there
+could read it. This is an exception to "agents never hold credential values", for the provider login only.
+Every other credential still goes through the vault. x100 itself never reads, copies or stores the login,
+which the providers' terms also require. What limits the exception: nothing else of the builder's home is
+visible, the harness is told to refuse reads of the login, and anything a driver emits is scanned for it. How
+one login is shared among many drivers is open until M3T tries it on a real login. The owner chose local
+logins, and this follows from that choice, so it is built this way unless the owner says otherwise.
+
+**proposed** Several drivers at once on one subscription is what the providers' terms leave unclear, and
+their limits assume one person's use. So the builder sets how many terminal drivers may run at once on each
+login, and the router counts it like a machine's cap.
 
 ## What lives outside a driver
 

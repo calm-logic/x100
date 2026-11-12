@@ -77,6 +77,10 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 4. **Open questions 1 and 2 in `PRODUCT.md`.** The build uses the recommended answers: the CEO may invent any
    role with a charter, and team changes need the builder's agreement.
 
+5. **Many agents on one subscription.** The providers' terms allow running their unmodified program on your
+   own login, and leave several automated sessions at once unclear. The risk is throttling of the account. The
+   build adds a cap per login on terminal drivers running at once. Say what the default should be. Proposed: 4.
+
 ## Owner's decisions during the build
 
 - **2026-11-12. Push to `origin`.** Allowed. Pushed after each accepted milestone from now on.
@@ -199,8 +203,10 @@ From M1a, where the documents were silent:
 
 ## Could not be verified, and why
 
-- Anything on macOS. There is no Mac, and nothing is pushed, so hosted CI has not run. That includes the
-  store's git plumbing.
+- macOS by hosted CI only. First run, 2026-11-12, of commit 2c3a3e3: Linux and macOS both green, which covers
+  the store's git plumbing, the kill tests and the daemon restart test there. The next push failed on macOS in
+  one test, `two_clients_see_the_same_events`, a race in the test between two followers. Being fixed with M6a.
+  The sandbox, the keychain and GPUI are not covered by CI.
 - Durability against power loss. Only a killed process was tested.
 - A crash between deciding to fire a job and appending it. The append is the commit, so it follows from the
   store's kill test, but no test kills the scheduler there.

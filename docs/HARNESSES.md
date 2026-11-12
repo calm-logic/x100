@@ -1,4 +1,4 @@
-# How Claude Code and Codex run headless
+# How Claude Code and Codex are run
 
 Status: research for M3, 2026-11-11. From the installed versions (Claude Code 2.1.322, Codex 0.167.1), their
 help, the Claude Agent SDK's types (`@anthropic-ai/claude-agent-sdk` 0.3.322, `sdk.d.ts`), the schema Codex
@@ -113,3 +113,91 @@ Paid, each under about a cent, on Haiku 5.5 and gpt-6-luna at low effort, about 
 keep context; compaction on request; the permission hook (under `--bare` for Claude, with the sandbox off for
 Codex); an MCP tool call with a per-driver token; a clean stop with nothing left running; and M3's own check,
 the one-file edit.
+
+# As terminal programs, on local logins
+
+Research for M3T, 2026-11-12. Both real programs were run in a pseudo-terminal against the fake provider,
+inside a sandbox with no network, with dummy logins. No provider and no subscription was used. Scratch runs
+with recorded terminals are under the session scratchpad in `m3t-research/`.
+
+Against the fake provider both programs, in a terminal: made a one-file edit, called a daemon tool over MCP
+with its bearer token, took a second turn that kept context, compacted on `/compact`, and stopped with
+nothing left running.
+
+## Claude Code in a terminal
+
+- **Start.** `claude --model M --settings FILE --setting-sources "" --strict-mcp-config --mcp-config FILE
+  --append-system-prompt-file PACK --permission-mode bypassPermissions "first prompt"`, with a clean
+  environment and `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_AUTO_COMPACT`,
+  `CLAUDE_CODE_MAX_RETRIES=1`, `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. `--bare`
+  cannot be used: it reads no subscription login. The start pack goes in the appended system prompt (41 KB
+  arrived whole), not in a paste, which Claude treats as possibly untrusted.
+- **First-run screens** are avoided by seeding `.claude.json` in the config directory with
+  `hasCompletedOnboarding`, a theme, and `hasTrustDialogAccepted` for the worktree. `settings` needs
+  `skipDangerousModePermissionPrompt`.
+- **A further turn.** One write of a bracketed paste, then Enter as a separate write about 250 ms later. A
+  prompt typed mid-turn is queued. Esc interrupts.
+- **Turn end.** The `Stop` hook, with the last message. `StopFailure` on an error, with a category
+  (`rate_limit`, `authentication_failed`, `server_error`). An interrupt fires neither. Hooks can be of type
+  `http`, so the daemon is the hook.
+- **State on the terminal.** Claude asks `OSC 7501 ?`, and once the terminal answers it reports
+  `state=idle|working|done|blocked|error` with a kind. This covers the interrupt and serves as a watchdog.
+- **Usage.** On `Stop`, the rows added to the session file named in the hook carry each request's tokens. The
+  status line command receives cumulative cost and context fill, but runs only now and then.
+- **Tools.** HTTP MCP with a bearer header. In bypass mode the daemon's tools never prompt.
+- **Gate.** A `PreToolUse` hook that denies reaches the model with its reason. A `PermissionRequest` hook can
+  allow with no dialog drawn.
+- **Stop.** SIGTERM or closing the terminal. Background commands run in sessions of their own, so stopping
+  must use the sandbox's process namespace, not the process group.
+- **Login.** On Linux a file in the config directory, rewritten by rename when the token refreshes. On macOS
+  the Keychain, keyed to the config directory. A fresh config directory holding only a login file started as
+  a subscriber.
+- **Terminal.** Alternate screen, mouse and focus reporting, bracketed paste. It queries the terminal (device
+  attributes, version, keyboard) and expects answers.
+
+## Codex in a terminal
+
+- **Preferred: the app-server with the real terminal attached.** The daemon runs `codex app-server --listen
+  unix://PATH` on the builder's login and drives it with M3's JSON-RPC code. It starts `codex --remote
+  unix://PATH` in the pseudo-terminal for the builder to watch. A second client that resumed the terminal's
+  thread and started a turn got the structured events, and the terminal drew the turn. Not yet tried: the
+  daemon creating the thread first and the terminal attaching to it.
+- **Fallback: the terminal alone.** `codex --no-daemon --dangerously-bypass-approvals-and-sandbox "first
+  prompt"` with a per-driver `CODEX_HOME`. The pack goes in `developer_instructions`. Hooks in `hooks.json`,
+  trusted by a hash in the config: `Stop`, `Interrupt`, and `PostModelRequest` with each request's tokens and
+  its failure. There is no hook for a failed turn's end. It reports `OSC 7501` states unasked.
+- **A further turn.** Paste, then Enter more than 120 ms later. Enter mid-turn steers the running turn.
+- **Extra request.** The terminal asks the model for a thread title once per thread.
+- **Login.** `auth.json` in `CODEX_HOME`, on macOS too, rewritten by rename on refresh. A read-only file fails.
+  With a ChatGPT login the terminal needs chatgpt.com reachable at start.
+- **Compaction.** `/compact` works. Automatic compaction can only be pushed away with a high limit.
+
+## What the other tools do
+
+- **herdr.** A terminal multiplexer. It types the agent's command into a shell, pastes prompts, and reads state
+  from the screen and title.
+- **Orca.** Terminals, with hooks that post to a local port and `OSC 7501` as the fallback. Trust entries are
+  written ahead.
+- **T3 Code.** No terminals for agents. Claude through the Agent SDK, Codex through `codex app-server`, both on
+  the local login.
+
+## Terms, as read on 2026-11-12
+
+- **Anthropic.** Its legal page says third-party developers may not offer Claude.ai login in their own
+  applications or collect, store or intermediate its credentials, and also that this does not prevent an end
+  user from signing in to the unmodified Claude Code binary with their own subscription. So: running the
+  unmodified program on the builder's own login looks allowed. x100 reading or holding the token is not.
+  Several automated sessions at once on one subscription is unclear, and the risk is throttling.
+- **OpenAI.** Its app-server page says a local or open-source application using app-server authentication can
+  continue to, and that it was never permitted for commercial or hosted services. Heavy automation is unclear.
+
+## Open, and only a real login settles it
+
+- **Sharing one login among many drivers.** Both programs rewrite the login file when the token refreshes. A
+  copy per driver would go stale when another driver refreshes, and a read-only or single-file mount breaks
+  the rewrite. On macOS Claude's login is not a file at all. The likely answer is that terminal drivers use
+  the builder's own config directory, with everything of the builder's setup switched off by flags. M3T
+  settles it with a real run.
+- Whether the proxy must pass each provider's login hosts untouched, since ending TLS there would show x100
+  the token.
+- The screens for a usage limit and an expired login.
