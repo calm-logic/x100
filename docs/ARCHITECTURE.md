@@ -692,6 +692,15 @@ since a GPU-rendered window under WSL depends on WSLg.
 The app needs: a terminal view (for an agent's live output, continuous across a change of driver), Markdown
 rendering (specs, chat), a list that updates in place, images, and the hero-style orb only if wanted.
 
+**proposed** What spike S1 found, which the app is built on (`spikes/gpui/REPORT.md`):
+
+- GPUI comes from a pinned git revision of Zed's repository. The crates.io release is a year old and renders
+  through Vulkan only.
+- Under WSL the app chooses X11 in code. Over Wayland, WSLg gives GPUI only a software renderer.
+- Zed's terminal, Markdown and widget crates are GPL and x100 cannot depend on them. The app has its own
+  terminal view on `alacritty_terminal` and its own Markdown view on `pulldown-cmark`.
+- A view that holds often-changing children is not cached. Its rows are.
+
 **proposed** Preview in v1 is a link that opens the builder's own browser. Showing a web app inside the window
 needs a browser engine, which the page says x100 does not contain. After v1 the choice is between embedding the
 operating system's own web view in a separate process for that tab only, and streaming screenshots from a

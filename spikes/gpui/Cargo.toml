@@ -1,0 +1,31 @@
+# Spike S1: a throwaway window to find out whether GPUI can carry the x100 desktop app.
+# Not a member of the x100 workspace (the root excludes `spikes`).
+[package]
+name = "gpui-spike"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Zed's main branch, pinned. The crates.io release (0.2.2, 2025-10) still renders through blade on Vulkan only.
+gpui = { git = "ssh://git@github.com/zed-industries/zed.git", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4" }
+gpui_platform = { git = "ssh://git@github.com/zed-industries/zed.git", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["wayland", "x11"] }
+alacritty_terminal = "0.26"
+pulldown-cmark = { version = "0.13", default-features = false }
+rand = "0.9"
+env_logger = "0.11"
+log = "0.4"
+futures = "0.3"
+
+# Copied from Zed's root Cargo.toml at the same revision: a git dependent does not inherit them.
+[patch.crates-io]
+async-process = { git = "ssh://git@github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
+async-task = { git = "ssh://git@github.com/zed-industries/async-task.git", rev = "015845a19fc31752c02367567d3b8900a406f9da" }
+calloop = { git = "ssh://git@github.com/zed-industries/calloop", rev = "3759371fee14c40066d64777e2a36b6ffcc22590" }
+khronos-egl = { git = "ssh://git@github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }
+
+[profile.release]
+debug = 1

@@ -9,9 +9,14 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo fmt --check` exit 0. Binaries built:
   `x100`, `x100-app`, `x100d`. The CI file is written and has not run, since nothing is pushed.
 
+- **S1, GPUI spike.** Verdict: GPUI can carry the app under WSL, with limits (X11 only under WSLg, about 32
+  frames a second, own terminal and Markdown views because Zed's are GPL, GPUI from a pinned git revision).
+  The orchestrator's own 20 second run on X11: GPU adapter selected, 642 frames, 2014 row renders for 1824
+  updates with 100 unprompted (the start-up refresh), 25% of one core, 218 MiB, exit 0. Report and rules for
+  M15 in `spikes/gpui/REPORT.md`. The spike stays in the tree until M15 has taken what it needs.
+
 ## In progress
 
-- S1, GPUI spike. Opus subagent, owns `spikes/gpui`.
 - M1, split in two because it is the contract and large. M1a: ids, domain types, events, the six state
   machines, the clock, and the Stateright proofs. M1b, after it: the folds into tab state. Opus subagent, owns
   `crates/x100-core`.
@@ -80,3 +85,5 @@ All in **proposed** parts, made in the review before M0. Reasons in brief.
 ## Could not be verified, and why
 
 - Anything on macOS. There is no Mac, and nothing is pushed, so hosted CI has not run.
+- S1 on macOS and native Linux. Under WSL nobody saw the window on the real screen (the Windows session was
+  locked) and no input was sent to it, so flicker by eye, clicks, keys and scrolling are unchecked.
