@@ -135,6 +135,22 @@ pub enum ToolCall {
         intent: String,
         brief: Option<String>,
     },
+    /// The CEO only. The integrations the builder connected, what the project is linked to, and
+    /// the Homebox projects it could be linked to.
+    ListIntegrations {},
+    /// The CEO only. Links the project to a Homebox project, named by its name or by its
+    /// repository's full name, `owner/name`, deploying to `environment` (production unless
+    /// named).
+    LinkProject {
+        homebox_project: String,
+        environment: Option<String>,
+    },
+    /// The CEO only. Deploys the project's main branch through Homebox. A project not yet on
+    /// GitHub is published first, added to Homebox and linked. The daemon does it in the
+    /// background, and the address or why it failed reaches the agent's inbox.
+    Deploy {
+        environment: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

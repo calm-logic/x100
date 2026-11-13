@@ -73,12 +73,16 @@ impl Setup {
 
     async fn start(&self, spec: DriverSpec) -> DriverHandle {
         let handle = self.harness.start(spec).await.unwrap();
-        assert_eq!(handle.info().version, "2.1.322");
-        assert!(
-            handle.info().warnings.is_empty(),
-            "{:?}",
-            handle.info().warnings
-        );
+        // Claude Code updates itself, so the installed version is whatever this machine has.
+        // A version other than the tested one is allowed its one warning, and the tests that
+        // follow say whether the newer program still behaves.
+        let other: Vec<_> = handle
+            .info()
+            .warnings
+            .iter()
+            .filter(|w| !w.contains("is not the version x100 was tested with"))
+            .collect();
+        assert!(other.is_empty(), "{other:?}");
         handle
     }
 

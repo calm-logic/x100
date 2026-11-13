@@ -1,12 +1,15 @@
 //! The Settings tab: the project's name, intent and code directory, which only the name of may be
 //! changed here, Ask me about, the project's budget, each lead's budget and effort range, the
-//! harnesses and models x100 may use, the Sandbox part with the daemon's one unsafe setting, the
-//! Decision model part, and the Credentials part. Each control sends its protocol request and says beside itself what came
+//! harnesses and models x100 may use, the Homebox project it deploys to, the Sandbox part with the
+//! daemon's one unsafe setting, the Decision model part, the Integrations part, and the
+//! Credentials part. Each control sends its protocol request and says beside itself what came
 //! back: where the daemon has not made a method yet it says so, and the control does not pretend
 //! to have worked. What a control changed shows when the state changes.
 
 mod credentials;
 mod decision;
+mod homebox;
+mod integrations;
 mod sandbox;
 
 use std::collections::HashMap;
@@ -24,12 +27,14 @@ use x100_core::project::SettingChange;
 
 pub use credentials::{CredentialModel, Credentials};
 pub use decision::{DecisionPart, DecisionPartModel};
+pub use homebox::{HomeboxModel, HomeboxPart};
+pub use integrations::{IntegrationsModel, IntegrationsPart};
 pub use sandbox::{SandboxModel, SandboxPart};
 
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
-use crate::widgets;
+use crate::widgets::{self, row};
 use crate::{theme, words};
 
 const ASK: [AskMeAbout; 4] = [
@@ -139,6 +144,8 @@ pub struct SettingsView {
     credentials: Entity<Credentials>,
     sandbox: Entity<SandboxPart>,
     decision: Entity<DecisionPart>,
+    integrations: Entity<IntegrationsPart>,
+    homebox: Entity<HomeboxPart>,
     _subscription: Subscription,
 }
 
@@ -166,6 +173,8 @@ impl SettingsView {
         let credentials = cx.new(|cx| Credentials::new(session.clone(), project, cx));
         let sandbox = cx.new(|cx| SandboxPart::new(session.clone(), cx));
         let decision = cx.new(|cx| DecisionPart::new(session.clone(), cx));
+        let integrations = cx.new(|cx| IntegrationsPart::new(session.clone(), cx));
+        let homebox = cx.new(|cx| HomeboxPart::new(session.clone(), project, cx));
         let mut view = Self {
             session,
             project,
@@ -175,6 +184,8 @@ impl SettingsView {
             credentials,
             sandbox,
             decision,
+            integrations,
+            homebox,
             _subscription: subscription,
         };
         view.refresh(cx);
@@ -200,6 +211,14 @@ impl SettingsView {
 
     pub fn decision(&self) -> &Entity<DecisionPart> {
         &self.decision
+    }
+
+    pub fn integrations(&self) -> &Entity<IntegrationsPart> {
+        &self.integrations
+    }
+
+    pub fn homebox(&self) -> &Entity<HomeboxPart> {
+        &self.homebox
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -401,41 +420,6 @@ impl SettingsView {
     }
 }
 
-/// A label on the left and its control on the right, under a hairline.
-fn row(
-    label: impl Into<gpui::SharedString>,
-    detail: Option<String>,
-    control: impl IntoElement,
-) -> gpui::Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(16.))
-        .py(px(12.))
-        .border_b_1()
-        .border_color(theme::line())
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .text_size(px(theme::TEXT))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(label.into()),
-                )
-                .children(detail.map(|d| {
-                    div()
-                        .text_size(px(theme::TINY))
-                        .text_color(theme::muted())
-                        .child(d)
-                })),
-        )
-        .child(control)
-}
-
 impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = div()
@@ -611,8 +595,10 @@ impl Render for SettingsView {
                     .text_color(theme::dim())
                     .child("The CEO sets each lead's effort range. For every task x100 picks the cheapest allowed model that meets the effort the task needs."),
             )
+            .child(self.homebox.clone())
             .child(self.sandbox.clone())
             .child(self.decision.clone())
+            .child(self.integrations.clone())
             .child(div().pt(px(18.)).child(self.credentials.clone()))
     }
 }

@@ -40,6 +40,17 @@ pub const PROXY_RESOLVE_ENV: &str = "X100_PROXY_RESOLVE";
 /// A PEM file of the only authorities the proxy trusts upstream, instead of the system's. Taken
 /// only with `X100_PROXY_RESOLVE`, so it can only point the proxy at a test's own servers.
 pub const PROXY_UPSTREAM_CA_ENV: &str = "X100_PROXY_UPSTREAM_CA";
+/// The `docker` program a Homebox on this machine is found with, and given a key with on "use
+/// local": `docker` on the path unless named.
+pub const DOCKER_ENV: &str = "X100_DOCKER";
+/// The `gh` program GitHub's "use local" runs: `gh` on the path unless named.
+pub const GH_ENV: &str = "X100_GH";
+/// Where a project's repository is pushed, as `<base>/<owner>/<name>.git`: GitHub unless named.
+/// For tests, a `file://` directory of bare repositories.
+pub const GIT_BASE_ENV: &str = "X100_GITHUB_GIT_BASE";
+/// The client id of an OAuth app registered for x100 on GitHub, for GitHub's device flow. None
+/// exists yet, so without it GitHub connects only through `gh`.
+pub const GITHUB_CLIENT_ID_ENV: &str = "X100_GITHUB_CLIENT_ID";
 
 /// What makes the sandboxes drivers run in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +119,10 @@ pub struct Config {
     pub proxy_resolve: std::collections::HashMap<String, x100_vault::Resolved>,
     /// The authorities the proxy trusts upstream instead of the system's, with `proxy_resolve`.
     pub proxy_upstream_ca: Option<PathBuf>,
+    pub docker: PathBuf,
+    pub gh: PathBuf,
+    pub github_git_base: String,
+    pub github_client_id: Option<String>,
 }
 
 impl Config {
@@ -132,6 +147,10 @@ impl Config {
             no_keychain: false,
             proxy_resolve: std::collections::HashMap::new(),
             proxy_upstream_ca: None,
+            docker: PathBuf::from("docker"),
+            gh: PathBuf::from("gh"),
+            github_git_base: "https://github.com".into(),
+            github_client_id: None,
         }
     }
 
@@ -218,6 +237,16 @@ impl Config {
             }
             config.proxy_upstream_ca = Some(PathBuf::from(ca));
         }
+        if let Some(docker) = env(DOCKER_ENV) {
+            config.docker = PathBuf::from(docker);
+        }
+        if let Some(gh) = env(GH_ENV) {
+            config.gh = PathBuf::from(gh);
+        }
+        if let Some(base) = text(GIT_BASE_ENV) {
+            config.github_git_base = base;
+        }
+        config.github_client_id = text(GITHUB_CLIENT_ID_ENV).filter(|id| !id.trim().is_empty());
         if let Some(start) = clock {
             // A real harness bills real time, so only scripted ones run on a fake clock.
             if config.scripts_dir.is_none() {

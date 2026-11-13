@@ -66,7 +66,10 @@ const CEO_WORK: &str = "The work. Before building anything, write the business r
      the builder will know it is done. Keep it as short as the project. A small project needs no \
      team: do the work yourself, in your working directory. Form a team with `form_team` only \
      when the work needs several roles at once; then `delegate` to the leads, `wait` on their \
-     reports and `review` each one.";
+     reports and `review` each one. When the builder asks to connect the project to a Homebox \
+     project or to deploy it, use `list_integrations`, `link_project` and `deploy`: x100 does the \
+     deploy, publishing the code to a private GitHub repository first if needed, and its address \
+     or why it failed comes to your inbox for you to tell the builder.";
 
 const MEMBER_WORK: &str = "The work. Do it yourself in your working directory. Start a worker with \
      `delegate` only for a part that can go on beside yours; then `wait` on its report and \

@@ -134,7 +134,10 @@ impl Models {
                     // host to the fake provider and refuses every other.
                     .env("ANTHROPIC_BASE_URL", common::fake_base(provider))
                     .env("X100_PROXY_RESOLVE", common::FAKE_RESOLVE)
-                    .env("X100_NO_KEYCHAIN", "1");
+                    .env("X100_NO_KEYCHAIN", "1")
+                    // No Homebox or gh of the builder's is looked for.
+                    .env("X100_DOCKER", "/nonexistent/x100-test/docker")
+                    .env("X100_GH", "/nonexistent/x100-test/gh");
             }
         }
     }

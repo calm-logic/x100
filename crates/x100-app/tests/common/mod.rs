@@ -57,6 +57,12 @@ pub struct Daemon {
 impl Daemon {
     /// A daemon that runs the Fernleaf script's harness, on a clock that moves only when told.
     pub fn fernleaf() -> Daemon {
+        Daemon::fernleaf_with(&[])
+    }
+
+    /// The same, with `env` on top. Without it the daemon is pointed at `docker` and `gh`
+    /// programs that do not exist, so it finds none of the builder's.
+    pub fn fernleaf_with(env: &[(&str, String)]) -> Daemon {
         // Under the build's own directory, not `/tmp`, which a sandbox replaces with its own.
         let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
         let child = Command::new(binary("x100d"))
@@ -73,6 +79,9 @@ impl Daemon {
             .arg(START.as_millis().to_string())
             // The vault's key is a file in the test's data directory, never in a keychain.
             .env("X100_NO_KEYCHAIN", "1")
+            .env("X100_DOCKER", "/nonexistent/x100-test/docker")
+            .env("X100_GH", "/nonexistent/x100-test/gh")
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");
@@ -121,8 +130,13 @@ pub struct Run {
 
 impl Run {
     pub fn start() -> Run {
+        Run::start_with(&[])
+    }
+
+    /// A run whose daemon has `env` on top of the usual.
+    pub fn start_with(env: &[(&str, String)]) -> Run {
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
-        let daemon = Daemon::fernleaf();
+        let daemon = Daemon::fernleaf_with(env);
         let cx = TestAppContext::single();
         cx.update(x100_app::init);
         Run { rt, daemon, cx }

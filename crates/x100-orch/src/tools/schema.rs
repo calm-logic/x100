@@ -194,7 +194,23 @@ pub(crate) fn schema(tool: Tool) -> Value {
             s["type"] = json!("object");
             s
         }
+        Tool::ListIntegrations => object(&[], &[]),
+        Tool::LinkProject => object(
+            &[(
+                "homebox_project",
+                text(
+                    "The Homebox project, by the name the builder used or by its repository \
+                     as owner/name.",
+                ),
+            )],
+            &[("environment", environment())],
+        ),
+        Tool::Deploy => object(&[], &[("environment", environment())]),
     }
+}
+
+fn environment() -> Value {
+    text("The Homebox environment, such as production or dev. Leave it out for the linked one.")
 }
 
 /// An object with `required` fields and `optional` ones, which may also be null, and no others.

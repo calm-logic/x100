@@ -31,6 +31,7 @@ use x100_core::tool::ToolCall;
 use x100_drivers::ToolEndpoint;
 use x100_drivers::fake::DaemonTools;
 use x100_gate::Ruling;
+use x100_integrations::Integrations;
 use x100_store::Git;
 use x100_vault::{Redactor, Requester};
 
@@ -72,6 +73,8 @@ pub struct Desk {
     redactor: Redactor,
     /// Where `start_process` runs, set once the orchestrator is made.
     sandboxes: OnceLock<Arc<Sandboxes>>,
+    /// What the integration tools call, set once by the daemon. Without it they are refused.
+    integrations: OnceLock<Arc<Integrations>>,
 }
 
 impl Desk {
@@ -83,7 +86,27 @@ impl Desk {
             settings,
             redactor,
             sandboxes: OnceLock::new(),
+            integrations: OnceLock::new(),
         })
+    }
+
+    /// Gives the integration tools their way to Homebox and GitHub. Set once.
+    pub fn attach_integrations(&self, integrations: Arc<Integrations>) {
+        let _ = self.integrations.set(integrations);
+    }
+
+    /// What carrying out `call` may use, read now: the settings, and what Homebox says if the
+    /// call reads it.
+    async fn using(&self, call: &ToolCall) -> Using {
+        let settings = (self.settings)();
+        let integrations = self.integrations.get().cloned();
+        let homebox = crate::integrate::prefetch(integrations.as_deref(), call, &settings).await;
+        Using {
+            sandboxes: self.sandboxes.get().cloned(),
+            integrations,
+            settings,
+            homebox,
+        }
     }
 
     pub(crate) fn listening_at(&self, base: String) {
@@ -162,10 +185,8 @@ impl Desk {
         let ctx = self.project_of(driver, token, Some(tool))?;
         let call = crate::redact::value(&self.redactor, &call)
             .ok_or("the call could not be cleared of credential values, so it is refused")?;
-        let settings = (self.settings)();
-        let sandboxes = self.sandboxes.get().cloned();
-        let done =
-            blocking(move || carry_out(&ctx, &settings, sandboxes.as_deref(), driver, call)).await;
+        let using = self.using(&call).await;
+        let done = blocking(move || carry_out(&ctx, &using, driver, call)).await;
         match done {
             Err(Outcome::Fenced(why)) => Err(self.refuse(driver, Some(tool), why)),
             Err(Outcome::Refused(why)) => Err(why),
@@ -199,15 +220,18 @@ impl Desk {
     /// Blocks.
     pub(crate) fn approved(
         &self,
-        ctx: &ProjectCtx,
+        ctx: &Arc<ProjectCtx>,
         w: &Writer,
         action: &Action,
         head: Events,
     ) -> Result<String, String> {
-        let settings = (self.settings)();
-        let sandboxes = self.sandboxes.get().cloned();
-        let planned = plan(ctx, w, &settings, action);
-        execute(ctx, w, sandboxes.as_deref(), action, head, planned, true).map_err(|o| match o {
+        let Request::Tool { call, .. } = &action.request else {
+            unreachable!("only a tool call is approved here")
+        };
+        // Homebox is asked only for a read held at "Every decision", which takes seconds at most.
+        let using = tokio::runtime::Handle::current().block_on(self.using(call));
+        let planned = plan(ctx, w, &using, action);
+        execute(ctx, w, &using, action, head, planned, true).map_err(|o| match o {
             Outcome::Fenced(why) | Outcome::Refused(why) => why,
         })
     }
@@ -286,10 +310,17 @@ enum Outcome {
     Refused(String),
 }
 
+/// What carrying out a call may use besides the project.
+struct Using {
+    sandboxes: Option<Arc<Sandboxes>>,
+    integrations: Option<Arc<Integrations>>,
+    settings: DaemonSettings,
+    homebox: crate::integrate::Prefetched,
+}
+
 fn carry_out(
-    ctx: &ProjectCtx,
-    settings: &DaemonSettings,
-    sandboxes: Option<&Sandboxes>,
+    ctx: &Arc<ProjectCtx>,
+    using: &Using,
     driver: DriverId,
     call: ToolCall,
 ) -> Result<String, Outcome> {
@@ -302,7 +333,7 @@ fn carry_out(
         request: Request::Tool { driver, call },
     };
     let ruling = w.read(|s| gate::rule(s, &action));
-    let planned = plan(ctx, &w, settings, &action);
+    let planned = plan(ctx, &w, using, &action);
     // A call the tools refuse is refused whatever the gate says, so the builder is never asked
     // about what would not be done. It reaches the plan, which is what allowed means here.
     if let Err(refusal) = planned {
@@ -325,14 +356,14 @@ fn carry_out(
         );
         return Ok(serde_json::json!({ "held": action.id, "message": words }).to_string());
     }
-    execute(ctx, &w, sandboxes, &action, head, planned, false)
+    execute(ctx, &w, using, &action, head, planned, false)
 }
 
 /// The tool call's plan on the state as it is now.
 fn plan(
     ctx: &ProjectCtx,
     w: &Writer,
-    settings: &DaemonSettings,
+    using: &Using,
     action: &Action,
 ) -> Result<tools::Plan, String> {
     let Request::Tool { call, .. } = &action.request else {
@@ -347,9 +378,10 @@ fn plan(
         let ctx = Ctx {
             agent: action.agent,
             now: clock.now(),
-            settings,
+            settings: &using.settings,
             clock,
             file_stored,
+            homebox: using.homebox.as_ref(),
         };
         tools::plan(s, &ctx, call)
     })
@@ -360,9 +392,9 @@ fn plan(
 /// ending the action. With `tell`, the agent is also given the builder's approval with the
 /// call's reply, or why it failed, in the append that ends the action.
 fn execute(
-    ctx: &ProjectCtx,
+    ctx: &Arc<ProjectCtx>,
     w: &Writer,
-    sandboxes: Option<&Sandboxes>,
+    using: &Using,
     action: &Action,
     mut head: Events,
     planned: Result<tools::Plan, String>,
@@ -408,10 +440,30 @@ fn execute(
             driver,
             purpose: Purpose::Work,
         };
-        match carry_out_process(sandboxes, requester, process) {
+        match carry_out_process(using.sandboxes.as_deref(), requester, process) {
             Ok(reply) => reply_override = reply,
             Err(e) => return fail(head, e),
         }
+    }
+    if let Some(job) = plan.deploy {
+        let Some(integrations) = using.integrations.clone() else {
+            return fail(head, "this daemon has no integrations".into());
+        };
+        // The action stays open until the deploy is done; then it ends, and the agent is told.
+        append(w, head)?;
+        let reply = crate::integrate::started(action);
+        crate::integrate::start(
+            Arc::clone(ctx),
+            integrations,
+            using.settings.clone(),
+            action.clone(),
+            job,
+            tell,
+        );
+        return Ok(reply);
+    }
+    if let Some(reply) = plan.reply {
+        reply_override = Some(reply);
     }
     let mut events = plan.events;
     if let Some(new) = &plan.code_dir {

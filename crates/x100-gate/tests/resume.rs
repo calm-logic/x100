@@ -296,6 +296,48 @@ fn a_merge_and_a_tool_call_read_in_plain_words() {
     assert!(shown.what.contains("Research was idle"), "{}", shown.what);
 }
 
+#[test]
+fn a_homebox_deploy_says_what_it_will_do_from_where_the_project_stands() {
+    let (mut state, f) = fern(AskMeAbout::HighRiskOnly);
+    let first = tool(
+        f.ceo,
+        x100_core::tool::ToolCall::Deploy { environment: None },
+    );
+    decide(&mut state, &first, Decision::Denied);
+    let shown = Shown::of(&state, state.action(first.id).expect("recorded")).expect("classified");
+    assert!(
+        shown
+            .what
+            .starts_with("Create a private repository on GitHub"),
+        "{}",
+        shown.what
+    );
+    push(
+        &mut state,
+        x100_core::party::Actor::Builder,
+        x100_core::event::ProjectEvent::SettingChanged(x100_core::project::SettingChange::Homebox(
+            Some(x100_core::integration::HomeboxLink {
+                instance: "http://127.0.0.1:7765".into(),
+                repo_full_name: "builder/fernleaf".into(),
+                project_id: "7".into(),
+                project_name: "fernleaf".into(),
+                environment: "production".into(),
+            }),
+        )),
+    );
+    let linked = tool(
+        f.ceo,
+        x100_core::tool::ToolCall::Deploy { environment: None },
+    );
+    decide(&mut state, &linked, Decision::Denied);
+    let shown = Shown::of(&state, state.action(linked.id).expect("recorded")).expect("classified");
+    assert_eq!(
+        shown.what,
+        "Push the main branch to builder/fernleaf and deploy the Homebox project \"fernleaf\" \
+         (production), which is public"
+    );
+}
+
 // The same cases as the plan's end-to-end check, as far as a pure crate can take them: the
 // rulings and the instructions. The orchestrator's test runs them with the fake harness.
 #[test]

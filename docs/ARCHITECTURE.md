@@ -63,6 +63,7 @@ daemon. Closing the window does not stop the agents.
 | `x100-sandbox` | Create, run in, and destroy an isolated workspace for one agent. |
 | `x100-vault` | Encrypted credential store, references, the egress proxy, redaction. |
 | `x100-gate` | Action classification, risk levels, the pause and resume flow. |
+| `x100-integrations` | Services the builder connects once: Homebox and GitHub. Finding a local one, connecting, and the calls. |
 | `x100-orch` | Agents: the CEO, lead and worker behaviour, delegation, the inbox, waits, the start pack, handoff between drivers, the tools agents are given, messaging, reporting. |
 | `x100-memory` | The memory and skill repositories. |
 | `x100-lab` | Reflection: evals, trials, the lab they run in, scoring, and the rule for committing a change. |
@@ -624,6 +625,38 @@ Decision 1, OpenAI's Decisions API, or TypeSafe AI's Jev. `docs/DECISION_MODELS.
   `decision_model.connect` and `decision_model.disconnect` are the protocol's methods.
 
 The one-off call through a harness is deleted. It started a whole terminal program for one label.
+
+## Integrations
+
+An integration is a service the builder connects once and projects then use. It is a daemon setting: the
+kind, how it was connected, the credential's reference if there is one, and what was learned at connect. A
+project has a link to something in an integration. Connections and links are events and fields of the folded
+state. `x100-integrations` holds the clients. The daemon makes every call, so no agent holds a credential.
+
+- **Homebox.** Two ways to connect. "Use local", the default when a container named `homebox-admin` is found:
+  after the builder confirms, the daemon runs one fixed command in that container, which mints an edit key
+  named `x100` that goes straight to the vault. Or a host address and a pasted key, checked with
+  `GET /api/auth/me`. Plain HTTP is accepted only to loopback. The key's credential is scoped to that host and
+  port and to no project. A project links to a Homebox project by `repo_full_name` and an environment.
+- **GitHub.** "Use local", the default when `gh` is installed and logged in: the daemon runs `gh` to create a
+  private repository and pushes with gh's credential helper, and never reads or stores the token. The OAuth
+  device flow is built behind `X100_GITHUB_CLIENT_ID` and is not usable until an OAuth app is registered; a
+  deploy through it is not built.
+- **Loopback.** The proxy refuses loopback for drivers. `Proxy::open_loopback` adds a port to a set that only
+  the daemon's own `Proxy::call` reads, for plain HTTP to a literal loopback address. A driver's route never
+  reads it.
+- **The CEO's tools.** `list_integrations` and `link_project` are low risk. `deploy` is rated
+  DeployToProduction, high risk, on two rows: `tool.deploy`, and `tool.deploy.publish_first` when the project
+  has no hosted repository yet, in which case the one request creates the private repository, pushes main,
+  adds it to Homebox and links it. Without GitHub connected a deploy is refused before the gate, with the
+  reason.
+- **A deploy runs in the background.** With `auto_deploy` on, the daemon pushes and waits for the deployment
+  of that commit. With it off, it calls deploy and checks the commit. An instance that keeps restarting counts
+  as failed. The result, the address or the reason, reaches the CEO as the held action's result, or as
+  `InboxItem::Finished` when the action was not held. One deploy per project runs at a time. A deploy cut off
+  by the daemon stopping is failed when it starts again, and the CEO is told.
+- **Environment.** `X100_DOCKER` and `X100_GH` name the programs, `X100_GITHUB_GIT_BASE` the push address.
+  Tests point them at stand-ins, so no test touches the real Docker, gh or GitHub.
 
 ## Memory, skills and reflection
 

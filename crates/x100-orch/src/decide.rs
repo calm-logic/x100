@@ -32,7 +32,7 @@ const NOT_CARRIED_OUT: &str = "It was not carried out: the daemon stopped before
 /// Records the builder's decision on held action `id` and does what it calls for. Blocks.
 pub(crate) fn decide(
     shared: &Shared,
-    ctx: &ProjectCtx,
+    ctx: &std::sync::Arc<ProjectCtx>,
     id: ActionId,
     decision: Decision,
 ) -> Result<(), Refused> {
@@ -173,11 +173,25 @@ fn sent_back(state: &ProjectState, clock: &dyn Clock, task: TaskId, why: &str) -
 }
 
 /// Approved tool calls and merges a stopped daemon did not finish: each fails, a merge's task goes
-/// back to its assignee, and the agent is told. Run when a project is attached. Approved commands
-/// and requests need nothing: they wait, allowed once, for the agent's next try.
+/// back to its assignee, and the agent is told. So does a publish or deploy that was let through
+/// and was still going in the background. Run when a project is attached. Approved commands and
+/// requests need nothing: they wait, allowed once, for the agent's next try.
 pub(crate) fn unfinished(state: &ProjectState, clock: &dyn Clock) -> Events {
     let mut out = Vec::new();
     for record in state.actions() {
+        if record.state == ActionState::Allowed && background(&record.action.request) {
+            let id = record.action.id;
+            out.push(gate::finished(id, Some(NOT_CARRIED_OUT.into())));
+            out.push(deliver(
+                clock,
+                record.action.agent,
+                InboxItem::Finished {
+                    action: id,
+                    result: NOT_CARRIED_OUT.into(),
+                },
+            ));
+            continue;
+        }
         if record.state != ActionState::Approved {
             continue;
         }
@@ -195,4 +209,15 @@ pub(crate) fn unfinished(state: &ProjectState, clock: &dyn Clock) -> Events {
         ));
     }
     out
+}
+
+/// A call whose work goes on after it returns, so an Allowed one may be left open by a stop.
+fn background(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::Tool {
+            call: x100_core::tool::ToolCall::Deploy { .. },
+            ..
+        }
+    )
 }

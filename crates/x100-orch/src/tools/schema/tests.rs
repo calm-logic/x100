@@ -258,6 +258,23 @@ fn samples(tool: Tool) -> Vec<ToolCall> {
                 brief: None,
             },
         ],
+        Tool::ListIntegrations => vec![ToolCall::ListIntegrations {}],
+        Tool::LinkProject => vec![
+            ToolCall::LinkProject {
+                homebox_project: "foobar".into(),
+                environment: None,
+            },
+            ToolCall::LinkProject {
+                homebox_project: "builder/foobar".into(),
+                environment: Some("dev".into()),
+            },
+        ],
+        Tool::Deploy => vec![
+            ToolCall::Deploy { environment: None },
+            ToolCall::Deploy {
+                environment: Some("production".into()),
+            },
+        ],
         Tool::LoadSkill => vec![
             ToolCall::LoadSkill {
                 skill: skill(SkillScope::Shared),
@@ -414,7 +431,14 @@ fn every_tool_has_a_name_a_description_and_a_schema_that_fits_serde() {
 fn every_tool_refuses_arguments_of_the_wrong_shape_as_serde_does() {
     for tool in Tool::ALL {
         let valid = validator(tool);
-        let mut wrong = vec![json!({}), json!([]), json!("text")];
+        let mut wrong = vec![json!([]), json!("text")];
+        // An empty object is wrong only for a tool that requires something.
+        if schema(tool)["required"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty())
+        {
+            wrong.push(json!({}));
+        }
         for call in samples(tool) {
             let args = arguments(&call);
             // Each argument in turn replaced by a value of a type none of them takes.

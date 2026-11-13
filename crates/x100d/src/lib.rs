@@ -34,9 +34,10 @@ use x100_store::{ProjectLog, ProjectStore, open_daemon_log};
 
 pub use config::{
     CLAUDE_BASE_URL_ENV, CLAUDE_LOGIN_ENV, CODEX_BASE_URL_ENV, CODEX_LOGIN_ENV, Config,
-    DATA_DIR_ENV, FAKE_PROGRAM_ENV, LAG_AFTER, MAX_LINE, NO_KEYCHAIN_ENV, PROJECTS_ROOT_ENV,
-    PROXY_RESOLVE_ENV, PROXY_UPSTREAM_CA_ENV, QUEUE_CAPACITY, SANDBOX_ENV, SANDBOX_HELPER_ENV,
-    SCRIPTS_ENV, SandboxKind, default_data_dir,
+    DATA_DIR_ENV, DOCKER_ENV, FAKE_PROGRAM_ENV, GH_ENV, GIT_BASE_ENV, GITHUB_CLIENT_ID_ENV,
+    LAG_AFTER, MAX_LINE, NO_KEYCHAIN_ENV, PROJECTS_ROOT_ENV, PROXY_RESOLVE_ENV,
+    PROXY_UPSTREAM_CA_ENV, QUEUE_CAPACITY, SANDBOX_ENV, SANDBOX_HELPER_ENV, SCRIPTS_ENV,
+    SandboxKind, default_data_dir,
 };
 pub use error::Error;
 pub use unavailable::arrives_with;
@@ -126,6 +127,19 @@ impl Daemon {
         // The harnesses reach the tools through the desk, so it exists before them, and so does
         // the address every driver is given.
         let desk = Desk::new(Arc::clone(&settings), opened.vault.redactor());
+        let integrations = Arc::new(x100_integrations::Integrations::new(
+            opened.proxy.clone(),
+            Arc::new(x100_integrations::homebox::local::Docker {
+                program: config.docker.clone(),
+            }),
+            Arc::new(x100_integrations::github::Gh {
+                program: config.gh.clone(),
+                git_base: config.github_git_base.clone(),
+            }),
+            x100_integrations::Timing::default(),
+            config.github_client_id.clone(),
+        ));
+        desk.attach_integrations(Arc::clone(&integrations));
         let tools = ToolServer::start(Arc::clone(&desk)).await?;
         let found = discover::discover(&config, &log, desk.clone(), no_sandbox.as_deref())?;
         // A rescan makes harnesses again, which reach the tools through the same desk.
@@ -162,6 +176,7 @@ impl Daemon {
             rescan_tools,
             daemon_jobs,
             opened.vault,
+            integrations,
             no_sandbox,
         ));
         hub.keep(reports);

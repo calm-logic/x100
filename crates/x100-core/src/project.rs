@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::AskMeAbout;
 use crate::harness::HarnessModel;
+use crate::integration::HomeboxLink;
 use crate::money::{Money, Percent};
 
 /// What a project is called and what it is for. A new project has neither: its CEO sets them with
@@ -47,4 +48,8 @@ pub enum SettingChange {
         what: HarnessModel,
         allowed: bool,
     },
+    /// The Homebox project it deploys to, or none.
+    Homebox(Option<HomeboxLink>),
+    /// The hosted repository, `owner/name` on GitHub, that x100 published its main branch to.
+    Repository(String),
 }

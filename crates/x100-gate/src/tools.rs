@@ -1,8 +1,7 @@
 //! Which row of the table a daemon tool call falls under.
 //!
 //! The match over [`ToolCall`] has no wildcard on purpose: a new tool does not compile until
-//! someone decides its row. A deploy tool, when integrations add one, gets its arm here, with a
-//! row in `rule.rs` of kind `DeployToProduction` and risk High.
+//! someone decides its row.
 
 use std::time::Duration;
 
@@ -69,6 +68,13 @@ pub fn rule(
             }
         }
         T::SetBudget { lead, budget } => return budget_rule(state, *lead, *budget),
+        T::ListIntegrations {} => &rule::LIST_INTEGRATIONS,
+        T::LinkProject { .. } => &rule::LINK_PROJECT,
+        // Pushing to a repository x100 has not made yet means making it first.
+        T::Deploy { .. } => match state.project() {
+            Some(p) if p.homebox.is_some() || p.repository.is_some() => &rule::DEPLOY,
+            _ => &rule::DEPLOY_PUBLISH,
+        },
         T::Review { .. }
         | T::Report { .. }
         | T::Message { .. }

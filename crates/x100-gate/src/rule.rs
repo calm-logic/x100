@@ -193,6 +193,37 @@ table! {
         "Cannot raise what a lead spends.",
     );
 
+    // Integrations. Each call is the daemon's own, with a key no agent holds.
+
+    LIST_INTEGRATIONS = row(
+        "tool.list_integrations",
+        "list_integrations",
+        Other,
+        Low,
+        "Reads what is connected and what the project could be linked to; changes nothing.",
+    );
+    LINK_PROJECT = row(
+        "tool.link_project",
+        "link_project",
+        Other,
+        Low,
+        "Changes which Homebox project this project deploys to; nothing is deployed or sent.",
+    );
+    DEPLOY = row(
+        "tool.deploy",
+        "deploy, of a project already on GitHub: push main and deploy it through Homebox",
+        DeployToProduction,
+        High,
+        "Pushes the code and changes what is live at a public address.",
+    );
+    DEPLOY_PUBLISH = row(
+        "tool.deploy.publish_first",
+        "deploy, of a project not on GitHub yet: create a private repository, push main, add it to Homebox, link and deploy",
+        DeployToProduction,
+        High,
+        "Creates a repository, pushes the code off this machine and makes it live at a public address.",
+    );
+
     // Merges.
 
     MERGE_MAIN = row(

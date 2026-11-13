@@ -142,6 +142,11 @@ pub fn describe(state: &ProjectState, item: &InboxItem) -> String {
             text.push_str(&format!("\nAction: {action}"));
             text
         }
+        InboxItem::Finished { action, result } => {
+            format!(
+                "A call of yours that the daemon carried out in the background is done.\n{result}\nAction: {action}"
+            )
+        }
         InboxItem::Job { job, note } => {
             format!("A scheduled job woke you: {note}\nJob: {job}")
         }

@@ -20,6 +20,7 @@ pub mod git;
 pub mod harness;
 pub mod id;
 pub mod inbox;
+pub mod integration;
 pub mod job;
 pub mod ledger;
 pub mod machine;

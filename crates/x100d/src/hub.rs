@@ -44,6 +44,8 @@ pub struct Hub {
     /// The daemon log's job clock: cool-offs ending.
     daemon_jobs: Scheduler<DaemonState>,
     pub vault: Vault,
+    /// The daemon's way to Homebox and GitHub, shared with the desk's tools.
+    pub integrations: Arc<x100_integrations::Integrations>,
     /// Why no sandbox can be made on this machine, if none can.
     pub no_sandbox: Option<String>,
 }
@@ -58,6 +60,8 @@ pub struct Registered {
 }
 
 impl Hub {
+    // Each is a part of the daemon made before the hub and kept as it is.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Config,
         log: DaemonLog,
@@ -65,6 +69,7 @@ impl Hub {
         desk: Arc<Desk>,
         daemon_jobs: Scheduler<DaemonState>,
         vault: Vault,
+        integrations: Arc<x100_integrations::Integrations>,
         no_sandbox: Option<String>,
     ) -> Self {
         Self {
@@ -78,6 +83,7 @@ impl Hub {
             schedulers: Mutex::new(BTreeMap::new()),
             daemon_jobs,
             vault,
+            integrations,
             no_sandbox,
         }
     }

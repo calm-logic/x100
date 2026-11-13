@@ -338,6 +338,14 @@ fn setting(n: &Names, change: &SettingChange) -> String {
             words::harness(n.daemon, what.harness),
             what.model.0
         ),
+        SettingChange::Homebox(Some(link)) => format!(
+            "Linked the project to the Homebox project {} ({}), {}",
+            link.project_name, link.repo_full_name, link.environment
+        ),
+        SettingChange::Homebox(None) => "Unlinked the project from Homebox".into(),
+        SettingChange::Repository(full) => {
+            format!("Published the project to the GitHub repository {full}")
+        }
     }
 }
 
@@ -400,6 +408,7 @@ fn inbox(n: &Names, item: &InboxItem) -> String {
             },
             n.action(*action)
         ),
+        InboxItem::Finished { action, .. } => format!("the result of {}", n.action(*action)),
         InboxItem::Job { note, .. } => format!("a reminder: {}", snippet(note)),
         InboxItem::WaitEnded { .. } => "word that a wait ended".into(),
         InboxItem::NoDriver { .. } => "word that no driver fits".into(),

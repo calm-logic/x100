@@ -94,13 +94,19 @@ pub fn reconcile(vault: &Vault, log: &DaemonLog) -> Result<(), Error> {
                     credential: c.reference,
                 },
             )?;
-            // The decision model's key is gone with it, so it is not connected.
+            // The decision model's or an integration's key is gone with it, so it is not
+            // connected.
             if log.with_state(|d| {
                 d.settings()
                     .decision_model
                     .is_some_and(|m| m.credential == c.reference)
             }) {
                 let none = DaemonSetting::DecisionModel(None);
+                log.append(Actor::Daemon, DaemonEvent::SettingChanged(none))?;
+            }
+            if let Some(none) =
+                log.with_state(|d| crate::methods::integration_without(d.settings(), c.reference))
+            {
                 log.append(Actor::Daemon, DaemonEvent::SettingChanged(none))?;
             }
         }

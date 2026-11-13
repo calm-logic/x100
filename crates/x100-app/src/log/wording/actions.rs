@@ -48,6 +48,17 @@ fn tool(n: &Names, call: &ToolCall) -> String {
         ToolCall::AddFile { name, .. } => format!("add the file {name}"),
         ToolCall::SetPreview { url } => format!("set the preview address to {url}"),
         ToolCall::SetUpProject { name, .. } => format!("set the project up as {}", quote(name)),
+        ToolCall::ListIntegrations {} => "list the integrations".into(),
+        ToolCall::LinkProject {
+            homebox_project, ..
+        } => format!(
+            "link the project to the Homebox project {}",
+            quote(homebox_project)
+        ),
+        ToolCall::Deploy { environment } => match environment {
+            Some(env) => format!("deploy the project through Homebox to {env}"),
+            None => "deploy the project through Homebox".into(),
+        },
         ToolCall::LoadSkill { skill } => format!("load the skill {}", skill.name.0),
         ToolCall::StartProcess { command, .. } => format!("start {command}"),
         ToolCall::StopProcess { name } => format!("stop {}", name.0),

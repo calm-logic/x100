@@ -24,6 +24,7 @@ x100-router = { path = "../x100-router" }
 x100-sandbox = { path = "../x100-sandbox" }
 x100-vault = { path = "../x100-vault" }
 x100-gate = { path = "../x100-gate" }
+x100-integrations = { path = "../x100-integrations" }
 async-trait = "0.1"
 bytes = "1"
 getrandom = "0.4"

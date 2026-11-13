@@ -33,7 +33,7 @@ use x100_core::id::{ActionId, CredentialRef};
 
 use crate::scope::Requester;
 use crate::{Vault, VaultError};
-pub use call::{Called, DaemonCall};
+pub use call::{CallMethod, Called, DaemonCall, Scheme};
 pub use tls::{Authority, UpstreamTrust};
 
 /// Where a host in [`ProxyConfig::resolve`] is sent instead of being looked up.
@@ -157,6 +157,8 @@ pub(crate) struct Shared {
     resolve: HashMap<String, Resolved>,
     closed: bool,
     refused: RwLock<BTreeSet<String>>,
+    /// Loopback ports the daemon's own calls may reach over plain HTTP. Never read for a driver.
+    daemon_loopback: RwLock<BTreeSet<u16>>,
     reports: mpsc::UnboundedSender<EgressReport>,
     /// Set once, by the daemon, after the proxy is made. Until then every request is refused.
     admission: OnceLock<Arc<dyn Admission>>,
@@ -218,6 +220,7 @@ impl Proxy {
                 .collect(),
             closed: config.closed,
             refused: RwLock::new(BTreeSet::new()),
+            daemon_loopback: RwLock::new(BTreeSet::new()),
             reports,
             admission: OnceLock::new(),
         };

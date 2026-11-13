@@ -154,6 +154,10 @@ fn invalid(setting: &DaemonSetting) -> Option<&'static str> {
         DaemonSetting::DecisionModel(_) => Some(
             "connect or disconnect a decision model with decision_model.connect or .disconnect",
         ),
+        DaemonSetting::Homebox(_) | DaemonSetting::GitHub(_) => Some(
+            "connect or disconnect an integration with integrations.connect_homebox, \
+             .connect_github or .disconnect",
+        ),
         _ => None,
     }
 }

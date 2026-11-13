@@ -94,6 +94,7 @@ fn call(
         settings: &settings,
         clock: &clock,
         file_stored: false,
+        homebox: None,
     };
     plan(state, &ctx, c)
 }

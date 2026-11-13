@@ -13,7 +13,9 @@ use std::time::Duration;
 use common::*;
 use x100_core::credential::{Credential, Projects, Refusal, UseOutcome};
 use x100_core::id::CredentialRef;
-use x100_vault::{DaemonCall, NoKeychain, Proxy, ProxyConfig, Resolved, SecretValue, Vault};
+use x100_vault::{
+    CallMethod, DaemonCall, NoKeychain, Proxy, ProxyConfig, Resolved, Scheme, SecretValue, Vault,
+};
 
 const DECIDER: &str = "decide.x100.test";
 const ELSEWHERE: &str = "elsewhere.x100.test";
@@ -81,9 +83,12 @@ async fn echo(ca: &TestCa) -> (TestServer, Got) {
 
 fn call(rig: &Rig, host: &str) -> DaemonCall {
     DaemonCall {
+        method: CallMethod::Post,
+        scheme: Scheme::Https,
         host: host.into(),
+        port: None,
         path: "/v1/decisions".into(),
-        credential: rig.reference,
+        credential: Some(rig.reference),
         headers: vec![
             ("authorization".into(), format!("Bearer {}", rig.reference)),
             ("content-type".into(), "application/json".into()),
@@ -154,4 +159,82 @@ async fn a_host_that_never_answers_is_given_up_on() {
     slow.timeout = Duration::from_millis(300);
     let why = rig.proxy.call(slow).await.answer.unwrap_err();
     assert!(why.contains("did not answer"), "{why}");
+}
+
+/// A Homebox on this machine is plain HTTP on loopback. The daemon's own call reaches it only
+/// once its port is opened, a GET with the key in its headers for a credential scoped to that
+/// port; and a driver's route still cannot reach the same port.
+#[tokio::test]
+async fn plain_http_reaches_only_an_opened_loopback_port_and_never_from_a_route() {
+    let got: Got = Arc::default();
+    let seen = Arc::clone(&got);
+    let server = TestServer::https(None, move |req| {
+        let seen = Arc::clone(&seen);
+        async move {
+            let auth = req
+                .headers()
+                .get("authorization")
+                .map(|v| v.to_str().unwrap().to_owned())
+                .unwrap_or_default();
+            let method = req.method().to_string();
+            seen.lock().unwrap().push((auth, method.into_bytes()));
+            respond(200, "{}")
+        }
+    })
+    .await;
+    let authority = format!("127.0.0.1:{}", server.port);
+    let mut s = setup_with(&[&authority], Projects::Only(Default::default()), None);
+    let get = DaemonCall {
+        method: CallMethod::Get,
+        scheme: Scheme::Http,
+        host: "127.0.0.1".into(),
+        port: Some(server.port),
+        path: "/api/projects".into(),
+        credential: Some(s.reference),
+        headers: vec![("authorization".into(), format!("Bearer {}", s.reference))],
+        body: Vec::new(),
+        timeout: Duration::from_secs(10),
+    };
+    let closed = s.proxy.call(get.clone()).await;
+    assert!(closed.answer.unwrap_err().contains("loopback"));
+    assert!(got.lock().unwrap().is_empty(), "nothing reached it");
+
+    s.proxy.open_loopback(server.port);
+    let called = s.proxy.call(get.clone()).await;
+    assert_eq!(called.used, Some(UseOutcome::Injected));
+    assert_eq!(called.answer.unwrap().0, 200);
+    assert_eq!(
+        got.lock().unwrap()[0],
+        (format!("Bearer {VALUE}"), b"GET".to_vec())
+    );
+    // A loopback address with another port is not opened by it.
+    let mut other = get.clone();
+    other.port = Some(server.port.wrapping_add(1));
+    assert!(s.proxy.call(other).await.answer.is_err());
+
+    // A driver's route refuses the opened port as it refuses all of loopback.
+    let route = s
+        .proxy
+        .open_route(requester(x100_core::driver::Purpose::Work), &[], &[])
+        .await
+        .unwrap();
+    let tcp = tokio::net::TcpStream::connect(route.addr()).await.unwrap();
+    let (mut sender, conn) =
+        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(tcp))
+            .await
+            .unwrap();
+    tokio::spawn(conn);
+    let request = http::Request::get(format!("http://{authority}/api/projects"))
+        .header("proxy-authorization", proxy_auth(&route))
+        .body(empty())
+        .unwrap();
+    assert_eq!(sender.send_request(request).await.unwrap().status(), 403);
+    assert_eq!(
+        s.report().await.outcome,
+        x100_vault::EgressOutcome::HostRefused
+    );
+    assert_eq!(got.lock().unwrap().len(), 1, "the route reached nothing");
+
+    s.proxy.close_loopback(server.port);
+    assert!(s.proxy.call(get).await.answer.is_err());
 }

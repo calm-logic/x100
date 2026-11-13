@@ -419,6 +419,14 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "credentials.remove",
         "decision_model.connect",
         "decision_model.disconnect",
+        "integrations.list",
+        "integrations.connect_homebox",
+        "integrations.connect_github",
+        "integrations.disconnect",
+        "integrations.homebox_projects",
+        "projects.link_homebox",
+        "projects.unlink_homebox",
+        "projects.deploy",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);

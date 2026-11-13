@@ -58,6 +58,10 @@ pub struct Project {
     pub preview: Option<String>,
     /// The tree, each agent's effort range and each lead's budget.
     pub team: Team,
+    /// The Homebox project it deploys to, once linked.
+    pub homebox: Option<crate::integration::HomeboxLink>,
+    /// The repository on GitHub its main branch is pushed to, once x100 published it.
+    pub repository: Option<String>,
 }
 
 impl Project {
@@ -248,6 +252,8 @@ impl ProjectState {
             settings: settings.clone(),
             preview: None,
             team: Team::new(ceo, effort),
+            homebox: None,
+            repository: None,
         });
         self.agents
             .insert(ceo, AgentRecord::new(ceo, "CEO", charter, at));
@@ -307,6 +313,8 @@ impl ProjectState {
                     settings.allowed.remove(what);
                 }
             }
+            SettingChange::Homebox(link) => project.homebox = link.clone(),
+            SettingChange::Repository(full_name) => project.repository = Some(full_name.clone()),
         }
         Budgets::in_force(&settings, &project.team)
             .check_leads()

@@ -17,6 +17,9 @@ use x100_core::git::CommitId;
 use x100_core::harness::{HarnessModel, ModelName};
 use x100_core::id::*;
 use x100_core::inbox::InboxItem;
+use x100_core::integration::{
+    GitHubConnection, GitHubWay, HomeboxConnection, HomeboxLink, HomeboxWay,
+};
 use x100_core::memory::{NoteName, SkillName, SkillRef, SkillScope, SkillVersion};
 use x100_core::money::{Money, Percent};
 use x100_core::party::Party;
@@ -124,6 +127,26 @@ pub fn small_project() -> ProjectState {
 
 pub fn project_events(n: usize) -> Vec<Envelope<x100_core::event::ProjectEvent>> {
     fernleaf().log[..n].to_vec()
+}
+
+fn homebox() -> HomeboxConnection {
+    HomeboxConnection {
+        way: HomeboxWay::Local,
+        address: "http://127.0.0.1:7765".into(),
+        credential: id(CredentialRef::new, 8),
+        primary_domain: Some("box.example.com".into()),
+        github_accounts: vec!["ada".into()],
+    }
+}
+
+fn link() -> HomeboxLink {
+    HomeboxLink {
+        instance: "http://127.0.0.1:7765".into(),
+        repo_full_name: "ada/fernleaf".into(),
+        project_id: "12".into(),
+        project_name: "fernleaf".into(),
+        environment: "production".into(),
+    }
 }
 
 pub fn samples() -> Vec<Sample> {
@@ -330,6 +353,63 @@ pub fn samples() -> Vec<Sample> {
         ),
         s(DisconnectDecisionModel {}, Done {}),
         s(
+            ListIntegrations {},
+            IntegrationList {
+                homebox: HomeboxStatus {
+                    connected: Some(homebox()),
+                    local: Some("http://127.0.0.1:7765".into()),
+                    default_way: HomeboxWay::Local,
+                },
+                github: GitHubStatus {
+                    connected: Some(GitHubConnection {
+                        way: GitHubWay::LocalGh,
+                        account: "ada".into(),
+                    }),
+                    ways: vec![GitHubMethod::LocalGh],
+                    default_way: Some(GitHubMethod::LocalGh),
+                },
+            },
+        ),
+        s(
+            ConnectHomebox::Address {
+                address: "https://homebox.example.com".into(),
+                key: Secret::new("hbk_not_a_real_key_0000"),
+            },
+            HomeboxConnected {
+                connection: HomeboxConnection {
+                    way: HomeboxWay::Address,
+                    address: "https://homebox.example.com".into(),
+                    ..homebox()
+                },
+            },
+        ),
+        s(
+            ConnectGitHub {
+                way: GitHubMethod::DeviceFlow,
+            },
+            GitHubConnecting::Approve {
+                user_code: "WDJB-MJHT".into(),
+                verification_uri: "https://github.com/login/device".into(),
+            },
+        ),
+        s(
+            DisconnectIntegration {
+                integration: Integration::GitHub,
+            },
+            Done {},
+        ),
+        s(
+            ListHomeboxProjects {},
+            HomeboxProjects {
+                projects: vec![HomeboxProject {
+                    name: "fernleaf".into(),
+                    repo_full_name: "ada/fernleaf".into(),
+                    managed: true,
+                    environments: vec!["production".into(), "dev".into()],
+                }],
+            },
+        ),
+        s(
             ListProjects {},
             ProjectList {
                 projects: vec![ProjectSummary {
@@ -362,6 +442,25 @@ pub fn samples() -> Vec<Sample> {
                 change: SettingChange::Budget(Money::from_dollars(80)),
             },
             Done {},
+        ),
+        s(
+            LinkHomebox {
+                project: prj,
+                homebox_project: "fernleaf".into(),
+                environment: None,
+            },
+            HomeboxLinked { link: link() },
+        ),
+        s(UnlinkHomebox { project: prj }, Done {}),
+        s(
+            DeployProject {
+                project: prj,
+                environment: None,
+            },
+            ProjectDeployed {
+                address: Some("https://fernleaf.box.example.com".into()),
+                commit: "4b825dc642cb6eb9a060e54bf8d69288fbee4904".into(),
+            },
         ),
         s(Reflect { project: prj }, Reflecting { task: tsk }),
         s(

@@ -33,8 +33,9 @@ method differ from the types, or if an example here is not accepted by the type 
   produced from the types. Enums are snake_case: a unit variant is a string, a variant with a value is an
   object with one key.
 - Bytes are standard base64 text.
-- A credential's value appears in exactly three requests: `credentials.add` and `credentials.replace`
-  (`value`), and `decision_model.connect` (`key`). No response, event or notification has a field that can
+- A credential's value appears in exactly four requests: `credentials.add` and `credentials.replace`
+  (`value`), `decision_model.connect` (`key`), and `integrations.connect_homebox` with `address` (`key`). A
+  key minted by a local Homebox never crosses the wire at all. No response, event or notification has a field that can
   hold one, and the type that carries it in cannot be serialised by accident (see `secret.rs`).
 
 ## Connecting
@@ -150,7 +151,7 @@ The client subscribes with no cursor. The result carries the snapshot: the daemo
 ```
 
 ```json daemon
-{"jsonrpc":"2.0","id":2,"result":{"snapshot":{"daemon":{"cool_offs":[],"credentials":{},"harnesses":{},"jobs":{},"machines":{},"projects":{},"seq":null,"settings":{"cool_off":{"nanos":0,"secs":600},"decision_model":null,"decision_threshold":70,"default_wait_deadline":{"nanos":0,"secs":86400},"last_turn_limit":{"nanos":0,"secs":180},"minimum_repeat":{"nanos":0,"secs":300},"projects_root":null,"retire_after_age":{"nanos":0,"secs":14400},"retire_after_tasks":10,"retire_at_context":70,"run_without_sandbox":false,"sandbox_programs":[],"stall_timeout":{"nanos":0,"secs":300},"start_pack_share":50,"terminal_drivers_per_login":4,"turns_without_progress":3}},"projects":{"prj_01M74XBRM00000000000000001":{"actions":{},"agents":{"agt_01M74XBRM00000000000000001":{"charter":"Own Fernleaf's launch, from brief to a live site.","drivers":[],"id":"agt_01M74XBRM00000000000000001","inbox":{"items":{}},"items":{},"joined":1794387601000,"memories":{},"open_tasks":[],"processes":{},"role":"CEO","skills":[],"spent":{"cost":0,"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}},"state":"planned","waits":{}}},"chat":[],"drivers":{},"files":{},"jobs":{},"messages":{},"project":{"ceo":"agt_01M74XBRM00000000000000001","code_dir":null,"created":1794387601000,"identity":null,"preview":null,"settings":{"allowed":[{"harness":"hns_00000000000000000000000002","model":"claude-opus"},{"harness":"hns_00000000000000000000000002","model":"claude-sonnet"},{"harness":"hns_00000000000000000000000003","model":"gpt-codex"}],"ask_me_about":"high_risk_only","budget":50000000,"lab_share":10},"team":{"ceo":"agt_01M74XBRM00000000000000001","members":{"agt_01M74XBRM00000000000000001":{"position":{"ceo":{"effort":{"max":"max","min":"low"}}},"retired":false}}}},"seq":1,"skills":[],"specs":{},"spend":{"lab":0,"leads":{},"project":0},"tasks":{},"trials":{},"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}}}},"subscription":1}}
+{"jsonrpc":"2.0","id":2,"result":{"snapshot":{"daemon":{"cool_offs":[],"credentials":{},"harnesses":{},"jobs":{},"machines":{},"projects":{},"seq":null,"settings":{"cool_off":{"nanos":0,"secs":600},"decision_model":null,"decision_threshold":70,"default_wait_deadline":{"nanos":0,"secs":86400},"github":null,"homebox":null,"last_turn_limit":{"nanos":0,"secs":180},"minimum_repeat":{"nanos":0,"secs":300},"projects_root":null,"retire_after_age":{"nanos":0,"secs":14400},"retire_after_tasks":10,"retire_at_context":70,"run_without_sandbox":false,"sandbox_programs":[],"stall_timeout":{"nanos":0,"secs":300},"start_pack_share":50,"terminal_drivers_per_login":4,"turns_without_progress":3}},"projects":{"prj_01M74XBRM00000000000000001":{"actions":{},"agents":{"agt_01M74XBRM00000000000000001":{"charter":"Own Fernleaf's launch, from brief to a live site.","drivers":[],"id":"agt_01M74XBRM00000000000000001","inbox":{"items":{}},"items":{},"joined":1794387601000,"memories":{},"open_tasks":[],"processes":{},"role":"CEO","skills":[],"spent":{"cost":0,"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}},"state":"planned","waits":{}}},"chat":[],"drivers":{},"files":{},"jobs":{},"messages":{},"project":{"ceo":"agt_01M74XBRM00000000000000001","code_dir":null,"created":1794387601000,"homebox":null,"identity":null,"preview":null,"repository":null,"settings":{"allowed":[{"harness":"hns_00000000000000000000000002","model":"claude-opus"},{"harness":"hns_00000000000000000000000002","model":"claude-sonnet"},{"harness":"hns_00000000000000000000000003","model":"gpt-codex"}],"ask_me_about":"high_risk_only","budget":50000000,"lab_share":10},"team":{"ceo":"agt_01M74XBRM00000000000000001","members":{"agt_01M74XBRM00000000000000001":{"position":{"ceo":{"effort":{"max":"max","min":"low"}}},"retired":false}}}},"seq":1,"skills":[],"specs":{},"spend":{"lab":0,"leads":{},"project":0},"tasks":{},"trials":{},"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}}}},"subscription":1}}
 ```
 
 Every event after the snapshot follows as a notification, in order, once. The next two events of the project's log are 2 and 3.
@@ -257,6 +258,8 @@ Errors: rejected
           "nanos": 0,
           "secs": 86400
         },
+        "github": null,
+        "homebox": null,
         "last_turn_limit": {
           "nanos": 0,
           "secs": 180
@@ -324,8 +327,10 @@ Errors: rejected
           "ceo": "agt_01M74XBRM00000000000000001",
           "code_dir": null,
           "created": 1794387601000,
+          "homebox": null,
           "identity": null,
           "preview": null,
+          "repository": null,
           "settings": {
             "allowed": [
               {
@@ -660,6 +665,8 @@ Errors: none
       "nanos": 0,
       "secs": 86400
     },
+    "github": null,
+    "homebox": null,
     "last_turn_limit": {
       "nanos": 0,
       "secs": 180
@@ -690,7 +697,7 @@ Errors: none
 
 ### `daemon.set_setting`
 
-Changes one of the daemon's settings. Which decision model classifies is changed with `decision_model.connect` and `.disconnect` only, and is `rejected` here.
+Changes one of the daemon's settings. Which decision model classifies is changed with `decision_model.connect` and `.disconnect` only, and Homebox and GitHub with `integrations.*`: each is `rejected` here.
 
 Params type `SetDaemonSetting`, result type `Done`.
 
@@ -908,6 +915,145 @@ Errors: none
 {}
 ```
 
+### `integrations.list`
+
+Lists the integrations x100 supports, Homebox and GitHub, each with its connection if it has one and the ways it can be connected on this machine now. Finding a local Homebox and a logged-in `gh` only reads: neither key nor token is read.
+
+Params type `ListIntegrations`, result type `IntegrationList`.
+
+Errors: none
+
+```json params
+{}
+```
+
+```json result
+{
+  "github": {
+    "connected": {
+      "account": "ada",
+      "way": "local_gh"
+    },
+    "default_way": "local_gh",
+    "ways": [
+      "local_gh"
+    ]
+  },
+  "homebox": {
+    "connected": {
+      "address": "http://127.0.0.1:7765",
+      "credential": "ref_01M74XBRM00000000000000008",
+      "github_accounts": [
+        "ada"
+      ],
+      "primary_domain": "box.example.com",
+      "way": "local"
+    },
+    "default_way": "local",
+    "local": "http://127.0.0.1:7765"
+  }
+}
+```
+
+### `integrations.connect_homebox`
+
+Connects Homebox, replacing one connected before. `local` runs one fixed command in the Homebox container on this machine, which mints an edit key named x100; the client asks the builder first. `address` takes a host address and an API key made there, checked with Homebox before it is kept. Either key goes to the vault, scoped to that Homebox's host and port and to no project, and is never returned by any method. No local Homebox, or a key Homebox refuses, is `rejected`.
+
+Params type `ConnectHomebox`, result type `HomeboxConnected`.
+
+Errors: rejected, unavailable
+
+```json params
+{
+  "address": "https://homebox.example.com",
+  "key": "hbk_not_a_real_key_0000",
+  "way": "address"
+}
+```
+
+```json result
+{
+  "connection": {
+    "address": "https://homebox.example.com",
+    "credential": "ref_01M74XBRM00000000000000008",
+    "github_accounts": [
+      "ada"
+    ],
+    "primary_domain": "box.example.com",
+    "way": "address"
+  }
+}
+```
+
+### `integrations.connect_github`
+
+Connects GitHub, where a project's repository is created and pushed so Homebox can deploy it. `local_gh` uses the `gh` command line logged in here, whose token the daemon never reads. `device_flow` starts GitHub's device flow and answers with the code the builder enters at GitHub; it is `unavailable` until an OAuth app for x100 is registered and its client id given to the daemon.
+
+Params type `ConnectGitHub`, result type `GitHubConnecting`.
+
+Errors: rejected, unavailable
+
+```json params
+{
+  "way": "device_flow"
+}
+```
+
+```json result
+{
+  "approve": {
+    "user_code": "WDJB-MJHT",
+    "verification_uri": "https://github.com/login/device"
+  }
+}
+```
+
+### `integrations.disconnect`
+
+Disconnects an integration and removes its key from the vault. Projects keep their links. A key minted in a local Homebox stays there until removed in Homebox's Identities.
+
+Params type `DisconnectIntegration`, result type `Done`.
+
+Errors: none
+
+```json params
+{
+  "integration": "git_hub"
+}
+```
+
+```json result
+{}
+```
+
+### `integrations.homebox_projects`
+
+The connected Homebox's projects, for a project's link to be chosen from. With none connected, `wrong_state`; when Homebox cannot be asked, `unavailable`.
+
+Params type `ListHomeboxProjects`, result type `HomeboxProjects`.
+
+Errors: wrong_state, unavailable
+
+```json params
+{}
+```
+
+```json result
+{
+  "projects": [
+    {
+      "environments": [
+        "production",
+        "dev"
+      ],
+      "managed": true,
+      "name": "fernleaf",
+      "repo_full_name": "ada/fernleaf"
+    }
+  ]
+}
+```
+
 ### `projects.list`
 
 Lists projects with the sidebar's line for each.
@@ -989,8 +1135,10 @@ Errors: not_found
     "ceo": "agt_01M74XBRM00000000000000001",
     "code_dir": null,
     "created": 1794387601000,
+    "homebox": null,
     "identity": null,
     "preview": null,
+    "repository": null,
     "settings": {
       "allowed": [
         {
@@ -1099,7 +1247,7 @@ Errors: not_found, wrong_state, rejected
 
 ### `projects.set`
 
-Changes a project setting: Ask me about, the total budget, the lab's share, or whether a harness and model are allowed. Turning one off hands the work of drivers using it on.
+Changes a project setting: Ask me about, the total budget, the lab's share, or whether a harness and model are allowed. Turning one off hands the work of drivers using it on. The Homebox link is changed with `projects.link_homebox` and `.unlink_homebox`, and the repository is x100's to record: each is `rejected` here.
 
 Params type `ChangeProjectSetting`, result type `Done`.
 
@@ -1116,6 +1264,74 @@ Errors: not_found, rejected
 
 ```json result
 {}
+```
+
+### `projects.link_homebox`
+
+Links a project to a project of the connected Homebox, found by its name or its repository's full name, deploying to `environment` (production unless named). A name that finds none or several is `rejected` with the choices.
+
+Params type `LinkHomebox`, result type `HomeboxLinked`.
+
+Errors: not_found, wrong_state, rejected, unavailable
+
+```json params
+{
+  "environment": null,
+  "homebox_project": "fernleaf",
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{
+  "link": {
+    "environment": "production",
+    "instance": "http://127.0.0.1:7765",
+    "project_id": "12",
+    "project_name": "fernleaf",
+    "repo_full_name": "ada/fernleaf"
+  }
+}
+```
+
+### `projects.unlink_homebox`
+
+Removes a project's link to Homebox.
+
+Params type `UnlinkHomebox`, result type `Done`.
+
+Errors: not_found
+
+```json params
+{
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{}
+```
+
+### `projects.deploy`
+
+The builder deploys a project's main branch through Homebox, and the answer comes when it is live or has failed. A project not on GitHub yet gets a private repository first, is added to Homebox and linked. Without Homebox and GitHub connected it is `wrong_state`, and a deploy that fails is `rejected` with why.
+
+Params type `DeployProject`, result type `ProjectDeployed`.
+
+Errors: not_found, wrong_state, rejected
+
+```json params
+{
+  "environment": null,
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{
+  "address": "https://fernleaf.box.example.com",
+  "commit": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+}
 ```
 
 ### `projects.reflect`
@@ -1288,7 +1504,7 @@ Errors: not_found, wrong_state
 
 ### `actions.decide`
 
-Approves or denies a held action, and returns once what it calls for is done: on Approve a held tool call is carried out, a held merge is done, and a held command or request out is allowed once, for the agent's next try; on Deny nothing runs, and a held merge's task goes back to its assignee. Either way the agent is told through its inbox. An action that is not held is `wrong_state`.
+Approves or denies a held action, and returns once what it calls for is done: on Approve a held tool call is carried out (a deploy is started, and its result reaches the agent when it is done), a held merge is done, and a held command or request out is allowed once, for the agent's next try; on Deny nothing runs, and a held merge's task goes back to its assignee. Either way the agent is told through its inbox. An action that is not held is `wrong_state`.
 
 Params type `DecideAction`, result type `Done`.
 
@@ -1657,9 +1873,10 @@ which appends events; the client sees the result in the stream, not in the respo
 |---|---|---|
 | `/machines/` | snapshot, `daemon.get` | `machines.set_cap` |
 | `/harnesses/` | snapshot, `daemon.get` | `harnesses.rescan`, `projects.set` (allow or disallow a harness and model) |
-| `/credentials/` | snapshot, `daemon.get` (reference, name, scope: never the value) | `credentials.add`, `.replace`, `.set_scope`, `.remove`, `decision_model.connect`, `.disconnect` |
-| daemon settings | snapshot, `daemon.get` | `daemon.set_setting`; the decision model by `decision_model.connect` and `.disconnect` |
-| `/projects/` | snapshot, `projects.list`, `projects.get` | `projects.create`, `projects.rename`, `projects.set`, `projects.reflect` |
+| `/credentials/` | snapshot, `daemon.get` (reference, name, scope: never the value) | `credentials.add`, `.replace`, `.set_scope`, `.remove`, `decision_model.connect`, `.disconnect`, `integrations.connect_homebox`, `.connect_github`, `.disconnect` |
+| daemon settings | snapshot, `daemon.get` | `daemon.set_setting`; the decision model by `decision_model.connect` and `.disconnect`; Homebox and GitHub by `integrations.connect_homebox`, `.connect_github` and `.disconnect` |
+| `/integrations/` | `integrations.list`, `integrations.homebox_projects`; each connection is a daemon setting | `integrations.connect_homebox`, `.connect_github`, `.disconnect` |
+| `/projects/` | snapshot, `projects.list`, `projects.get` | `projects.create`, `projects.rename`, `projects.set`, `projects.reflect`, `projects.link_homebox`, `.unlink_homebox`, `projects.deploy` |
 | `/events` | `events.subscribe`, `events.read` | not changed by clients |
 | `/agents/` | snapshot (team, state, current task and driver) | `agents.set_budget`, `agents.set_effort`, `agents.replace_driver` |
 | `/agents/{id}/inbox` | `agents.inbox` | by the daemon |

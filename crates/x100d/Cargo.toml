@@ -38,6 +38,7 @@ x100-orch = { path = "../x100-orch" }
 x100-router = { path = "../x100-router" }
 x100-sandbox = { path = "../x100-sandbox" }
 x100-vault = { path = "../x100-vault" }
+x100-integrations = { path = "../x100-integrations" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

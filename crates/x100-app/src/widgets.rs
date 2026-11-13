@@ -1,5 +1,5 @@
 //! The small pieces the mock repeats: an agent's orb, the effort pips, a progress meter, a pill, a
-//! segmented switch and buttons.
+//! segmented switch, buttons, and Settings' row of a label and its control.
 
 use gpui::{
     AnyElement, BoxShadow, Div, ElementId, Rgba, SharedString, Stateful, div, hsla, point,
@@ -175,4 +175,39 @@ pub fn round_button(id: impl Into<ElementId>, symbol: &'static str) -> Stateful<
         .cursor_pointer()
         .hover(|s| s.bg(theme::hover()))
         .child(symbol)
+}
+
+/// A label on the left and its control on the right, under a hairline.
+pub fn row(
+    label: impl Into<SharedString>,
+    detail: Option<String>,
+    control: impl IntoElement,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(16.))
+        .py(px(12.))
+        .border_b_1()
+        .border_color(theme::line())
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(px(theme::TEXT))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(label.into()),
+                )
+                .children(detail.map(|d| {
+                    div()
+                        .text_size(px(theme::TINY))
+                        .text_color(theme::muted())
+                        .child(d)
+                })),
+        )
+        .child(control)
 }

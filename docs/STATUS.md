@@ -230,6 +230,28 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
     `the_first_message_creates_the_project...` at line 254 under load.
   - Also fixed here: `program_paths` compared a resolved path with an unresolved one, which failed on macOS.
 
+- **M12I, integrations: Homebox and GitHub.** The orchestrator's run: 549 tests pass, 0 fail, 13 ignored,
+  clippy and fmt clean. All on stand-ins: a stand-in Homebox server, a stand-in `docker` and `gh`, and a bare
+  git repository as the remote. `x100d/tests/integrations.rs`, daemon as a child process: "use local" is
+  offered first and connects with no key typed, and the minted key is found nowhere outside the vault by a
+  byte search; without a local Homebox the builder gives a host and a key, and a wrong key, a read key and
+  plain HTTP to another host are refused; a project is linked from the protocol and by the CEO by name, and
+  the link survives a restart; without GitHub a deploy is refused with the reason; a deploy from the chat is
+  held at "High risk only", runs on Approve, and the CEO is told the address or why it failed; a project with
+  no repository is created, pushed, added, linked and deployed in one request; both `auto_deploy` settings
+  deploy once; a deploy cut off by the daemon stopping fails on restart. The app's Settings has Integrations
+  and the project's Homebox project. A driver's route to an opened loopback port is still refused.
+  - **Not run:** the real mint command, real `gh` and push, real Homebox calls from x100, the device flow
+    against GitHub (no OAuth app exists), macOS, a deploy cut off by SIGKILL.
+  - **Limits:** the minted key stays in Homebox after Disconnect, since an edit key cannot revoke itself. A
+    name that resolves to loopback is still not refused by the proxy, so a driver could reach the local
+    Homebox port, where it holds no key. `desk.rs` and two test files are a little over 600 lines.
+  - The driver tests no longer assert the exact installed version of Claude Code or Codex. Claude Code
+    updated itself to 2.1.323 here and 13 tests failed on that alone. A version other than the tested one is
+    allowed its warning, and the tests run against what is installed.
+- **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
+  in base mode, production only, dev paused. Not through x100.
+
 ## In progress
 
 M12I, integrations with Homebox and GitHub. Opus subagent.
@@ -274,6 +296,12 @@ invent any role with a charter, and team changes need the builder's agreement.
 - **2026-11-12. The gate's classifier is a decision model**: Gemini Decision 1, OpenAI's Decisions API or
   TypeSafe AI's Jev, not a language model run in a harness. Research in `docs/DECISION_MODELS.md`, design in
   ARCHITECTURE's Gate section, milestone M12D in the plan.
+- **2026-11-12. The decision model offered first is the cheapest that is good enough, and the confidence
+  threshold is a setting.** Gemini Decision 1 is offered first in Settings: its free tier makes it the
+  cheapest in use and its documentation is the most complete. Jev has the lowest list price but its access is
+  unclear and a paper reports it following an option's name over its description. The threshold stays 0.7 by
+  default and becomes a daemon setting the builder can change. **Not built yet:** the threshold is a constant
+  until the change after M12I.
 - **2026-11-12. Trials are a toggle, off by default.** After Anthropic's post on agent memory, reflection
   commits its changes directly unless the project's "trial before commit" setting is on. Corrections of notes
   against the log are never put on trial. This changed the decided line in ARCHITECTURE's "Evals, trials and

@@ -147,6 +147,22 @@ pub async fn rename(hub: &Hub, p: RenameProject) -> Result<Done, RpcError> {
 
 pub async fn change_setting(hub: &Hub, p: ChangeProjectSetting) -> Result<Done, RpcError> {
     let store = project(hub, p.project)?;
+    // A link is checked with Homebox, and a repository is recorded only by x100's own deploy.
+    match &p.change {
+        SettingChange::Homebox(_) => {
+            return Err(RpcError::new(
+                ErrorCode::Rejected,
+                "link or unlink Homebox with projects.link_homebox or .unlink_homebox",
+            ));
+        }
+        SettingChange::Repository(_) => {
+            return Err(RpcError::new(
+                ErrorCode::Rejected,
+                "a project's repository is recorded by x100 when it publishes the project",
+            ));
+        }
+        _ => {}
+    }
     if let SettingChange::Allow {
         what,
         allowed: true,

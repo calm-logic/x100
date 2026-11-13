@@ -33,6 +33,9 @@ pub(crate) enum Tool {
     ReadMemories,
     ProposeChange,
     SetUpProject,
+    ListIntegrations,
+    LinkProject,
+    Deploy,
 }
 
 /// What the CEO is told once its call has set the project up.
@@ -47,7 +50,7 @@ pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the t
      reaches your inbox.";
 
 impl Tool {
-    pub const ALL: [Tool; 23] = [
+    pub const ALL: [Tool; 26] = [
         Tool::Delegate,
         Tool::Review,
         Tool::Report,
@@ -71,6 +74,9 @@ impl Tool {
         Tool::ReadMemories,
         Tool::ProposeChange,
         Tool::SetUpProject,
+        Tool::ListIntegrations,
+        Tool::LinkProject,
+        Tool::Deploy,
     ];
 
     pub fn of(call: &ToolCall) -> Tool {
@@ -98,6 +104,9 @@ impl Tool {
             ToolCall::ReadMemories { .. } => Tool::ReadMemories,
             ToolCall::ProposeChange(_) => Tool::ProposeChange,
             ToolCall::SetUpProject { .. } => Tool::SetUpProject,
+            ToolCall::ListIntegrations {} => Tool::ListIntegrations,
+            ToolCall::LinkProject { .. } => Tool::LinkProject,
+            ToolCall::Deploy { .. } => Tool::Deploy,
         }
     }
 
@@ -131,6 +140,9 @@ impl Tool {
             Tool::ReadMemories => "read_memories",
             Tool::ProposeChange => "propose_change",
             Tool::SetUpProject => "set_up_project",
+            Tool::ListIntegrations => "list_integrations",
+            Tool::LinkProject => "link_project",
+            Tool::Deploy => "deploy",
         }
     }
 
@@ -145,6 +157,9 @@ impl Tool {
                 | Tool::ReadMemories
                 | Tool::ProposeChange
                 | Tool::SetUpProject
+                | Tool::ListIntegrations
+                | Tool::LinkProject
+                | Tool::Deploy
         )
     }
 
@@ -160,6 +175,13 @@ impl Tool {
 
     /// The call these arguments make, or why they do not fit the tool.
     pub fn parse(self, arguments: Value) -> Result<ToolCall, String> {
+        // MCP's arguments are an object; serde alone would read a list as a struct's fields.
+        if !arguments.is_object() {
+            return Err(format!(
+                "the arguments to `{}` are not an object",
+                self.name()
+            ));
+        }
         let call: ToolCall = serde_json::from_value(json!({ self.name(): arguments }))
             .map_err(|e| format!("the arguments do not fit `{}`: {e}", self.name()))?;
         debug_assert_eq!(Tool::of(&call), self);
@@ -277,6 +299,25 @@ impl Tool {
                  Until this is called there is no task: do not plan, write specs or form a team \
                  before it. Call it again later only to change the name or the intent; that \
                  changes nothing else. Returns the task's id the first time."
+            }
+            Tool::ListIntegrations => {
+                "CEO only. What the builder connected (Homebox, where projects are deployed, and \
+                 GitHub, where their code is hosted), what this project is linked to, and the \
+                 Homebox projects it could be linked to, by name and repository."
+            }
+            Tool::LinkProject => {
+                "CEO only. Link this project to a Homebox project, named as the builder named it \
+                 or by its repository, owner/name, so `deploy` deploys there. If the name fits \
+                 none or several, the answer lists the choices; ask the builder which. Returns \
+                 the link."
+            }
+            Tool::Deploy => {
+                "CEO only. Deploy the project's main branch through Homebox, to its linked \
+                 project and environment (production unless named). A project not linked yet is \
+                 put in a new private GitHub repository, added to Homebox and linked first, all \
+                 in this one call. It usually waits for the builder's approval. The daemon does it in \
+                 the background, and the deployed address, or why it failed, comes to your \
+                 inbox: tell the builder."
             }
         }
     }

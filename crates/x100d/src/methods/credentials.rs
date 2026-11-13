@@ -100,6 +100,7 @@ pub async fn remove(hub: &Hub, p: RemoveCredential) -> Result<Done, RpcError> {
     blocking(move || {
         vault.remove(p.credential).map_err(vault_error)?;
         super::decision::removed(&log, p.credential)?;
+        super::integrations::removed(&log, p.credential)?;
         let event = DaemonEvent::CredentialRemoved {
             credential: p.credential,
         };

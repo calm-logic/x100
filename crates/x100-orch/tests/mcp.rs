@@ -69,7 +69,15 @@ const LATER: [&str; 5] = [
     "read_log",
     "propose_change",
 ];
-const CEO_ONLY: [&str; 4] = ["form_team", "set_effort", "set_budget", "set_up_project"];
+const CEO_ONLY: [&str; 7] = [
+    "form_team",
+    "set_effort",
+    "set_budget",
+    "set_up_project",
+    "list_integrations",
+    "link_project",
+    "deploy",
+];
 
 fn parsed(answer: &Answer) -> Value {
     assert!(!answer.is_error, "{answer:?}");
@@ -193,7 +201,7 @@ async fn two_drivers_reach_their_own_tools_over_http_at_once() {
     expected.sort();
     got.sort();
     assert_eq!(got, expected, "a lead gets every other tool the CEO gets");
-    assert_eq!(ceo_names.len(), 18);
+    assert_eq!(ceo_names.len(), 21);
 
     assert_eq!(parsed(&spec)["revision"], 1);
     assert_eq!(parsed(&update)["task"], json!(tech_task));
@@ -221,8 +229,8 @@ async fn two_drivers_reach_their_own_tools_over_http_at_once() {
 
     // What a harness gets wrong is answered as an error the model can read, and changes nothing.
     let seq = s.seq();
-    let unknown = ceo.call("deploy", json!({})).await;
-    assert!(unknown.is_error && unknown.text.contains("no tool `deploy`"));
+    let unknown = ceo.call("launch", json!({})).await;
+    assert!(unknown.is_error && unknown.text.contains("no tool `launch`"));
     let wrong = ceo
         .call("write_spec", json!({ "spec": "novel", "body": 3 }))
         .await;

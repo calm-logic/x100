@@ -214,6 +214,18 @@ fn every_tool(f: &x100_core::testing::Fernleaf) -> Vec<(ToolCall, &'static str)>
             },
             "tool.routine",
         ),
+        (ToolCall::ListIntegrations {}, "tool.list_integrations"),
+        (
+            ToolCall::LinkProject {
+                homebox_project: "foobar".into(),
+                environment: None,
+            },
+            "tool.link_project",
+        ),
+        (
+            ToolCall::Deploy { environment: None },
+            "tool.deploy.publish_first",
+        ),
     ]
 }
 
@@ -244,6 +256,9 @@ fn variant_index(call: &ToolCall) -> usize {
         ToolCall::ReadMemories { .. } => 20,
         ToolCall::ProposeChange(_) => 21,
         ToolCall::SetUpProject { .. } => 22,
+        ToolCall::ListIntegrations {} => 23,
+        ToolCall::LinkProject { .. } => 24,
+        ToolCall::Deploy { .. } => 25,
     }
 }
 
@@ -253,7 +268,7 @@ fn every_tool_variant_has_a_rule() {
     let calls = every_tool(&f);
     let mut seen: Vec<usize> = calls.iter().map(|(c, _)| variant_index(c)).collect();
     seen.sort_unstable();
-    assert_eq!(seen, (0..23).collect::<Vec<_>>(), "a case per variant");
+    assert_eq!(seen, (0..26).collect::<Vec<_>>(), "a case per variant");
     for (call, expected) in calls {
         let r = ruling(&state, &tool(f.backend, call.clone()));
         assert_eq!(rule_of(&r).as_deref(), Some(expected), "{call:?}");

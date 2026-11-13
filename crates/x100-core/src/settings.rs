@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::decision::DecisionModel;
+use crate::integration::{GitHubConnection, HomeboxConnection};
 use crate::job::Interval;
 use crate::money::Percent;
 
@@ -60,6 +61,11 @@ pub struct DaemonSettings {
     /// A decision model's answer whose confidence is below this share has its risk raised one
     /// level.
     pub decision_threshold: Percent,
+    /// The Homebox x100 deploys to, once the builder connects one.
+    pub homebox: Option<HomeboxConnection>,
+    /// The GitHub account x100 creates repositories under and pushes to. Until it is connected,
+    /// a project's repository stays on this machine.
+    pub github: Option<GitHubConnection>,
 }
 
 const fn minutes(n: u64) -> Duration {
@@ -85,6 +91,8 @@ impl Default for DaemonSettings {
             sandbox_programs: Vec::new(),
             decision_model: None,
             decision_threshold: percent(70),
+            homebox: None,
+            github: None,
         }
     }
 }
@@ -113,6 +121,8 @@ pub enum DaemonSetting {
     SandboxPrograms(Vec<PathBuf>),
     DecisionModel(Option<DecisionModel>),
     DecisionThreshold(Percent),
+    Homebox(Option<HomeboxConnection>),
+    GitHub(Option<GitHubConnection>),
 }
 
 impl DaemonSettings {
@@ -135,6 +145,8 @@ impl DaemonSettings {
             S::SandboxPrograms(v) => self.sandbox_programs = v,
             S::DecisionModel(v) => self.decision_model = v,
             S::DecisionThreshold(v) => self.decision_threshold = v,
+            S::Homebox(v) => self.homebox = v,
+            S::GitHub(v) => self.github = v,
         }
     }
 }

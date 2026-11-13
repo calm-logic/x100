@@ -73,7 +73,23 @@ drop it.
 - The link stores the instance, the project's `repo_full_name` as its stable key, its id and name as last
   seen, and the environment. A renamed project changes address. A released one refuses deploys until re-linked.
 
-## Unknown, since it needs a login
+## Found since, from Homebox's code and a logged-in session
 
-The primary domain, which GitHub accounts are connected, the cluster's peers, and whether releasing a project
-also removes it from peers.
+- `GET /api/domains` (R) lists domains with `name` and `is_primary`. `GET /api/integrations` (R) lists the
+  connected accounts with `provider` and `account_login`. Each project also carries `domain` and
+  `integration.account_login`.
+- The deploy and deployment-list routes take the environment's id, not its name.
+- `POST /projects/{id}/add` answers with the deployments it queued, so the first deploy is watched and not
+  repeated.
+- Homebox probes only instances that have a URL. The others stay `unknown`, so only an instance with a URL
+  can be judged as crash-looping.
+- A project's `domain_mode` is `container` (`<name>.<domain>`, and `<name>--dev.<domain>` for dev) or `base`
+  (the project owns the domain: production at the apex, dev at `dev.<domain>`).
+- `POST /projects/{id}/environments/{env}/stop` pauses an environment until it is resumed. Pushes while paused
+  are staged and not run.
+- "Use local" has been run once by hand in a narrower form: a session signed inside the container, not a
+  minted key. The x100 mint command itself is still unrun.
+
+## Unknown
+
+The cluster's peers, and whether releasing a project also removes it from peers.

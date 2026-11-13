@@ -32,6 +32,10 @@ pub enum InboxItem {
         /// once more. `None` when there is nothing to add to the decision.
         result: Option<String>,
     },
+    /// A call of its own that the daemon carried out in the background, such as a deploy, is
+    /// done, with what came of it in words the agent can act on. A held call the builder
+    /// approved ends with its [`InboxItem::Decision`] instead, which carries the same.
+    Finished { action: ActionId, result: String },
     /// A job woke it.
     Job { job: JobId, note: String },
     /// One of its waits ran out, or waits on something that can no longer happen.

@@ -237,5 +237,35 @@ fn describe(state: &ProjectState, call: &ToolCall) -> String {
             shorten(telemetry, 300)
         ),
         T::SetUpProject { name, .. } => format!("Set up the project \"{}\"", shorten(name, 120)),
+        T::ListIntegrations {} => "List the connected integrations".to_owned(),
+        T::LinkProject {
+            homebox_project, ..
+        } => format!(
+            "Link the project to the Homebox project \"{}\"",
+            shorten(homebox_project, 120)
+        ),
+        T::Deploy { environment } => deploy(state, environment.as_deref()),
+    }
+}
+
+/// What a deploy will do, from where the project stands: published and linked, or not yet.
+fn deploy(state: &ProjectState, environment: Option<&str>) -> String {
+    let project = state.project();
+    let link = project.and_then(|p| p.homebox.as_ref());
+    let env = environment
+        .or(link.map(|l| l.environment.as_str()))
+        .unwrap_or(x100_core::integration::DEFAULT_ENVIRONMENT);
+    match (link, project.and_then(|p| p.repository.as_ref())) {
+        (Some(l), _) => format!(
+            "Push the main branch to {} and deploy the Homebox project \"{}\" ({env}), which is public",
+            l.repo_full_name, l.project_name
+        ),
+        (None, Some(repo)) => format!(
+            "Push the main branch to {repo}, add it to Homebox and deploy it ({env}), which is public"
+        ),
+        (None, None) => format!(
+            "Create a private repository on GitHub, push the main branch to it, add it to Homebox \
+             and deploy it ({env}), which is public"
+        ),
     }
 }

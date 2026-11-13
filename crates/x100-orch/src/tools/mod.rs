@@ -8,6 +8,7 @@
 //! pack can rebuild a call's result from the log.
 
 mod catalogue;
+mod integrate;
 mod later;
 mod process;
 mod schema;
@@ -43,7 +44,12 @@ pub(crate) struct Ctx<'a> {
     pub clock: &'a dyn Clock,
     /// For `add_file`: whether the bytes it names are in the project's file store.
     pub file_stored: bool,
+    /// For `list_integrations` and `link_project`: the connected Homebox's projects, asked
+    /// before the call is decided, or why they could not be.
+    pub homebox: Option<&'a Result<Vec<HomeboxProject>, String>>,
 }
+
+pub(crate) use x100_integrations::homebox::Project as HomeboxProject;
 
 /// What carrying out a call takes.
 #[derive(Debug, Default)]
@@ -57,6 +63,17 @@ pub(crate) struct Plan {
     pub code_dir: Option<NewCodeDir>,
     /// A process to start or stop in the agent's sandbox before the events are appended.
     pub process: Option<ProcessPlan>,
+    /// What the driver reads, when it is not made from the events.
+    pub reply: Option<String>,
+    /// A deploy, which the daemon does after the call returns, since it takes minutes; its result
+    /// reaches the agent's inbox.
+    pub deploy: Option<DeployJob>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeployJob {
+    /// `None` for the linked one.
+    pub environment: Option<String>,
 }
 
 /// Where a project being set up gets its code directory: `<root>/<slug>`, or with a number after
@@ -178,6 +195,12 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
         } => setup::set_up(&at, name, intent, brief.as_deref()),
         ToolCall::StartProcess { name, command } => process::start(&at, name, command),
         ToolCall::StopProcess { name } => process::stop(&at, name),
+        ToolCall::ListIntegrations {} => integrate::list(&at),
+        ToolCall::LinkProject {
+            homebox_project,
+            environment,
+        } => integrate::link(&at, homebox_project, environment.as_deref()),
+        ToolCall::Deploy { environment } => integrate::deploy(&at, environment.clone()),
         ToolCall::LoadSkill { .. }
         | ToolCall::Remember { .. }
         | ToolCall::ReadLog { .. }

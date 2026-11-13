@@ -146,6 +146,8 @@ impl Env {
         config.fake_program = Some(env!("CARGO_BIN_EXE_x100d-fake-harness").into());
         config.sandbox_helper = Some(env!("CARGO_BIN_EXE_x100d-sandbox").into());
         config.no_keychain = true;
+        let [(_, docker), (_, gh)] = no_integrations();
+        (config.docker, config.gh) = (docker.into(), gh.into());
         config
     }
 
@@ -218,6 +220,15 @@ pub struct DaemonProc {
     child: Option<Child>,
 }
 
+/// A test's daemon finds no Homebox and no `gh` of the builder's: it is pointed at programs that
+/// do not exist, unless the test names its own stand-ins.
+pub fn no_integrations() -> [(&'static str, &'static str); 2] {
+    [
+        (x100d::DOCKER_ENV, "/nonexistent/x100-test/docker"),
+        (x100d::GH_ENV, "/nonexistent/x100-test/gh"),
+    ]
+}
+
 /// A test's daemon makes code directories only where the test says, never in the builder's
 /// `~/x100`.
 fn own_projects_root(args: &[std::ffi::OsString]) {
@@ -235,6 +246,7 @@ impl DaemonProc {
             // A test's vault keeps its key in a file in its own data directory, never in the
             // builder's keychain.
             .env(x100d::NO_KEYCHAIN_ENV, "1")
+            .envs(no_integrations())
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");
@@ -247,6 +259,7 @@ impl DaemonProc {
         let child = Command::new(env!("CARGO_BIN_EXE_x100d"))
             .args(args)
             .env(x100d::NO_KEYCHAIN_ENV, "1")
+            .envs(no_integrations())
             .envs(extra.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .spawn()
@@ -262,6 +275,7 @@ impl DaemonProc {
             .env_clear()
             .envs(env.iter().map(|(k, v)| (k, v)))
             .env(x100d::NO_KEYCHAIN_ENV, "1")
+            .envs(no_integrations())
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");

@@ -21,7 +21,7 @@ use x100_core::money::Usage;
 use x100_core::party::Actor;
 use x100_gate::decision::{self, DecisionModel};
 use x100_gate::{Asked, Question};
-use x100_vault::DaemonCall;
+use x100_vault::{CallMethod, DaemonCall, Scheme};
 
 use crate::Shared;
 use crate::ctx::{Events, ProjectCtx};
@@ -132,9 +132,12 @@ async fn ask(
 ) -> (Asked, Option<u64>, Vec<x100_core::credential::UseOutcome>) {
     let (header, value) = model.key_header(&connected.credential.to_string());
     let request = DaemonCall {
+        method: CallMethod::Post,
+        scheme: Scheme::Https,
         host: connected.provider.host().to_owned(),
+        port: None,
         path: model.path().to_owned(),
-        credential: connected.credential,
+        credential: Some(connected.credential),
         headers: vec![
             (header.to_owned(), value),
             ("content-type".into(), "application/json".into()),

@@ -6,9 +6,11 @@ mod credentials;
 mod daemon;
 mod decision;
 mod files;
+mod integrations;
 mod projects;
 
 pub(crate) use daemon::terminal_of;
+pub(crate) use integrations::without as integration_without;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -90,6 +92,14 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::RemoveCredential(p) => out(credentials::remove(hub, p).await),
         Call::ConnectDecisionModel(p) => out(decision::connect(hub, p).await),
         Call::DisconnectDecisionModel(p) => out(decision::disconnect(hub, p).await),
+        Call::ListIntegrations(_) => out(Ok(integrations::list(hub).await)),
+        Call::ConnectHomebox(p) => out(integrations::connect_homebox(hub, p).await),
+        Call::ConnectGitHub(p) => out(integrations::connect_github(hub, p).await),
+        Call::DisconnectIntegration(p) => out(integrations::disconnect(hub, p).await),
+        Call::ListHomeboxProjects(_) => out(integrations::homebox_projects(hub).await),
+        Call::LinkHomebox(p) => out(integrations::link(hub, p).await),
+        Call::UnlinkHomebox(p) => out(integrations::unlink(hub, p).await),
+        Call::DeployProject(p) => out(integrations::deploy(hub, p).await),
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)

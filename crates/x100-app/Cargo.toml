@@ -34,6 +34,8 @@ log = "0.4"
 env_logger = "0.11"
 
 [dev-dependencies]
+# The Homebox stand-in the daemon's tests use, included by the app's: a loopback HTTP server.
+tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread"] }
 gpui = { git = "https://github.com/zed-industries/zed", rev = "3e23a0c48201a9cc34ad4a3a4225910247de41f4", features = ["test-support"] }
 tempfile = "3"
 x100-core = { path = "../x100-core", features = ["testing"] }

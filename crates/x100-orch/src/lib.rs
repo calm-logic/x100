@@ -35,6 +35,7 @@ mod egress;
 mod fleet;
 mod gate;
 mod ids;
+mod integrate;
 mod jobs;
 mod mcp;
 pub mod pack;

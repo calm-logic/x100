@@ -52,6 +52,7 @@ impl Scene {
             settings: &self.settings,
             clock: &self.clock,
             file_stored: false,
+            homebox: None,
         };
         plan(&self.state, &ctx, call)
     }

@@ -7886,6 +7886,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "x100-integrations"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+ "x100-core",
+ "x100-vault",
+]
+
+[[package]]
 name = "x100-jobs"
 version = "0.0.0"
 dependencies = [
@@ -7929,6 +7941,7 @@ dependencies = [
  "x100-core",
  "x100-drivers",
  "x100-gate",
+ "x100-integrations",
  "x100-jobs",
  "x100-router",
  "x100-sandbox",
@@ -8040,6 +8053,7 @@ dependencies = [
  "x100-client",
  "x100-core",
  "x100-drivers",
+ "x100-integrations",
  "x100-jobs",
  "x100-orch",
  "x100-proto",

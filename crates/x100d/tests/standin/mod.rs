@@ -7,6 +7,10 @@
 //! test told it to say. An error it gives quotes the key it was sent, as some providers do, so a
 //! test can see that the daemon redacts it.
 
+#![allow(dead_code)]
+
+pub mod homebox;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -66,39 +70,45 @@ pub fn provider_of(host: &str) -> Option<DecisionProvider> {
     DecisionProvider::ALL.into_iter().find(|p| p.host() == host)
 }
 
+/// A TLS acceptor with one certificate for `hosts`, signed by a new test authority whose
+/// certificate is written to `ca` for the daemon to trust upstream.
+pub fn tls(ca: &Path, hosts: Vec<String>) -> tokio_rustls::TlsAcceptor {
+    let ca_key = KeyPair::generate().unwrap();
+    let mut params = CertificateParams::default();
+    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.key_usages = vec![
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::DigitalSignature,
+    ];
+    let ca_cert = params.self_signed(&ca_key).unwrap();
+    std::fs::write(ca, ca_cert.pem()).unwrap();
+    let issuer = Issuer::new(params, ca_key);
+    let leaf_key = KeyPair::generate().unwrap();
+    let leaf = CertificateParams::new(hosts)
+        .unwrap()
+        .signed_by(&leaf_key, &issuer)
+        .unwrap();
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
+    let chain: Vec<CertificateDer<'static>> = vec![leaf.der().clone()];
+    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(chain, key)
+    .unwrap();
+    tokio_rustls::TlsAcceptor::from(Arc::new(config))
+}
+
 impl StandIn {
     pub async fn start(dir: &Path) -> StandIn {
-        let ca_key = KeyPair::generate().unwrap();
-        let mut params = CertificateParams::default();
-        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        params.key_usages = vec![
-            KeyUsagePurpose::KeyCertSign,
-            KeyUsagePurpose::DigitalSignature,
-        ];
-        let ca_cert = params.self_signed(&ca_key).unwrap();
         let ca = dir.join("standin-ca.pem");
-        std::fs::write(&ca, ca_cert.pem()).unwrap();
-        let issuer = Issuer::new(params, ca_key);
         let hosts: Vec<String> = DecisionProvider::ALL
             .iter()
             .map(|p| p.host().to_owned())
             .collect();
-        let leaf_key = KeyPair::generate().unwrap();
-        let leaf = CertificateParams::new(hosts)
-            .unwrap()
-            .signed_by(&leaf_key, &issuer)
-            .unwrap();
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
-        let chain: Vec<CertificateDer<'static>> = vec![leaf.der().clone()];
-        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(chain, key)
-        .unwrap();
-        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let acceptor = tls(&ca, hosts);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let says = Arc::new(Mutex::new(Says::HangUp));
