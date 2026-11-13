@@ -14,7 +14,7 @@ fn on(flag: bool) -> &'static str {
     if flag { "[x]" } else { "[ ]" }
 }
 
-pub fn page(c: &Ctx) -> Page {
+pub fn page(c: &Ctx, ig: &crate::integrations::Integrations) -> Page {
     let mut page = Page::new();
     let Some(project) = c.p.project() else {
         return page;
@@ -210,6 +210,7 @@ pub fn page(c: &Ctx) -> Page {
             page.paragraph(why, "      ", c.width);
         }
     }
+    super::integrations::section(&mut page, c, ig);
     page
 }
 

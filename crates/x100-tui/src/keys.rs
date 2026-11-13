@@ -22,7 +22,10 @@ enum Typed {
 fn typing(prompt: &mut Prompt, key: KeyEvent) -> Typed {
     match key.code {
         KeyCode::Esc => Typed::Cancelled,
-        KeyCode::Enter => Typed::Done(prompt.input.take()),
+        // Alt-Enter is a new line, as in the chat; a skill's text has several.
+        KeyCode::Enter if !key.modifiers.contains(KeyModifiers::ALT) => {
+            Typed::Done(prompt.input.take())
+        }
         _ => {
             prompt.input.key(key);
             Typed::Pending
@@ -226,6 +229,15 @@ impl App {
     pub fn ask(&mut self, title: &str, then: Then) {
         if let Some(ui) = self.project_ui_mut() {
             ui.prompt = Some(prompt(title, then));
+        }
+    }
+
+    /// A prompt that starts with `text` in it, to change rather than retype.
+    pub fn ask_with(&mut self, title: &str, then: Then, text: &str) {
+        if let Some(ui) = self.project_ui_mut() {
+            let mut p = prompt(title, then);
+            p.input.insert_str(text);
+            ui.prompt = Some(p);
         }
     }
 
@@ -438,6 +450,20 @@ impl App {
             (Some(a), KeyCode::Char('r')) => {
                 let (project, agent) = (ui.id, a.id);
                 self.replace_driver(project, agent);
+            }
+            (Some(a), KeyCode::Char('l')) => {
+                let (project, agent) = (ui.id, a.id);
+                self.ask_look(project, agent);
+            }
+            (Some(a), KeyCode::Char('n')) if a.mode == AgentMode::Skills => {
+                let agent = a.id;
+                self.ask_new_skill(agent);
+            }
+            (Some(a), KeyCode::Char('e')) if a.mode == AgentMode::Skills => {
+                let agent = a.id;
+                if let Some(Target::Skill(skill)) = self.selected() {
+                    self.ask_edit_skill(agent, skill);
+                }
             }
             (Some(_), KeyCode::Char(c)) => {
                 let mode = match c {

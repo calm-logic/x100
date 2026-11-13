@@ -10,7 +10,7 @@ use x100_client::words;
 
 use crate::app::{App, Prompt, TABS, Tab, Where};
 use crate::input::Input;
-use crate::page::{ACCENT, BAD, BOLD, DIM, GOOD, WARN, clip};
+use crate::page::{ACCENT, BAD, BOLD, DIM, GOOD, WARN, clip, wrap};
 use crate::pages::follows_end;
 
 /// The text of an input broken to `width` columns, and where its cursor falls in it.
@@ -83,8 +83,11 @@ fn hints(app: &App) -> String {
                 Tab::Chat => "Enter sends · Ctrl-A attaches · PgUp/PgDn scroll",
                 Tab::Held => "a approve · d deny",
                 Tab::Team => match &ui.agent {
+                    Some(a) if a.mode == crate::app::AgentMode::Skills => {
+                        "Esc back · n new skill · e rewrite it · c o w m k t switch · l look"
+                    }
                     Some(_) => {
-                        "Esc back · c o w m k t switch what is shown · r replaces its driver"
+                        "Esc back · c o w m k t switch what is shown · r replaces its driver · l look"
                     }
                     None if ui.drivers => "s stop · r replace driver · d agents",
                     None => "Enter opens · d drivers",
@@ -95,7 +98,9 @@ fn hints(app: &App) -> String {
                 Tab::Budget => "b project budget · e lead budget",
                 Tab::Log => "↑/↓ PgUp/PgDn scroll",
                 Tab::Preview => "",
-                Tab::Settings => "Enter changes · c credential · v value · x remove · r range",
+                Tab::Settings => {
+                    "Enter changes or connects · c credential · v value · x remove · r range"
+                }
             };
             format!("{tab}  ·  Tab next · p projects · q quits")
         }
@@ -222,11 +227,10 @@ impl App {
     fn draw_project(&mut self, frame: &mut Frame, area: Rect) {
         let width = area.width as usize;
         let header = self.header(width);
-        let prompt_height = if matches!(self.project_ui(), Some(u) if u.prompt.is_some()) {
-            2
-        } else {
-            0
-        };
+        let prompt_height = self
+            .project_ui()
+            .and_then(|u| u.prompt.as_ref())
+            .map_or(0, |p| wrap(&p.title, width).len() as u16 + 1);
         let chat = matches!(self.project_ui(), Some(u) if u.tab == Tab::Chat);
         let input_height: u16 = if chat {
             let ui = self.project_ui().expect("a project is open");
@@ -390,18 +394,26 @@ impl App {
     }
 }
 
-/// A one-line question and its answer box; returns where the cursor goes.
+/// A one-line question and its answer box, which shows the line the cursor is on; returns where
+/// the cursor goes.
 fn prompt_lines(frame: &mut Frame, p: &Prompt, area: Rect) -> Position {
-    let (lines, (cx, _)) = layout(&p.input, (area.width as usize).saturating_sub(3), p.masked);
-    let shown = lines.first().cloned().unwrap_or_default();
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::styled(clip(&p.title, area.width as usize), WARN),
-            Line::from(vec![Span::styled("> ", ACCENT), Span::raw(shown)]),
-        ]),
-        area,
-    );
-    Position::new(area.x + 2 + cx, area.y + 1)
+    let (lines, (cx, cy)) = layout(&p.input, (area.width as usize).saturating_sub(3), p.masked);
+    let shown = lines.get(cy as usize).cloned().unwrap_or_default();
+    // A question with its choices can be longer than the screen is wide; it wraps above the box.
+    let mut text: Vec<Line> = wrap(&p.title, area.width as usize)
+        .into_iter()
+        .map(|l| Line::styled(l, WARN))
+        .collect();
+    let row = text.len() as u16;
+    text.push(Line::from(vec![
+        Span::styled("> ", ACCENT),
+        Span::raw(shown),
+    ]));
+    frame.render_widget(Paragraph::new(text), area);
+    Position::new(
+        area.x + 2 + cx,
+        area.y + row.min(area.height.saturating_sub(1)),
+    )
 }
 
 #[cfg(test)]

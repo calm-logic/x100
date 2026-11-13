@@ -61,8 +61,28 @@ pub struct Daemon {
 impl Daemon {
     /// A daemon that runs the Fernleaf script's harness, on a clock that moves only when told.
     pub fn fernleaf() -> Daemon {
+        Daemon::start(None, &[])
+    }
+
+    /// A daemon that runs `script`, a fake harness's script of the test's own, with `env` on top
+    /// of the usual. Without it the daemon is pointed at `docker` and `gh` programs that do not
+    /// exist, so it finds none of the builder's.
+    pub fn scripted(script: &str, env: &[(&str, String)]) -> Daemon {
+        Daemon::start(Some(script), env)
+    }
+
+    fn start(script: Option<&str>, env: &[(&str, String)]) -> Daemon {
         // Under the build's own directory, not `/tmp`, which a sandbox replaces with its own.
         let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
+        let scripts = match script {
+            Some(script) => {
+                let scripts = dir.path().join("scripts");
+                std::fs::create_dir_all(&scripts).expect("the scripts directory");
+                std::fs::write(scripts.join("fake.toml"), script).expect("the script is written");
+                scripts
+            }
+            None => PathBuf::from(SCRIPTS),
+        };
         let child = Command::new(binary("x100d"))
             .arg("--data-dir")
             .arg(dir.path().join("data"))
@@ -70,7 +90,7 @@ impl Daemon {
             .arg("--projects-root")
             .arg(dir.path().join("projects"))
             .arg("--scripts-dir")
-            .arg(SCRIPTS)
+            .arg(&scripts)
             .arg("--fake-harness")
             .arg(binary("x100d-fake-harness"))
             .arg("--fake-clock")
@@ -82,6 +102,7 @@ impl Daemon {
             .env("X100_NO_KEYCHAIN", "1")
             .env("X100_DOCKER", "/nonexistent/x100-test/docker")
             .env("X100_GH", "/nonexistent/x100-test/gh")
+            .envs(env.iter().map(|(k, v)| (*k, v)))
             .stdin(Stdio::null())
             .spawn()
             .expect("x100d starts");
@@ -129,7 +150,14 @@ pub struct Run {
 
 impl Run {
     pub fn start() -> Run {
-        let daemon = Daemon::fernleaf();
+        Run::with(Daemon::fernleaf())
+    }
+
+    pub fn scripted(script: &str, env: &[(&str, String)]) -> Run {
+        Run::with(Daemon::scripted(script, env))
+    }
+
+    fn with(daemon: Daemon) -> Run {
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
         let mut options = Options::new(daemon.socket(), "test");
         options.startup_timeout = WAIT;
@@ -250,11 +278,16 @@ pub struct Screen {
 }
 
 impl Screen {
-    /// What the screen shows now, one string per row with trailing blanks cut.
-    pub fn text(&mut self) -> String {
+    /// What the screen shows now, each cell with its style.
+    pub fn buffer(&mut self) -> ratatui::buffer::Buffer {
         self.tui.drain();
         self.terminal.draw(|f| self.tui.app.draw(f)).expect("draws");
-        let buffer = self.terminal.backend().buffer().clone();
+        self.terminal.backend().buffer().clone()
+    }
+
+    /// What the screen shows now, one string per row with trailing blanks cut.
+    pub fn text(&mut self) -> String {
+        let buffer = self.buffer();
         let width = buffer.area.width as usize;
         buffer
             .content()
@@ -286,6 +319,21 @@ impl Screen {
         for c in text.chars() {
             self.press(ratatui::crossterm::event::KeyCode::Char(c));
         }
+    }
+
+    /// Moves the selection to the line that stands for `target`, from the top, and says whether
+    /// it is listed.
+    pub fn select(&mut self, target: &x100_tui::page::Target) -> bool {
+        use ratatui::crossterm::event::KeyCode;
+        self.text();
+        self.press(KeyCode::Home);
+        for _ in 0..80 {
+            if self.tui.app.selected().as_ref() == Some(target) {
+                return true;
+            }
+            self.press(KeyCode::Down);
+        }
+        false
     }
 
     /// Redraws until `done` holds for the screen, applying what arrives meanwhile.

@@ -27,6 +27,10 @@ vt100 = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "io-util", "io-std", "fs"] }
 
 [dev-dependencies]
+# The Homebox stand-in the daemon's tests use, included by the integrations test: a loopback HTTP
+# server.
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread"] }
 # The binary is run in a pseudo-terminal and its screen read back.
 portable-pty = "0.9"
 tempfile = "3"

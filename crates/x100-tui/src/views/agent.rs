@@ -7,7 +7,7 @@ use x100_proto::{Memories, Skills};
 
 use super::Ctx;
 use super::settings::{trial_change, trial_state};
-use crate::page::{BOLD, DIM, Page};
+use crate::page::{BOLD, DIM, Page, Target, span, spans};
 
 pub fn memories(c: &Ctx, loaded: &Option<Result<Memories, String>>) -> Page {
     let mut page = Page::new();
@@ -47,9 +47,11 @@ pub fn skills(c: &Ctx, agent: AgentId, loaded: &Option<Result<Skills, String>>) 
             page.text(format!("Its skills could not be read: {e}"));
         }
         Some(Ok(s)) if s.skills.is_empty() => {
-            page.text("No skills yet.");
+            page.text("No skills yet. n writes one.");
         }
         Some(Ok(s)) => {
+            page.styled("n writes a new skill. e rewrites the selected one.", DIM);
+            page.blank();
             for scope in [SkillScope::Agent(agent), SkillScope::Shared] {
                 let mine: Vec<_> = s.skills.iter().filter(|k| k.skill.scope == scope).collect();
                 if mine.is_empty() {
@@ -60,9 +62,12 @@ pub fn skills(c: &Ctx, agent: AgentId, loaded: &Option<Result<Skills, String>>) 
                     SkillScope::Agent(_) => "Its own skills",
                 });
                 for k in mine {
-                    page.styled(
-                        format!("  {} · version {}", k.skill.name.0, k.version.0),
-                        BOLD,
+                    page.row(
+                        spans(vec![span(
+                            format!("  {} · version {}", k.skill.name.0, k.version.0),
+                            BOLD,
+                        )]),
+                        Target::Skill(k.skill.clone()),
                     );
                     page.paragraph(&k.description, "    ", c.width);
                 }
@@ -107,7 +112,12 @@ mod tests {
     use super::*;
 
     fn ctx<'a>(p: &'a ProjectState, d: &'a DaemonState) -> Ctx<'a> {
-        Ctx { p, d, width: 80 }
+        Ctx {
+            p,
+            d,
+            width: 80,
+            colours: crate::look::Colours::Basic,
+        }
     }
 
     #[test]

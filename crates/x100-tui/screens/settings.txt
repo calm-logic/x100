@@ -28,13 +28,13 @@ REFLECTION
   Reflect now
   No trials yet.
 
+INTEGRATIONS
+  Homebox  Not connected. Projects cannot be deployed until it is.
+    Host and key  A Homebox elsewhere, with an API key made there.
+  GitHub   Not connected. A project's code stays on this machine, so Homebox cannot deploy it.
+    Install the gh command line and sign in with `gh auth login`, then open Settings again.
 
+HOMEBOX PROJECT
+  Not linked. Connect Homebox under Integrations to deploy there.
 
-
-
-
-
-
-
-
-Enter changes · c credential · v value · x remove · r range  ·  Tab next · p projects · q quits
+Enter changes or connects · c credential · v value · x remove · r range  ·  Tab next · p projects · q quits

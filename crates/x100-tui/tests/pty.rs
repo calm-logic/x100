@@ -121,7 +121,8 @@ fn open_row(x: &mut Pty, name: &str) {
         .collect();
     let at = rows
         .iter()
-        .position(|l| l.split_whitespace().nth(1) == Some(name))
+        // Its state, its face, then its role.
+        .position(|l| l.split_whitespace().nth(2) == Some(name))
         .unwrap_or_else(|| panic!("{name} is not listed on\n{text}"));
     x.send(&"\x1b[B".repeat(at));
     x.send("\r");
@@ -131,7 +132,9 @@ fn capture(name: &str, text: &str) {
     if let Some(dir) = std::env::var_os("X100_SCREENS") {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(format!("{name}.txt")), format!("{text}\n")).unwrap();
+        // Cells the interface cleared are blanks to the terminal; the saved text has none at ends.
+        let text: Vec<&str> = text.lines().map(str::trim_end).collect();
+        std::fs::write(dir.join(format!("{name}.txt")), text.join("\n") + "\n").unwrap();
     }
 }
 

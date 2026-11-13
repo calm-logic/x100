@@ -8,7 +8,8 @@ use x100_core::id::AgentId;
 use super::Ctx;
 use crate::page::{ACCENT, DIM, GOOD, Page, Target, WARN, cell, clip, span, spans};
 
-/// "● Tech  Working  Build the site  50%  Claude Code · sonnet · Medium  Medium to Max".
+/// "● ⬢ Tech  Working  Build the site  50%  Claude Code · sonnet · Medium  Medium to Max": its
+/// state, its face, and what it is on.
 pub fn agent_line(c: &Ctx, id: AgentId, depth: usize) -> Option<Line<'static>> {
     let row = c.p.row(id)?;
     let state = row.agent.state.clone();
@@ -34,6 +35,8 @@ pub fn agent_line(c: &Ctx, id: AgentId, depth: usize) -> Option<Line<'static>> {
     let mut line = vec![
         span(" ".repeat(indent), DIM),
         dot,
+        crate::look::face(row.agent.appearance, c.colours),
+        span(" ", DIM),
         span(
             cell(&row.agent.role, 20usize.saturating_sub(indent)),
             crate::page::BOLD,

@@ -124,6 +124,8 @@ pub enum Then {
     RemoveCredential(CredentialRef),
     DecisionProvider,
     DecisionKey(x100_core::decision::DecisionProvider),
+    Agent(crate::agent_edits::AgentAsked),
+    Integration(crate::integrations::Asked),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +223,8 @@ pub struct App {
     pub body: (u16, u16),
     pub(crate) remember: Remember,
     next_token: u64,
+    pub colours: crate::look::Colours,
+    pub integrations: crate::integrations::Integrations,
 }
 
 impl App {
@@ -244,10 +248,14 @@ impl App {
             body: (100, 30),
             remember,
             next_token: 1,
+            colours: crate::look::Colours::from_env(),
+            integrations: Default::default(),
         };
         app.at = app.opening();
         if let Where::Project(ui) = &app.at {
-            app.sync_log_for(ui.id);
+            // Opening on the tab does what switching to it does: the Log reads, Settings looks.
+            let tab = ui.tab;
+            app.set_tab(tab);
         }
         app
     }
@@ -310,8 +318,15 @@ impl App {
         ui.dots.remove(&tab);
         let id = ui.id;
         self.saved();
-        if tab == Tab::Log {
-            self.sync_log_for(id);
+        match tab {
+            Tab::Log => self.sync_log_for(id),
+            Tab::Settings => {
+                // Opened again, Settings reads again, so an answer that failed is asked anew.
+                self.integrations.projects = None;
+                self.look_around();
+                self.sync_homebox_projects();
+            }
+            _ => {}
         }
     }
 
@@ -411,6 +426,7 @@ impl App {
                     o.chunk(driver, chunk);
                 }
             }
+            Msg::Integration(arrived) => self.integration_arrived(arrived),
             Msg::TerminalRefused {
                 token,
                 driver,
@@ -447,6 +463,7 @@ impl App {
         let client = self.client.clone();
         match change {
             Change::Reset => {
+                self.sync_homebox_projects();
                 if let Some(ui) = self.project_ui_mut() {
                     ui.log.reset();
                     let id = ui.id;
@@ -482,7 +499,8 @@ impl App {
                 }
                 self.sync_log_for(id);
             }
-            Change::Connection { .. } | Change::Daemon(_) => {}
+            Change::Daemon(_) => self.sync_homebox_projects(),
+            Change::Connection { .. } => {}
         }
     }
 

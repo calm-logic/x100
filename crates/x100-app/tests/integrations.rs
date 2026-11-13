@@ -60,9 +60,29 @@ fn reach(vcx: &mut VisualTestContext, selector: &'static str) {
     panic!("{selector} is never in view");
 }
 
+/// A click as two events, each followed by every task that is ready. Something the page reads
+/// can land between them and move the control, and GPUI then drops the click, so a move is
+/// reported as what it is rather than as a wait that times out.
 fn press(vcx: &mut VisualTestContext, selector: &'static str) {
     reach(vcx, selector);
-    click(vcx, selector);
+    let down = bounds(vcx, selector).unwrap();
+    vcx.simulate_mouse_down(
+        down.center(),
+        gpui::MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    let now = bounds(vcx, selector);
+    assert_eq!(
+        now.map(|b| b.origin),
+        Some(down.origin),
+        "{selector} moved between mouse down and up: the page was still filling in"
+    );
+    vcx.simulate_mouse_up(
+        down.center(),
+        gpui::MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    pump(vcx);
 }
 
 #[test]
@@ -167,6 +187,12 @@ fn homebox_and_github_connect_from_settings_and_a_project_is_linked() {
         None
     );
 
+    // Connected, the project's Homebox project asks for the instance's projects and lists them
+    // above Integrations, which moves GitHub's Connect down; it is pressed once they are there.
+    pump_until(&mut vcx, "the Homebox projects are listed", |vcx| {
+        vcx.read(|cx| linked.read(cx).shown().projects.is_some())
+    });
+
     // GitHub through the local gh.
     press(&mut vcx, "github-connect");
     pump_until(&mut vcx, "GitHub is connected", |vcx| {
@@ -178,11 +204,8 @@ fn homebox_and_github_connect_from_settings_and_a_project_is_linked() {
         (GitHubWay::LocalGh, ACCOUNT)
     );
 
-    // The project's Homebox project: the instance's managed projects, a click to link, and
-    // Unlink.
-    pump_until(&mut vcx, "the Homebox projects are listed", |vcx| {
-        vcx.read(|cx| linked.read(cx).shown().projects.is_some())
-    });
+    // The project's Homebox project: a click on one of the instance's managed projects links
+    // it, and Unlink.
     press(&mut vcx, "homebox-project-shop");
     let link = pump_for(&mut vcx, &client, ("the project is linked", WAIT), |s| {
         s.projects.get(&project)?.project()?.homebox.clone()
@@ -206,6 +229,15 @@ fn homebox_and_github_connect_from_settings_and_a_project_is_linked() {
     press(&mut vcx, "homebox-disconnect");
     pump_until(&mut vcx, "Homebox is disconnected", |vcx| {
         vcx.read(|cx| part.read(cx).shown().homebox.is_none())
+    });
+    // The daemon removes the key in a second event. It leaves Credentials, at the end of the
+    // page, which moves what is above when the page is scrolled to its end.
+    pump_until(&mut vcx, "Homebox's key is removed", |_| {
+        client.with_state(|s| {
+            !s.daemon
+                .credentials()
+                .any(|c| c.credential.reference == connected.credential)
+        })
     });
     press(&mut vcx, "homebox-way-address");
     press(&mut vcx, "homebox-address");

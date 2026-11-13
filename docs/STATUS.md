@@ -336,16 +336,32 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Not verified:** a terminal driver followed live (only a recorded screen is replayed). Notes and skills
     with content, against the daemon. macOS. `cargo deny` on the new dependencies (ratatui, vt100,
     portable-pty for tests).
+- **The app integrations flake, traced, and the terminal interface's gaps closed.** The orchestrator's run:
+  668 tests pass, 0 fail, 15 ignored, clippy and fmt clean.
+  - **The flake was the test.** A test click is a mouse down and a mouse up with every ready task run
+    between. When a late answer moved the button in that gap, the click was dropped and the next wait timed
+    out. Two late answers did it: Homebox's projects arriving above GitHub's Connect button, and the key's
+    row leaving Credentials after Disconnect. The test now waits for both, and a press fails at once, naming
+    the control, if it moved between down and up. The subagent's loops: 40 of 40 under load, 30 of 30 alone.
+  - **Terminal interface:** agents' outlines and colours in the tree with `l` to change them, writing a
+    skill, and Settings' Integrations with the Homebox link and Deploy now, each tested against a real daemon
+    with stand-ins for Homebox and GitHub. Notes and skills with content are now tested against the daemon.
+  - **Seen under heavy load and not traced:** `x100d/tests/sandbox.rs`
+    `every_driver_runs_contained_in_its_agents_sandbox` (no "fetched", 3 times) and `handoff.rs`
+    `a_daemon_call_in_flight_when_its_driver_dies_takes_effect_once` ("the call is in flight: Nothing", once).
+  - **Not verified:** GitHub's sign-in by code in the terminal. The Tasks tab orders tasks opened at the same
+    moment unstably.
+  - Sandbox tests leave root-owned directories under `target/tmp`, so `cargo clean` fails.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
 ## In progress
 
-The flaky app integrations test.
+Nothing. Every milestone that runs on the fake harness is built.
 
 Queued, in this order:
 
-1. The terminal interface's gaps: looks, writing a skill, integrations.
+1. The two flakes seen under heavy load, in `sandbox.rs` and `handoff.rs`.
 2. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
 3. M17, hardening and release. Needs real providers.
 

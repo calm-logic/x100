@@ -8353,6 +8353,7 @@ version = "0.0.0"
 dependencies = [
  "portable-pty",
  "ratatui",
+ "serde_json",
  "tempfile",
  "tokio",
  "vt100",

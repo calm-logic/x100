@@ -49,4 +49,5 @@ pub enum Msg {
     Started(Result<ProjectId, ClientError>),
     Uploaded(Result<FileRef, ClientError>),
     Notice(String),
+    Integration(crate::integrations::Arrived),
 }

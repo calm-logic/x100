@@ -5,6 +5,7 @@ pub mod budget;
 pub mod chat;
 pub mod files;
 pub mod held;
+pub mod integrations;
 pub mod log;
 pub mod preview;
 pub mod settings;
@@ -19,6 +20,7 @@ pub struct Ctx<'a> {
     pub p: &'a ProjectState,
     pub d: &'a DaemonState,
     pub width: usize,
+    pub colours: crate::look::Colours,
 }
 
 pub fn role(p: &ProjectState, id: x100_core::id::AgentId) -> String {

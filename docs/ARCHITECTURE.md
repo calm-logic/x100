@@ -959,8 +959,12 @@ Neither interface holds logic of its own beyond drawing and input.
 - Single commands print one tab-separated record per line: `projects`, `new`, `send`, `chat`, `log`,
   `actions`, `approve`, `deny`. `chat` and `log` follow with `-f` and stop at `--until TEXT`. Exit codes:
   0 done, 1 refused or failed, 2 usage, 3 no daemon, 4 timed out.
-- Not in the terminal interface: changing an agent's look, writing a skill, and the Integrations part of
-  Settings.
+- The Team tree shows each agent's outline as a one-column glyph in its colour: 24-bit when `COLORTERM`
+  says so, the nearest of the 16 named colours otherwise, none with `NO_COLOR`. `l` on an agent's page
+  changes the look.
+- `n` and `e` on an agent's skills page write a skill.
+- Settings has Integrations, the project's Homebox link and Deploy now. The Homebox key is typed masked.
+  GitHub's sign-in by code is offered where the daemon offers it and is untested.
 
 ## Multi-device and remote machines (later)
 

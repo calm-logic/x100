@@ -79,6 +79,7 @@ impl App {
                         client.reflect(project).await?;
                         Ok("The CEO was asked to reflect".into())
                     }),
+                    other => self.integration_chosen(project, other),
                 }
             }
             _ => {}
@@ -213,6 +214,8 @@ impl App {
                 client.connect_decision_model(provider, text).await?;
                 Ok("Connected the decision model".into())
             }),
+            Then::Agent(asked) => self.agent_answered(project, asked, text),
+            Then::Integration(asked) => self.integration_answered(asked, text, yes),
         }
     }
 

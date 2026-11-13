@@ -56,6 +56,7 @@ impl App {
                 p,
                 d: &s.daemon,
                 width,
+                colours: self.colours,
             };
             let mut lines = views::team::header(&c, agent.id);
             let modes = [
@@ -93,6 +94,7 @@ impl App {
                 p,
                 d: &s.daemon,
                 width,
+                colours: self.colours,
             };
             match ui.tab {
                 Tab::Chat => views::chat::page(&c),
@@ -115,7 +117,7 @@ impl App {
                 Tab::Budget => views::budget::page(&c),
                 Tab::Log => views::log::page(&ui.log, width),
                 Tab::Preview => views::preview::page(&c),
-                Tab::Settings => views::settings::page(&c),
+                Tab::Settings => views::settings::page(&c, &self.integrations),
             }
         }))
     }

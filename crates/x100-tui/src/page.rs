@@ -23,6 +23,7 @@ pub enum Target {
     Lead(AgentId),
     Setting(Setting),
     Credential(CredentialRef),
+    Skill(x100_core::memory::SkillRef),
 }
 
 /// A control in Settings.
@@ -35,6 +36,14 @@ pub enum Setting {
     Allow(x100_core::harness::HarnessModel),
     DecisionModel,
     ReflectNow,
+    HomeboxLocal,
+    HomeboxAddress,
+    GitHub(x100_proto::GitHubMethod),
+    Disconnect(x100_proto::Integration),
+    /// Link the project to the Homebox project of this repository, `owner/name`.
+    LinkHomebox(String),
+    UnlinkHomebox,
+    Deploy,
 }
 
 #[derive(Debug, Clone)]
