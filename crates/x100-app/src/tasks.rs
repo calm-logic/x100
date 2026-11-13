@@ -80,7 +80,7 @@ impl TaskModel {
     /// Every task, in the order it was opened.
     pub fn all(p: &ProjectState) -> Vec<TaskModel> {
         let mut tasks: Vec<_> = p.tasks().collect();
-        tasks.sort_by_key(|t| (t.opened, t.task.id));
+        tasks.sort_by_key(|t| t.seq);
         tasks
             .into_iter()
             .enumerate()

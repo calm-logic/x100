@@ -352,6 +352,20 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Not verified:** GitHub's sign-in by code in the terminal. The Tasks tab orders tasks opened at the same
     moment unstably.
   - Sandbox tests leave root-owned directories under `target/tmp`, so `cargo clean` fails.
+- **The two load flakes, traced.** The orchestrator's run: 672 tests pass, 0 fail, 15 ignored, clippy and
+  fmt clean. The subagent's loops under a load average of about 60 on 32 cores: the in-flight test failed 7
+  of 129 before and 0 of 120 after, the sandbox test 8 of 33 before and 0 of 50 after.
+  - **In-flight call:** the fake harness reported a tool result when the daemon answered, not when the
+    harness read the answer, so a call the dead driver never read looked finished. The fake now reports its
+    own results as the real harnesses do. A desk test with no timing in it now proves the wait for calls in
+    flight: with the wait removed it fails every time.
+  - **Sandbox test:** it stopped the driver mid-turn, so the next driver was given the unhandled item again
+    and never fetched. The test now waits for the driver to be warm. The product was right.
+  - **Root-owned leftovers:** Docker made missing mount points under the sandbox's `/tmp` as root. The
+    container backend now makes them as the builder first. 43 old ones remain under `target/tmp`.
+  - Tasks are ordered by the order the log opened them, in both clients, the start pack and reflection.
+  - **Not changed:** a daemon starved for over a second could stop reading a dead harness's last line. An
+    interrupted older item is listed after a newer one in the next turn's input.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
@@ -361,9 +375,8 @@ Nothing. Every milestone that runs on the fake harness is built.
 
 Queued, in this order:
 
-1. The two flakes seen under heavy load, in `sandbox.rs` and `handoff.rs`.
-2. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
-3. M17, hardening and release. Needs real providers.
+1. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
+2. M17, hardening and release. Needs real providers.
 
 ## Waiting on the owner
 

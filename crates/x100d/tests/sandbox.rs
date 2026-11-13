@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use common::{Env, WAIT, create_project, gone, running};
 use x100_client::Client;
+use x100_core::driver::DriverState;
 use x100_core::event::ProjectEvent;
 use x100_core::id::{AgentId, ProjectId};
 use x100_core::process::{ProcessEnd, ProcessName};
@@ -262,10 +263,20 @@ async fn every_driver_runs_contained_in_its_agents_sandbox() {
         .unwrap()
         .drivers
         .clone();
+    // The message comes mid-turn. A driver stopped before its turn ends leaves the turn's items
+    // for the next one, which would then serve again before it fetched.
+    let server = *before.last().unwrap();
+    client
+        .wait_for(WAIT, |s| {
+            let state = &s.projects.get(&a)?.driver(server)?.state;
+            (*state == DriverState::Warm).then_some(())
+        })
+        .await
+        .expect("the turn that started the server ends");
     client
         .request(StopDriver {
             project: a,
-            driver: *before.last().unwrap(),
+            driver: server,
         })
         .await
         .unwrap();

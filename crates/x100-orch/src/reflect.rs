@@ -264,7 +264,7 @@ fn accepted(state: &x100_core::fold::ProjectState) -> String {
                 && t.task.title != REFLECTION
         })
         .collect();
-    done.sort_by_key(|t| std::cmp::Reverse((t.opened, t.task.id)));
+    done.sort_by_key(|t| std::cmp::Reverse(t.seq));
     done.iter()
         .take(ACCEPTED)
         .map(|t| format!("Accepted: {} ({})\n", t.task.id, t.task.title))

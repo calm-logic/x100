@@ -346,7 +346,7 @@ fn recent_tasks(state: &ProjectState, agent: AgentId) -> String {
             (asg.assignee == agent).then_some((t, report))
         })
         .collect();
-    done.sort_by_key(|(t, _)| (t.opened, t.task.id));
+    done.sort_by_key(|(t, _)| t.seq);
     let skip = done.len().saturating_sub(RECENT_TASKS);
     let mut out = String::new();
     for (t, report) in done.into_iter().skip(skip) {

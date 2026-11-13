@@ -220,9 +220,14 @@ impl Player {
                 let reply = self
                     .reply(|m| matches!(m, ToFake::DaemonResult { id: got, .. } if *got == id))
                     .await;
-                let Some(ToFake::DaemonResult { text, .. }) = reply else {
+                let Some(ToFake::DaemonResult { text, ok, .. }) = reply else {
                     return Flow::Interrupted;
                 };
+                out(&FromFake::ToolResult {
+                    id,
+                    output: text.clone(),
+                    is_error: !ok,
+                });
                 if let Some(name) = save {
                     self.vars.insert(name.clone(), text);
                 }

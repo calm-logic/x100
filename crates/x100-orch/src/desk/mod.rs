@@ -22,6 +22,8 @@
 //! spec, note or file name a driver sends holds one.
 
 mod carry;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;

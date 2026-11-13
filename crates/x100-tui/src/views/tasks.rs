@@ -21,7 +21,7 @@ pub fn status(state: &TaskState) -> &'static str {
 /// Every task, in the order it was opened.
 pub fn ordered(p: &ProjectState) -> Vec<TaskId> {
     let mut tasks: Vec<_> = p.tasks().collect();
-    tasks.sort_by_key(|t| (t.opened, t.task.id));
+    tasks.sort_by_key(|t| t.seq);
     tasks.into_iter().map(|t| t.task.id).collect()
 }
 
@@ -62,4 +62,60 @@ pub fn page(c: &Ctx) -> Page {
         page.text("No tasks yet.");
     }
     page
+}
+
+#[cfg(test)]
+mod tests {
+    use x100_core::event::{Envelope, ProjectEvent, Seq};
+    use x100_core::fold::DaemonState;
+    use x100_core::testing::fernleaf;
+
+    use super::*;
+
+    /// Two tasks opened in the same millisecond, the second with the smaller id, are listed as
+    /// the log opened them.
+    #[test]
+    fn tasks_opened_in_the_same_millisecond_are_listed_as_the_log_opened_them() {
+        let log = fernleaf().log;
+        let mut p = ProjectState::fold(&log).expect("the scenario folds");
+        let last = log.last().unwrap();
+        let (task, opening) = log
+            .iter()
+            .find_map(|e| match &e.event {
+                ProjectEvent::TaskOpened { task, opening } => Some((task.clone(), opening.clone())),
+                _ => None,
+            })
+            .unwrap();
+        for (n, (id, title)) in [(u128::MAX - 1, "OPENED-FIRST"), (1, "OPENED-SECOND")]
+            .into_iter()
+            .enumerate()
+        {
+            let mut task = task.clone();
+            task.id = TaskId::from_u128(id);
+            task.title = title.into();
+            let e = Envelope {
+                seq: Seq(last.seq.0 + 1 + n as u64),
+                at: last.at,
+                by: last.by,
+                event: ProjectEvent::TaskOpened {
+                    task,
+                    opening: opening.clone(),
+                },
+            };
+            p.apply(&e).expect("the task opens");
+        }
+        let d = DaemonState::default();
+        let c = Ctx {
+            p: &p,
+            d: &d,
+            width: 120,
+            colours: crate::look::Colours::Basic,
+        };
+        let text = page(&c).plain();
+        let at = |title: &str| {
+            text.find(title)
+                .unwrap_or_else(|| panic!("{title} in\n{text}"))
+        };
+        assert!(at("OPENED-FIRST") < at("OPENED-SECOND"), "{text}");
+    }
 }

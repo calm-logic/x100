@@ -215,9 +215,17 @@ impl Backend for Container {
         }
         args.extend(["--workdir".into(), spec.worktree.display().to_string()]);
         args.extend(bind(&layout.tmp, Path::new("/tmp"), Access::ReadWrite)?);
-        args.extend(bind(&self.helper, &self.helper, Access::ReadOnly)?);
-        for m in mounts(&spec, &layout) {
-            args.extend(bind(&m.path, &m.path, m.access)?);
+        let inner: Vec<(PathBuf, Access)> =
+            std::iter::once((self.helper.clone(), Access::ReadOnly))
+                .chain(
+                    mounts(&spec, &layout)
+                        .into_iter()
+                        .map(|m| (m.path, m.access)),
+                )
+                .collect();
+        for (path, access) in &inner {
+            make_mount_point(&layout.tmp, path)?;
+            args.extend(bind(path, path, *access)?);
         }
         args.extend([self.image.clone(), helper.clone(), "tunnel".into()]);
         let anchor = self
@@ -267,6 +275,34 @@ impl Backend for Container {
         )
         .await
     }
+}
+
+/// A path mounted at itself under `/tmp` lands in the sandbox's own `/tmp`, which is `tmp` on the
+/// host. Its mount point is made there now, as the builder: the runtime would make what is missing
+/// as root, and the builder could not remove it once the sandbox is gone.
+fn make_mount_point(tmp: &Path, path: &Path) -> Result<(), Error> {
+    let Ok(inside) = path.strip_prefix("/tmp") else {
+        return Ok(());
+    };
+    if inside.as_os_str().is_empty() {
+        return Ok(());
+    }
+    let point = tmp.join(inside);
+    let made = if path.is_dir() {
+        std::fs::create_dir_all(&point)
+    } else {
+        point
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&point)
+                    .map(drop)
+            })
+    };
+    made.map_err(io("making a mount point in the sandbox's /tmp"))
 }
 
 fn bind(from: &Path, to: &Path, access: Access) -> Result<[String; 2], Error> {

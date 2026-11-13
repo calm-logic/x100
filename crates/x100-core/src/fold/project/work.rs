@@ -274,6 +274,8 @@ impl ProjectState {
                 task: task.clone(),
                 state,
                 opened: at,
+                // Tasks are never removed, so this counts every task opened before it.
+                seq: self.tasks.len(),
                 progress: None,
                 sent_back: None,
                 conflict: None,

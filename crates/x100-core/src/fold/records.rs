@@ -99,6 +99,10 @@ pub struct TaskRecord {
     /// The assignment, its effort, and the report are in the state.
     pub state: TaskState,
     pub opened: Timestamp,
+    /// Its place in the order the log opened the project's tasks, from 0. What to sort by for
+    /// that order: tasks opened in the same millisecond share `opened`, and their ids are random
+    /// past the millisecond.
+    pub seq: usize,
     pub progress: Option<Progress>,
     /// The note of the last time it was sent back, while it is back in progress.
     pub sent_back: Option<String>,

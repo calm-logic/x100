@@ -20,7 +20,8 @@ pub(crate) enum FromFake {
         name: String,
         input: Value,
         /// A daemon tool call, which the driver makes for the fake and answers with
-        /// [`ToFake::DaemonResult`].
+        /// [`ToFake::DaemonResult`]. The fake reports the result as a `ToolResult` once it has
+        /// read it.
         daemon: bool,
     },
     ToolResult {

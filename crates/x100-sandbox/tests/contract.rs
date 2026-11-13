@@ -25,6 +25,7 @@ on_both!(
     real_harnesses_start,
     terminal_reaches_inside,
     host_reaches_a_socket_inside,
+    a_path_under_tmp_leaves_nothing_behind,
 );
 
 /// Deleting the home, writing outside the worktree and connecting out all fail or touch only
@@ -469,4 +470,27 @@ async fn host_reaches_a_socket_inside(backend: &dyn Backend) {
     }
     assert_eq!(said, "from inside");
     sandbox.destroy().await.unwrap();
+}
+
+/// A program and a directory that live under the host's `/tmp` are mounted into the sandbox's own
+/// `/tmp`, and once the sandbox is gone the builder can remove everything it kept.
+async fn a_path_under_tmp_leaves_nothing_behind(backend: &dyn Backend) {
+    let base = scratch();
+    let work = dir(base.path().join("work"));
+    let host_tmp = tempfile::tempdir_in("/tmp").unwrap();
+    let tools = dir(host_tmp.path().join("deep/tools"));
+    std::fs::write(tools.join("listed"), "in a directory").unwrap();
+    let program = dir(host_tmp.path().join("deep/bin")).join("program");
+    std::fs::write(&program, "a program").unwrap();
+    let mut spec = spec("tmp", base.path(), &work);
+    spec.programs = vec![program.clone()];
+    spec.paths = vec![Mount::read_only(&tools)];
+    let sandbox = backend.create(spec).await.unwrap();
+    let script = format!("cat {} {}/listed", program.display(), tools.display());
+    let out = run(&sandbox, &script).await;
+    assert_eq!(stdout(&out), "a programin a directory", "{}", text(&out));
+    sandbox.destroy().await.unwrap();
+    let kept = base.path().to_owned();
+    base.close()
+        .unwrap_or_else(|e| panic!("{} is left behind: {e}", kept.display()));
 }

@@ -268,16 +268,14 @@ impl Protocol for FakeProtocol {
         Ok(())
     }
 
+    /// Only passed on: the child reports the result once it has read it, as a real harness does.
+    /// A child that dies first never saw it, so the call stays open and the next driver is told
+    /// it was in flight.
     fn daemon_reply(&mut self, id: String, reply: Result<String, String>, fx: &mut Effects) {
         let (ok, text) = match reply {
             Ok(text) => (true, text),
             Err(text) => (false, text),
         };
-        fx.emit(DriverOutput::ToolResult {
-            id: id.clone(),
-            output: text.clone(),
-            is_error: !ok,
-        });
         send(fx, &ToFake::DaemonResult { id, ok, text });
     }
 }
