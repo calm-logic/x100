@@ -312,12 +312,13 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
 
 ## In progress
 
-Nothing. M14 is the last milestone that runs on the fake harness.
+M9, handoff. Opus subagent.
 
 Queued, in this order:
 
-1. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
-2. M17, hardening and release. Needs real providers.
+1. M7, the terminal interface. `x100-tui` is still an empty binary.
+2. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
+3. M17, hardening and release. Needs real providers.
 
 ## Waiting on the owner
 
