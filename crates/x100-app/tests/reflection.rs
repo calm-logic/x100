@@ -1,7 +1,8 @@
 //! An agent's page shows its memory notes and its skills as the daemon lists them from the
-//! repositories, against a scripted daemon on a socket. The state is core's Fernleaf, whose agents
-//! have loaded the deploy skill; the daemon here lists notes the state knows nothing of, as
-//! files a driver wrote after the snapshot would be.
+//! repositories, and the trials about it as the daemon lists them, against a scripted daemon on a
+//! socket. The state is core's Fernleaf, whose agents have loaded the deploy skill and whose CEO
+//! put a change to it on trial; the daemon here lists notes the state knows nothing of, as files a
+//! driver wrote after the snapshot would be.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -23,7 +24,7 @@ use x100_core::testing::{FERNLEAF, START, daemon_log, deploy_skill, fernleaf};
 use x100_core::time::Timestamp;
 use x100_proto::{
     Call, ErrorCode, Id, Memories, MemoryNote, Message, Response, RpcError, SkillInfo, Skills,
-    Snapshot,
+    Snapshot, Trials,
 };
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -147,6 +148,10 @@ async fn serve(listener: UnixListener, w: Arc<World>, asked: Arc<Mutex<Vec<Strin
                     serde_json::to_value(Memories { notes: vec![] }).unwrap(),
                 )),
                 Call::ListSkills(_) => send(ok(id, serde_json::to_value(skills(&w)).unwrap())),
+                Call::ListTrials(_) => {
+                    let trials = w.snapshot.projects[&FERNLEAF].trials().cloned().collect();
+                    send(ok(id, serde_json::to_value(Trials { trials }).unwrap()))
+                }
                 Call::Unsubscribe(_) => send(ok(id, serde_json::json!({}))),
                 _ => send(err(id, ErrorCode::NotFound, "not scripted")),
             }
@@ -186,7 +191,9 @@ fn an_agents_page_lists_its_notes_and_skills_from_the_repositories() {
         vcx.run_until_parked();
         std::thread::sleep(Duration::from_millis(5));
         let listed = vcx.read(|cx| view.read(cx).listed(cx));
-        if listed.notes.iter().all(|n| n.body.is_some()) && listed.skills.len() == 3 {
+        let asked_trials = asked.lock().unwrap().contains(&"trials.list".to_owned());
+        if listed.notes.iter().all(|n| n.body.is_some()) && listed.skills.len() == 3 && asked_trials
+        {
             break listed;
         }
         assert!(
@@ -224,9 +231,25 @@ fn an_agents_page_lists_its_notes_and_skills_from_the_repositories() {
     );
     assert_eq!(deploy_skill().name.0, "deploy");
 
-    // Trials are not served until the lab, so they are not asked for.
     let asked = asked.lock().unwrap().clone();
     assert!(asked.contains(&"memories.list".to_owned()), "{asked:?}");
     assert!(asked.contains(&"skills.list".to_owned()), "{asked:?}");
-    assert!(!asked.contains(&"trials.list".to_owned()), "{asked:?}");
+
+    // The trial of the deploy skill is about an agent that loaded it, with each arm's scores. The
+    // other trial, of another agent's own skill, is not about this one.
+    assert_eq!(listed.trials.len(), 1, "{:#?}", listed.trials);
+    let t = &listed.trials[0];
+    assert_eq!(t.change, "A change to the skill deploy");
+    assert_eq!(t.state, "Committed");
+    assert!(
+        t.without
+            .starts_with("Without the change: 6 of 9 checks passed over 3 runs"),
+        "{t:#?}"
+    );
+    assert!(
+        t.with
+            .starts_with("With the change: 9 of 9 checks passed over 3 runs"),
+        "{t:#?}"
+    );
+    assert_eq!(t.why, None);
 }

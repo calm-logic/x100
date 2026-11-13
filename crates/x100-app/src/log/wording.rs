@@ -342,6 +342,12 @@ fn setting(n: &Names, change: &SettingChange) -> String {
         SettingChange::LabShare(share) => {
             format!("Set the lab's share of the budget to {}%", share.value())
         }
+        SettingChange::TrialBeforeCommit(true) => {
+            "Turned on trial before commit: reflection's changes are tried in the lab first".into()
+        }
+        SettingChange::TrialBeforeCommit(false) => {
+            "Turned off trial before commit: reflection's changes are committed directly".into()
+        }
         SettingChange::Allow { what, allowed } => format!(
             "{} {} \u{b7} {}",
             if *allowed {
@@ -526,8 +532,8 @@ fn trial_event(n: &Names, trial: TrialId, event: &TrialEvent) -> String {
             format!("The trial of {about} does not support it")
         }
         TrialEvent::Committed { .. } => format!("Committed {about}, which the trial supported"),
-        TrialEvent::Discarded => format!("Dropped {about}"),
-        TrialEvent::Stopped => format!("Stopped the trial of {about}"),
+        TrialEvent::Discarded { why } => format!("Dropped {about}: {why}"),
+        TrialEvent::Stopped { why } => format!("Stopped the trial of {about}: {why}"),
     }
 }
 

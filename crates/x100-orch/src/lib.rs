@@ -37,6 +37,7 @@ mod gate;
 mod ids;
 mod integrate;
 mod jobs;
+mod lab;
 mod mcp;
 pub mod pack;
 mod processes;
@@ -44,6 +45,7 @@ mod project;
 mod recall;
 mod recover;
 mod redact;
+mod reflect;
 mod route;
 mod sandbox;
 mod settle;
@@ -52,6 +54,7 @@ mod spec;
 mod store;
 mod tools;
 mod turns;
+mod workdir;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
@@ -223,7 +226,8 @@ impl Orchestrator {
             Arc::clone(&config.processes),
         ));
         config.desk.attach(Arc::clone(&sandboxes));
-        Self {
+        let desk = Arc::clone(&config.desk);
+        let made = Self {
             shared: Arc::new(Shared {
                 clock: config.clock,
                 dice: config.dice,
@@ -241,7 +245,9 @@ impl Orchestrator {
                 in_flight: Mutex::new(HashSet::new()),
             }),
             projects: Arc::new(Mutex::new(HashMap::new())),
-        }
+        };
+        desk.attach_shared(Arc::downgrade(&made.shared));
+        made
     }
 
     /// Starts the turn loop of a project whose store is open. Any driver the log shows as live
@@ -341,6 +347,13 @@ impl Orchestrator {
     ) -> Result<(x100_core::memory::SkillVersion, x100_core::git::CommitId), Refused> {
         let ctx = self.ctx(project)?;
         blocking(move || shelf::write_skill(&ctx, skill, text)).await
+    }
+
+    /// Reflect now: the builder gives the CEO a reflection task over the work since the last
+    /// one. Returns the task.
+    pub async fn reflect(&self, project: ProjectId) -> Result<TaskId, Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || reflect::reflect(&ctx)).await
     }
 
     /// The builder cancels a job. Any wait on it ends.

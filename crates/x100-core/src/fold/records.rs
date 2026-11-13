@@ -193,6 +193,8 @@ pub struct TrialRecord {
     /// Every run of both arms, in the order they finished.
     pub runs: Vec<RunScore>,
     pub commit: Option<CommitId>,
+    /// Why it was discarded or stopped.
+    pub why: Option<String>,
 }
 
 /// A skill change that reached the main branch, with the trial that put it there if one did.

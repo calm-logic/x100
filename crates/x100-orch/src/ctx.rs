@@ -30,6 +30,9 @@ pub(crate) struct ProjectCtx {
     /// The project's job clock, which learns of a job only from `schedule` or a wake.
     jobs: Scheduler<ProjectState>,
     lock: Mutex<()>,
+    /// Held while a trial runs, so the project's trials run one after another and each one's
+    /// spending is weighed against the lab's cap with nothing else spending it.
+    pub lab: tokio::sync::Mutex<()>,
 }
 
 impl ProjectCtx {
@@ -47,6 +50,7 @@ impl ProjectCtx {
             dice,
             jobs,
             lock: Mutex::new(()),
+            lab: tokio::sync::Mutex::new(()),
         })
     }
 

@@ -1,5 +1,6 @@
 //! The memory and log tools: `remember`, `read_note`, `search_notes`, `load_skill`,
-//! `search_log` and the CEO's `read_memories`. What they do is read or write files and the log's
+//! `search_log` and the CEO's `read_memories`, and the file and log work of reflection's
+//! `read_log` and `propose_change` ([`super::reflect`]). What they do is read or write files and the log's
 //! text, which a pure planner cannot, so the planner only checks what the folded state decides and
 //! names the work in a [`MemoryPlan`]. The desk runs it ([`crate::recall`]) before it appends, since
 //! the commit it makes goes into the event.
@@ -40,6 +41,22 @@ pub(crate) enum MemoryPlan {
     SearchLog {
         query: String,
         limit: usize,
+    },
+    /// The CEO reads the log from `from` to `to`, both in it.
+    ReadLog {
+        from: Seq,
+        to: u64,
+    },
+    /// The CEO corrects one of `agent`'s notes, citing the events that show it wrong.
+    Correct {
+        agent: AgentId,
+        note: NoteName,
+        body: String,
+        sources: Vec<Seq>,
+    },
+    /// Reflection's change, committed to main at once since the project does not trial changes.
+    Commit {
+        change: x100_core::trial::TrialChange,
     },
 }
 

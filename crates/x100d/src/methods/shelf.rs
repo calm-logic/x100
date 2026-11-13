@@ -55,3 +55,21 @@ pub async fn write_skill(hub: &Hub, p: WriteSkill) -> Result<SkillWritten, RpcEr
         .map_err(refused)?;
     Ok(SkillWritten { version, commit })
 }
+
+/// Reflect now: the CEO gets a reflection task over the work since the last one.
+pub async fn reflect(
+    hub: &Hub,
+    p: x100_proto::Reflect,
+) -> Result<x100_proto::Reflecting, RpcError> {
+    project(hub, p.project)?;
+    let task = hub.orch.reflect(p.project).await.map_err(refused)?;
+    Ok(x100_proto::Reflecting { task })
+}
+
+/// Every trial of the project, oldest first, with both arms' runs and scores.
+pub fn trials(hub: &Hub, p: x100_proto::ListTrials) -> Result<x100_proto::Trials, RpcError> {
+    let store = project(hub, p.project)?;
+    let mut trials: Vec<_> = store.log.with_state(|s| s.trials().cloned().collect());
+    trials.sort_by_key(|t| (t.proposed, t.trial.id));
+    Ok(x100_proto::Trials { trials })
+}

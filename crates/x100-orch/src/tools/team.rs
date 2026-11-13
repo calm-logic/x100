@@ -39,8 +39,8 @@ pub(super) fn form(at: &At, leads: &[LeadSpec]) -> Result<Plan, Refusal> {
         .any(|(_, p)| matches!(p, Position::Lead { .. }))
     {
         return Err(
-            "the team is formed already: in v1 every later change to it is proposed to the \
-             builder, which arrives with M14"
+            "the team is formed already: every later change to it is proposed to the builder \
+             with `propose_change` (team), with the telemetry that shows the need"
                 .into(),
         );
     }

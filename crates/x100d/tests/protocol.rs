@@ -335,18 +335,14 @@ async fn methods_that_later_milestones_make_real_say_which() {
         ProjectId::from_u128(1),
         x100_core::id::AgentId::from_u128(1),
     );
-    let later: Vec<(Call, &str)> = vec![
-        (
-            ReplaceDriver {
-                project: p,
-                agent: a,
-            }
-            .into(),
-            "M9",
-        ),
-        (Reflect { project: p }.into(), "M14"),
-        (ListTrials { project: p }.into(), "M14"),
-    ];
+    let later: Vec<(Call, &str)> = vec![(
+        ReplaceDriver {
+            project: p,
+            agent: a,
+        }
+        .into(),
+        "M9",
+    )];
     let mut raw = Raw::connect(&d.env).await;
     raw.hello().await;
     let mut later_names = Vec::new();
@@ -415,6 +411,8 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "memories.list",
         "skills.list",
         "skills.write",
+        "projects.reflect",
+        "trials.list",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);

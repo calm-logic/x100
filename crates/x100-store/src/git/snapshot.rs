@@ -167,6 +167,34 @@ impl Git {
     }
 }
 
+impl Git {
+    /// Makes `into`, which must not exist, a repository of its own whose one commit holds the
+    /// files of `commit`, as a lab run starts from. The project is only read: the index used
+    /// lives under `into`, and no ref, object or index of the project's is written.
+    pub fn export(&self, commit: &CommitId, into: &Path) -> Result<()> {
+        name_ok(&commit.0)?;
+        fs::create_dir(into).map_err(io(into))?;
+        run(into, ["init", "-q", "-b", "main"], &[])?;
+        let index = into.join(".git").join("x100-export-index");
+        let env = [("GIT_INDEX_FILE", index.as_os_str())];
+        run(&self.project, ["read-tree", &commit.0], &env)?;
+        let mut prefix = into.as_os_str().to_owned();
+        prefix.push("/");
+        let mut arg = std::ffi::OsString::from("--prefix=");
+        arg.push(&prefix);
+        run(
+            &self.project,
+            [OsStr::new("checkout-index"), OsStr::new("-a"), &arg],
+            &env,
+        )?;
+        let _ = fs::remove_file(&index);
+        run(into, ["add", "-A"], &[])?;
+        let message = format!("x100 lab: the files of {}", commit.0);
+        run(into, ["commit", "-q", "--allow-empty", "-m", &message], &[])?;
+        Ok(())
+    }
+}
+
 /// The tree of everything in the worktree, written without touching its index.
 fn working_tree(worktree: &Path) -> Result<String> {
     let idx = TempIndex::new(worktree, true)?;

@@ -77,7 +77,15 @@ fn tool(n: &Names, call: &ToolCall) -> String {
         }
         ToolCall::ReadLog { .. } => "read the log".into(),
         ToolCall::ReadMemories { agent } => format!("read {}'s memories", n.agent(*agent)),
-        ToolCall::ProposeChange(_) => "propose a change to the team or its skills".into(),
+        ToolCall::ProposeChange(x100_core::tool::Proposal::Trial { .. }) => {
+            "propose a change to its skills or memory".into()
+        }
+        ToolCall::ProposeChange(x100_core::tool::Proposal::Correction { agent, note, .. }) => {
+            format!("correct {}'s note {}", n.agent(*agent), note.0)
+        }
+        ToolCall::ProposeChange(x100_core::tool::Proposal::Team { .. }) => {
+            "propose a change to the team".into()
+        }
     }
 }
 

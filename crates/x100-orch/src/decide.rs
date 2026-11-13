@@ -211,12 +211,14 @@ pub(crate) fn unfinished(state: &ProjectState, clock: &dyn Clock) -> Events {
     out
 }
 
-/// A call whose work goes on after it returns, so an Allowed one may be left open by a stop.
+/// A call whose work goes on after it returns, so an Allowed one may be left open by a stop: a
+/// deploy, or a change on trial in the lab.
 fn background(request: &Request) -> bool {
+    use x100_core::tool::{Proposal, ToolCall};
     matches!(
         request,
         Request::Tool {
-            call: x100_core::tool::ToolCall::Deploy { .. },
+            call: ToolCall::Deploy { .. } | ToolCall::ProposeChange(Proposal::Trial { .. }),
             ..
         }
     )

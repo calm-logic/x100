@@ -214,6 +214,7 @@ impl Actor_ {
             dir,
             start_pack,
             &placed,
+            self.shared.desk.issue(driver, Arc::clone(&self.ctx)),
         );
         let mut handle = match harness.start(spec).await {
             Ok(h) => h,

@@ -241,6 +241,7 @@ impl World {
                 ask_me_about: x100_core::action::AskMeAbout::HighRiskOnly,
                 budget: setup.budget,
                 lab_share: Percent::new(10).unwrap(),
+                trial_before_commit: false,
                 allowed,
             },
         };

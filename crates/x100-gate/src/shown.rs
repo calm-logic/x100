@@ -234,12 +234,21 @@ fn describe(state: &ProjectState, call: &ToolCall) -> String {
         T::ReadLog { .. } => "Read the project's log".to_owned(),
         T::ReadMemories { agent: a } => format!("Read {}'s memories", agent(state, *a)),
         T::ProposeChange(Proposal::Trial { .. }) => "Propose a trial of a skill or memory".into(),
+        T::ProposeChange(Proposal::Correction { agent: a, note, .. }) => format!(
+            "Correct {}'s note {} against the log",
+            agent(state, *a),
+            shorten(&note.0, 80)
+        ),
         T::ProposeChange(Proposal::Team {
             changes, telemetry, ..
         }) => format!(
-            "Change the team ({} change(s)). Reason: {}",
-            changes.len(),
-            shorten(telemetry, 300)
+            "Change the team: {}. Telemetry: {}",
+            changes
+                .iter()
+                .map(|c| team_change(state, c))
+                .collect::<Vec<_>>()
+                .join("; "),
+            shorten(telemetry, 600)
         ),
         T::SetUpProject { name, .. } => format!("Set up the project \"{}\"", shorten(name, 120)),
         T::ListIntegrations {} => "List the connected integrations".to_owned(),
@@ -250,6 +259,19 @@ fn describe(state: &ProjectState, call: &ToolCall) -> String {
             shorten(homebox_project, 120)
         ),
         T::Deploy { environment } => deploy(state, environment.as_deref()),
+    }
+}
+
+/// One change to the team, in words.
+fn team_change(state: &ProjectState, change: &x100_core::team::TeamChange) -> String {
+    use x100_core::team::TeamChange as C;
+    match change {
+        C::AddLead(lead) => format!("add a lead, {}", shorten(&lead.role, 60)),
+        C::Fold { lead, into } => {
+            format!("fold {} into {}", agent(state, *lead), agent(state, *into))
+        }
+        C::Promote { worker, .. } => format!("make {} a lead", agent(state, *worker)),
+        C::Retire { agent: a } => format!("retire {}", agent(state, *a)),
     }
 }
 

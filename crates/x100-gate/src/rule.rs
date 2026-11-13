@@ -96,7 +96,7 @@ table! {
         "tool.routine",
         "report, wait, update_task, raise_task, review, message, write_spec, add_file, set_preview, \
          load_skill, remember, cancel_job, stop_process, read_log, read_memories, set_up_project, \
-         propose_change (a trial)",
+         propose_change (a trial, or a correction of a note against the log)",
         Other,
         Low,
         "Changes the project's own records and nothing outside it.",
@@ -370,6 +370,20 @@ table! {
         Other,
         Low,
         "Nothing went out: the proxy refuses this host.",
+    );
+    EGRESS_LAB_READ = row(
+        "egress.lab.read",
+        "a lab driver's request that only reads (GET, HEAD, OPTIONS)",
+        Other,
+        Low,
+        "A trial run may read what its work needs; it holds no credential and writes nothing.",
+    );
+    EGRESS_LAB_WRITE = row(
+        "egress.lab.write",
+        "a lab driver's request that would write",
+        Other,
+        Low,
+        "Refused and sent nowhere: a trial run never writes outside the lab, whatever the level.",
     );
 
     // Commands a harness's permission hook stopped. See `command` for how a command is read.

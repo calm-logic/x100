@@ -379,6 +379,12 @@ fn samples(tool: Tool) -> Vec<ToolCall> {
                     runs_per_arm: 1,
                 },
             }),
+            ToolCall::ProposeChange(Proposal::Correction {
+                agent: agent(2),
+                note: NoteName("stack".into()),
+                body: "Vite, not webpack.".into(),
+                sources: vec![Seq(12), Seq(40)],
+            }),
             ToolCall::ProposeChange(Proposal::Team {
                 changes: vec![
                     TeamChange::AddLead(lead()),

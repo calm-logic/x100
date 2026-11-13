@@ -122,8 +122,8 @@ State machines to make explicit and verify:
   `report` moves it to In review. Accepting it moves it to Promoting while the assignee's branch is merged, then
   to Done. In review → In progress when the delegator sends it back, a failed task included. Promoting → In
   progress when the merge fails.
-- **Trial**: Proposed → Running → Scored → Committed or Discarded. Running → Stopped when the lab's cap would be
-  passed.
+- **Trial**: Proposed → Running → Scored → Committed or Discarded. Running → Stopped when the lab's cap would be passed or the daemon stops. A supported change
+  that can no longer be merged is Discarded. Discarded and Stopped carry the reason.
 
 Invariants worth proving:
 
@@ -770,6 +770,42 @@ trial under either setting. The default may change after experiments with both.
 In v1, trials can gate skills and memories. A team change is still proposed to the builder as a held action, now
 with the telemetry that prompted it attached. Trials of team shape come later, since each one means running the
 same work twice with two teams.
+
+**As built (M14).** `x100-lab` holds the eval set's checks and the commit rule. `x100-orch` runs the trials.
+
+- **Reflect now** opens a reflection task for the CEO, which gets `read_log` and `propose_change`. It is
+  refused while the CEO holds another task of the builder's. With the setting off each proposal is committed
+  at once with `trial: None`. With it on, a skill edit, a new skill or a compaction becomes a trial. A
+  correction must cite events in the log and is committed directly under either setting.
+- **Eval set.** The daemon checks and completes the CEO's set. At most 5 items, and 3 to 10 runs per arm. A
+  past task must be done and accepted, and its checkpoint is the one the log records for its assignee's first
+  turn on it, not one the CEO names. A skill change needs at least one past task. A compaction needs at least
+  one probe whose answer is in the notes before compaction.
+- **One run.** Each item is done by its own lab driver in a fresh sandbox. A past task scores one check for a
+  completed report and one per script that exits 0 in that sandbox within 300 seconds. A probe scores one
+  check. A rubric is marked 0 to 100 by a judging lab driver. Tool errors, turns, time and cost are summed.
+- **Rule.** Both arms finish every run. The changed arm is no worse on checks or on the judge's mark. It is
+  better on at least one measure by a tenth of the baseline's total, and every changed run is at least as good
+  on that measure as every baseline run. The last part keeps noise in time from committing a change that did
+  nothing.
+- **Compaction.** Tried only if it leaves the memory smaller and the index within its limit, otherwise
+  discarded with no run. Committed only when every probe is answered in every changed run. It is merged note
+  by note, so a note written meanwhile is kept.
+- **Isolation.** The sandbox is over a copy: the checkpoint's tree exported under the daemon's data directory
+  as a new one-commit repository, destroyed after the run. The project is only read. The lab's proxy route
+  makes the vault refuse every credential. Reads go out under gate row `egress.lab.read` without judging,
+  writes are refused under `egress.lab.write`, and the sandbox has no other way out. Charges go to the lab
+  line. The lab stops a trial before the run that would pass the cap.
+- **One trial per project at a time.** A trial cut off by the daemon stopping is Stopped on the next start and
+  its branch deleted. A merge conflict discards the change with the reason.
+- **Team change.** A held action that shows each change and the telemetry behind it. Approving it appends the
+  events. An agent at work is not retired.
+- **Seeing it.** `trials.list` gives every trial with both arms' scores. The CEO's page lists them all, since
+  a new shared skill belongs to no agent until one loads it. Lab drivers' transcripts are kept for the builder
+  and left out of work packs.
+- **Limit.** A lab driver on a harness that uses an API key cannot reach its model, because the vault refuses
+  lab drivers every credential, the provider's key included. Login harnesses work. Whether a lab route may
+  use the key for its provider's host alone is the owner's call.
 
 ## Store
 

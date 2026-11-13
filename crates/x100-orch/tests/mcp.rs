@@ -62,8 +62,9 @@ fn endpoint(w: &World, driver: DriverId) -> ToolEndpoint {
 }
 
 /// The tools a later milestone builds, which do nothing yet.
-const LATER: [&str; 2] = ["read_log", "propose_change"];
-const CEO_ONLY: [&str; 8] = [
+const CEO_ONLY: [&str; 10] = [
+    "read_log",
+    "propose_change",
     "read_memories",
     "form_team",
     "set_effort",
@@ -180,13 +181,6 @@ async fn two_drivers_reach_their_own_tools_over_http_at_once() {
             "a lead is not offered {name}"
         );
     }
-    for name in LATER {
-        assert!(!ceo_names.contains(&name), "{name} is not offered yet");
-        assert!(
-            !lead_names.iter().any(|n| n == name),
-            "{name} is not offered yet"
-        );
-    }
     let mut expected: Vec<&str> = ceo_names
         .iter()
         .copied()
@@ -196,7 +190,7 @@ async fn two_drivers_reach_their_own_tools_over_http_at_once() {
     expected.sort();
     got.sort();
     assert_eq!(got, expected, "a lead gets every other tool the CEO gets");
-    assert_eq!(ceo_names.len(), 27);
+    assert_eq!(ceo_names.len(), 29, "every tool is offered to the CEO");
 
     assert_eq!(parsed(&spec)["revision"], 1);
     assert_eq!(parsed(&update)["task"], json!(tech_task));

@@ -19,9 +19,7 @@ use x100_core::task::{Progress, TaskState, Verdict};
 use x100_core::team::LeadSpec;
 use x100_core::testing::{Fernleaf, fernleaf};
 use x100_core::time::{Clock, FakeClock};
-use x100_core::tool::{
-    AgentOutcome, Delegated, Delegatee, JobRequest, Proposal, Recipient, ToolCall,
-};
+use x100_core::tool::{AgentOutcome, Delegated, Delegatee, JobRequest, Recipient, ToolCall};
 use x100_core::wait::WaitOn;
 
 use super::{Ctx, Plan, plan};
@@ -598,33 +596,5 @@ fn a_process_is_started_once_by_name_and_stopped_only_while_it_runs() {
     assert!(!processes.contains_key(&ProcessName("web".into())));
 }
 
-#[test]
-fn tools_of_later_milestones_say_which_one() {
-    let s = scene();
-    let cases = [
-        (
-            ToolCall::ReadLog {
-                from: Seq(1),
-                to: None,
-            },
-            "M14",
-        ),
-        (
-            ToolCall::ProposeChange(Proposal::Team {
-                changes: vec![],
-                telemetry: String::new(),
-                team_toml: String::new(),
-            }),
-            "M14",
-        ),
-    ];
-    for (call, milestone) in cases {
-        let why = s.refused(s.f.ceo, &call);
-        assert!(
-            why.contains("not available yet") && why.contains(milestone),
-            "{why}"
-        );
-    }
-}
-
 mod memory;
+mod reflect;

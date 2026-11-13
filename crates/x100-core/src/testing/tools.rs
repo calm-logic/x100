@@ -213,7 +213,8 @@ impl LogBuilder {
             self.push(Actor::Daemon, event);
         } else {
             trial_event(self, TrialEvent::Scored(TrialVerdict::DoesNotSupport));
-            trial_event(self, TrialEvent::Discarded);
+            let why = "the changed arm was no better on any measure".to_owned();
+            trial_event(self, TrialEvent::Discarded { why });
         }
         id
     }

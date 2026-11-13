@@ -18,6 +18,22 @@ pub enum Settled {
     Provider,
     /// The proxy refused the host before anything went out.
     RefusedByProxy,
+    /// A lab driver's read, which goes out without the gate's judging, since a lab driver holds
+    /// no credential.
+    LabRead,
+    /// A lab driver's write, refused before anything goes out.
+    LabWrite,
+}
+
+impl Settled {
+    /// How a lab driver's request is settled: a read goes, a write does not.
+    pub fn lab(method: &str) -> Settled {
+        if is_read(method) {
+            Settled::LabRead
+        } else {
+            Settled::LabWrite
+        }
+    }
 }
 
 /// The ruling recorded for egress x100 settled: allowed, since the gate holds nothing back from
@@ -26,6 +42,8 @@ pub fn settled(how: Settled, host: &str, method: &str) -> Ruling {
     let row = match how {
         Settled::Provider => &rule::EGRESS_PROVIDER,
         Settled::RefusedByProxy => &rule::EGRESS_REFUSED,
+        Settled::LabRead => &rule::EGRESS_LAB_READ,
+        Settled::LabWrite => &rule::EGRESS_LAB_WRITE,
     };
     let detail = format!("{} {}", method.to_uppercase(), normal(host));
     Ruling::Allow(from_rule(&Matched::because(row, detail)))

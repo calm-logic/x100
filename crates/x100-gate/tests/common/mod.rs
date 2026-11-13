@@ -64,6 +64,7 @@ pub fn bare(level: AskMeAbout) -> (ProjectState, AgentId) {
                 ask_me_about: level,
                 budget: Money::from_dollars(50),
                 lab_share: Percent::new(10).expect("a percentage"),
+                trial_before_commit: false,
                 allowed: [opus(), sonnet(), gpt()].into(),
             },
         },

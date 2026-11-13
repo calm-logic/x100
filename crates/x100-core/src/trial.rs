@@ -113,7 +113,8 @@ pub enum TrialState {
     Committed,
     /// The branch was deleted. The trial is kept.
     Discarded,
-    /// Going on would have passed the lab's cap.
+    /// It ended before it was scored: going on would have passed the lab's cap, or the daemon
+    /// stopped mid-trial. The branch was deleted.
     Stopped,
 }
 
@@ -139,9 +140,16 @@ pub enum TrialEvent {
     Started,
     RunFinished(RunScore),
     Scored(Verdict),
-    Committed { commit: CommitId },
-    Discarded,
-    Stopped,
+    Committed {
+        commit: CommitId,
+    },
+    /// `why` says what decided it, in words the builder reads.
+    Discarded {
+        why: String,
+    },
+    Stopped {
+        why: String,
+    },
 }
 
 impl TrialEvent {
@@ -151,16 +159,17 @@ impl TrialEvent {
             TrialEvent::RunFinished(_) => "RunFinished",
             TrialEvent::Scored(_) => "Scored",
             TrialEvent::Committed { .. } => "Committed",
-            TrialEvent::Discarded => "Discarded",
-            TrialEvent::Stopped => "Stopped",
+            TrialEvent::Discarded { .. } => "Discarded",
+            TrialEvent::Stopped { .. } => "Stopped",
         }
     }
 }
 
 /// The trial machine. Proposed → Running → Scored → Committed or Discarded. Running → Stopped when
-/// the lab's cap would be passed. A trial that supports its change can only be committed, and one
-/// that does not can only be discarded, so the rule for committing is decided once, when it is
-/// scored.
+/// the lab's cap would be passed or the daemon stopped. A trial that does not support its change
+/// can only be discarded, so nothing reaches the main branch unless the rule for committing said
+/// so when it was scored. One that supports it is committed, or discarded when the change can no
+/// longer be merged because the main branch changed the same file meanwhile.
 pub fn next(state: &TrialState, event: &TrialEvent) -> Result<TrialState, Rejected> {
     use TrialEvent as E;
     use TrialState as S;
@@ -168,9 +177,9 @@ pub fn next(state: &TrialState, event: &TrialEvent) -> Result<TrialState, Reject
         (S::Proposed, E::Started) => Some(S::Running),
         (S::Running, E::RunFinished(_)) => Some(S::Running),
         (S::Running, E::Scored(verdict)) => Some(S::Scored(*verdict)),
-        (S::Running, E::Stopped) => Some(S::Stopped),
+        (S::Running, E::Stopped { .. }) => Some(S::Stopped),
         (S::Scored(Verdict::Supports), E::Committed { .. }) => Some(S::Committed),
-        (S::Scored(Verdict::DoesNotSupport), E::Discarded) => Some(S::Discarded),
+        (S::Scored(_), E::Discarded { .. }) => Some(S::Discarded),
         _ => None,
     };
     next.ok_or(Rejected {

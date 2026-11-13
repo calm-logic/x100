@@ -429,6 +429,8 @@ fn task_transitions() {
 fn trial_transitions() {
     use TrialEvent as E;
     use TrialState as S;
+    let discarded = || E::Discarded { why: "why".into() };
+    let stopped = || E::Stopped { why: "why".into() };
     let supports = S::Scored(TrialVerdict::Supports);
     let does_not = S::Scored(TrialVerdict::DoesNotSupport);
     let states = [
@@ -460,8 +462,8 @@ fn trial_transitions() {
         E::Scored(TrialVerdict::Supports),
         E::Scored(TrialVerdict::DoesNotSupport),
         commit.clone(),
-        E::Discarded,
-        E::Stopped,
+        discarded(),
+        stopped(),
     ];
     let accepted = [
         (S::Proposed, E::Started, S::Running),
@@ -472,9 +474,11 @@ fn trial_transitions() {
             E::Scored(TrialVerdict::DoesNotSupport),
             does_not,
         ),
-        (S::Running, E::Stopped, S::Stopped),
+        (S::Running, stopped(), S::Stopped),
         (supports, commit, S::Committed),
-        (does_not, E::Discarded, S::Discarded),
+        (does_not, discarded(), S::Discarded),
+        // A change the runs supported that main can no longer take.
+        (supports, discarded(), S::Discarded),
     ];
     check_table(
         MachineKind::Trial,

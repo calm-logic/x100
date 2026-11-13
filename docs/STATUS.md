@@ -286,17 +286,38 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
     a thousand tool calls. Trials stay hidden in the app until M14, which also adds "trial before commit".
   - `x100-app/tests/integrations.rs` has timed out three times under full-workspace load, at this commit and
     the one before, and passed each time after. Not yet traced.
+- **M14, the lab, trials and reflection.** The orchestrator's run: 621 tests pass, 0 fail, 13 ignored, clippy
+  and fmt clean, nothing left running. `x100d/tests/lab.rs` and `lab_isolation.rs`, daemon as a child process
+  on the fake harness, fake clock and seed 7:
+  - Setting off: Reflect now's correction, skill edit and compaction are each a commit and an event with no
+    trial, and no lab driver starts.
+  - Setting on: a skill that helps is committed and one that does not is dropped, with every run's score in
+    `trials.list`. The project's code, refs, file store and non-lab ledger lines are byte for byte as before.
+    A compaction is committed only when it is smaller, fits the index and answers every probe. A trial that
+    would pass the lab's cap is stopped at the cap. A team change is held with its telemetry shown.
+  - Each lab driver, contained: a read carries the credential's reference and never its value, a POST gets
+    403 and never reaches the server, and going around the proxy reaches nothing.
+  - A trial cut off by the daemon stopping is Stopped on restart and its branch deleted.
+  - App: the Trial before commit switch, Reflect now and its refusal, and the CEO's page listing trials.
+  - **Fixed:** the app test helper scrolled only down, so a late part above the scroll position was never in
+    view. This is the likely cause of the `x100-app/tests/integrations.rs` timeouts, not proven.
+  - **Not run:** a real harness or a real judge model in the lab, the macOS container backend, a compaction
+    merge conflict through the daemon (the memory crate's test covers it). With the fake clock, time never
+    counts as a measure in the daemon tests; the rule's own test covers it.
+  - **Limits:** a lab driver on an API-key harness cannot reach its model, since the vault refuses lab
+    drivers every credential. `team.toml` is not written when a team change is approved. `desk.rs`,
+    `pack/mod.rs` and `settings/mod.rs` are a little over 600 lines.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
 ## In progress
 
-M12I, integrations with Homebox and GitHub. Opus subagent.
+Nothing. M14 is the last milestone that runs on the fake harness.
 
 Queued, in this order:
 
-1. The two-part end-to-end run on the owner's logins, and a new recording.
-2. M7, M9, M13, M14, M17.
+1. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
+2. M17, hardening and release. Needs real providers.
 
 ## Waiting on the owner
 
@@ -341,8 +362,7 @@ invent any role with a charter, and team changes need the builder's agreement.
 - **2026-11-12. Trials are a toggle, off by default.** After Anthropic's post on agent memory, reflection
   commits its changes directly unless the project's "trial before commit" setting is on. Corrections of notes
   against the log are never put on trial. This changed the decided line in ARCHITECTURE's "Evals, trials and
-  the lab", PRODUCT's reflection features and M14's check. `x100-core` still names skill changes as "committed
-  by trials" in its fold; M13 and M14 change that with the setting. The memory design also gained log search,
+  the lab", PRODUCT's reflection features and M14's check. Built in M13 and M14. The memory design also gained log search,
   notes that cite events, a bounded index and recorded reads, all proposed.
 - **2026-11-12. Push to `origin`.** Allowed. Pushed after each accepted milestone from now on.
 - **2026-11-12. Local subscriptions.** x100 must run the builder's local agents on their own subscriptions,

@@ -7913,6 +7913,9 @@ dependencies = [
 [[package]]
 name = "x100-lab"
 version = "0.0.0"
+dependencies = [
+ "x100-core",
+]
 
 [[package]]
 name = "x100-memory"
@@ -7948,6 +7951,7 @@ dependencies = [
  "x100-gate",
  "x100-integrations",
  "x100-jobs",
+ "x100-lab",
  "x100-memory",
  "x100-router",
  "x100-sandbox",
@@ -8059,6 +8063,7 @@ dependencies = [
  "x100-client",
  "x100-core",
  "x100-drivers",
+ "x100-gate",
  "x100-integrations",
  "x100-jobs",
  "x100-memory",

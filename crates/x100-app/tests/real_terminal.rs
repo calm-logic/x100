@@ -170,6 +170,7 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
             ask_me_about: AskMeAbout::HighRiskOnly,
             budget: Money::from_dollars(5),
             lab_share: Percent::new(10).unwrap(),
+            trial_before_commit: false,
             allowed: Default::default(),
         };
         let project = client

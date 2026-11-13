@@ -46,6 +46,7 @@ fn main() {
                 ask_me_about: AskMeAbout::Nothing,
                 budget: Money::from_dollars(10),
                 lab_share: Percent::new(10).expect("a percentage"),
+                trial_before_commit: false,
                 allowed: Default::default(),
             },
         };

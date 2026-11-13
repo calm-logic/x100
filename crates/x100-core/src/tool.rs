@@ -228,14 +228,24 @@ pub enum JobRequest {
     },
 }
 
-/// What reflection proposes. Skill and memory changes go on trial; a team change goes to the
-/// builder as a held action, with the telemetry that prompted it.
+/// What reflection proposes. A skill or memory change goes on trial when the project's "trial
+/// before commit" setting is on, and is committed directly when it is off. A correction is
+/// never put on trial. A team change goes to the builder as a held action, with the telemetry
+/// that prompted it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Proposal {
     Trial {
         change: TrialChange,
         eval: EvalSet,
+    },
+    /// A note the log shows to be wrong, rewritten. `sources` are the events that show it, which
+    /// must be in the log.
+    Correction {
+        agent: AgentId,
+        note: NoteName,
+        body: String,
+        sources: Vec<Seq>,
     },
     Team {
         changes: Vec<TeamChange>,

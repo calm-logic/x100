@@ -37,15 +37,22 @@ fn script(path: &Path, body: String) {
 /// Scrolls the page down, as the wheel would, until `selector` is drawn inside the window.
 fn reach(vcx: &mut VisualTestContext, selector: &'static str) {
     for _ in 0..20 {
-        if let Some(b) = bounds(vcx, selector)
+        let found = bounds(vcx, selector);
+        if let Some(b) = found
             && b.origin.y > gpui::px(0.)
             && b.origin.y + b.size.height < gpui::px(880.)
         {
             return;
         }
+        // A part drawn once its answer arrives can appear above a page already scrolled past it,
+        // so the wheel turns toward it rather than always down.
+        let step = match found {
+            Some(b) if b.origin.y <= gpui::px(0.) => 300.,
+            _ => -300.,
+        };
         vcx.simulate_event(gpui::ScrollEvent {
             position: gpui::point(gpui::px(900.), gpui::px(500.)),
-            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-300.))),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(step))),
             ..Default::default()
         });
         pump(vcx);

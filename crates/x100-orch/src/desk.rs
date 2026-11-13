@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use async_trait::async_trait;
 use x100_core::action::{Action, Decision, Request};
@@ -26,23 +26,22 @@ use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::id::{ActionId, AgentId, DriverId};
 use x100_core::settings::DaemonSettings;
-use x100_core::spec::SpecKind;
 use x100_core::tool::ToolCall;
 use x100_drivers::ToolEndpoint;
 use x100_drivers::fake::DaemonTools;
 use x100_gate::Ruling;
 use x100_integrations::Integrations;
-use x100_store::Git;
 use x100_vault::{Redactor, Requester};
 
 use crate::ctx::{Events, ProjectCtx, Writer, git_of};
 use crate::gate;
 use crate::ids::new_id;
+use crate::lab::LabCalls;
 use crate::sandbox::Sandboxes;
 use crate::settle::deliver;
 use crate::store::blocking;
-use crate::tools::{self, Ctx, END_THE_TURN, NewCodeDir, ProcessPlan, SET_UP, Tool};
-use crate::{Settings, branches};
+use crate::tools::{self, Ctx, END_THE_TURN, SET_UP, Tool};
+use crate::{Settings, Shared, branches};
 
 /// How many refusals [`Desk::refusals`] keeps, newest last.
 const REFUSALS_KEPT: usize = 256;
@@ -52,6 +51,8 @@ const REFUSALS_KEPT: usize = 256;
 struct Pass {
     token: String,
     ctx: Arc<ProjectCtx>,
+    /// Set for a lab driver, whose calls are its run's and never the project's.
+    lab: Option<Arc<LabCalls>>,
 }
 
 /// A call or listing the desk refused because of who made it.
@@ -75,6 +76,9 @@ pub struct Desk {
     sandboxes: OnceLock<Arc<Sandboxes>>,
     /// What the integration tools call, set once by the daemon. Without it they are refused.
     integrations: OnceLock<Arc<Integrations>>,
+    /// The orchestrator's shared parts, which a trial's lab runs on. Weak, since they hold the
+    /// desk.
+    shared: OnceLock<Weak<Shared>>,
 }
 
 impl Desk {
@@ -87,6 +91,7 @@ impl Desk {
             redactor,
             sandboxes: OnceLock::new(),
             integrations: OnceLock::new(),
+            shared: OnceLock::new(),
         })
     }
 
@@ -106,6 +111,7 @@ impl Desk {
             integrations,
             settings,
             homebox,
+            shared: self.shared.get().and_then(Weak::upgrade),
         }
     }
 
@@ -115,6 +121,10 @@ impl Desk {
 
     pub(crate) fn attach(&self, sandboxes: Arc<Sandboxes>) {
         let _ = self.sandboxes.set(sandboxes);
+    }
+
+    pub(crate) fn attach_shared(&self, shared: Weak<Shared>) {
+        let _ = self.shared.set(shared);
     }
 
     /// The tool server's address on loopback, which every sandbox maps in.
@@ -139,9 +149,29 @@ impl Desk {
             Pass {
                 token: token.clone(),
                 ctx,
+                lab: None,
             },
         );
         ToolEndpoint { url, token }
+    }
+
+    /// The same for a lab driver, whose calls `calls` answers.
+    pub(crate) fn issue_lab(
+        &self,
+        driver: DriverId,
+        ctx: Arc<ProjectCtx>,
+        calls: Arc<LabCalls>,
+    ) -> ToolEndpoint {
+        let endpoint = self.issue(driver, ctx);
+        if let Some(pass) = self.passes.lock().expect("desk lock").get_mut(&driver) {
+            pass.lab = Some(calls);
+        }
+        endpoint
+    }
+
+    /// Forgets a lab driver once its run is over, so a late call finds nothing to act on.
+    pub(crate) fn withdraw(&self, driver: DriverId) {
+        self.passes.lock().expect("desk lock").remove(&driver);
     }
 
     /// The most recent refusals of callers, oldest first.
@@ -157,14 +187,17 @@ impl Desk {
     /// The tools offered to `driver`: those that do something yet, and the CEO's own only to the
     /// CEO's drivers.
     pub(crate) async fn listing(&self, driver: DriverId, token: &str) -> Result<Vec<Tool>, String> {
-        let ctx = self.project_of(driver, token, None)?;
+        let (ctx, lab) = self.project_of(driver, token, None)?;
+        if lab.is_some() {
+            return Ok(LabCalls::listing());
+        }
         let fenced = blocking(move || {
             ctx.store.log.with_state(|s| {
                 let agent = fence(s, driver)?;
                 let ceo = s.project().is_some_and(|p| p.team.ceo() == agent);
                 Ok(Tool::ALL
                     .into_iter()
-                    .filter(|t| t.served() && (ceo || !t.ceo_only()))
+                    .filter(|t| ceo || !t.ceo_only())
                     .collect())
             })
         })
@@ -182,9 +215,12 @@ impl Desk {
         call: ToolCall,
     ) -> Result<String, String> {
         let tool = Tool::of(&call);
-        let ctx = self.project_of(driver, token, Some(tool))?;
+        let (ctx, lab) = self.project_of(driver, token, Some(tool))?;
         let call = crate::redact::value(&self.redactor, &call)
             .ok_or("the call could not be cleared of credential values, so it is refused")?;
+        if let Some(lab) = lab {
+            return blocking(move || lab.answer(&call)).await;
+        }
         let using = self.using(&call).await;
         let done = blocking(move || carry_out(&ctx, &using, driver, call)).await;
         match done {
@@ -194,20 +230,21 @@ impl Desk {
         }
     }
 
-    /// The project of the driver this token was given to.
+    /// The project of the driver this token was given to, and its lab run if it is a lab
+    /// driver.
     fn project_of(
         &self,
         driver: DriverId,
         token: &str,
         tool: Option<Tool>,
-    ) -> Result<Arc<ProjectCtx>, String> {
+    ) -> Result<(Arc<ProjectCtx>, Option<Arc<LabCalls>>), String> {
         let found = self
             .passes
             .lock()
             .expect("desk lock")
             .get(&driver)
             .filter(|p| same(&p.token, token))
-            .map(|p| Arc::clone(&p.ctx));
+            .map(|p| (Arc::clone(&p.ctx), p.lab.clone()));
         found.ok_or_else(|| {
             let why = format!("this token was not given to {driver}: the call is refused");
             self.refuse(driver, tool, why)
@@ -316,6 +353,7 @@ struct Using {
     integrations: Option<Arc<Integrations>>,
     settings: DaemonSettings,
     homebox: crate::integrate::Prefetched,
+    shared: Option<Arc<Shared>>,
 }
 
 fn carry_out(
@@ -441,7 +479,7 @@ fn execute(
             driver,
             purpose: Purpose::Work,
         };
-        match carry_out_process(using.sandboxes.as_deref(), requester, process) {
+        match crate::workdir::carry_out_process(using.sandboxes.as_deref(), requester, process) {
             Ok(reply) => reply_override = reply,
             Err(e) => return fail(head, e),
         }
@@ -479,6 +517,30 @@ fn execute(
         );
         return Ok(reply);
     }
+    if let Some(trial) = &plan.trial {
+        let Some(shared) = using.shared.clone() else {
+            return fail(head, "this daemon has no lab".into());
+        };
+        let proposed = match crate::lab::propose(ctx, w, trial, agent) {
+            Ok(p) => p,
+            Err(e) => return fail(head, e),
+        };
+        head.extend(proposed.events);
+        let reply = proposed.reply;
+        match proposed.trial {
+            // The action stays open until the trial is done; then it ends, and the agent is told.
+            Some(trial) => {
+                append(w, head)?;
+                crate::lab::start(shared, Arc::clone(ctx), action.clone(), trial, tell);
+            }
+            None => {
+                head.push(gate::finished(action.id, None));
+                head.extend(told(Ok(&reply)));
+                append(w, head)?;
+            }
+        }
+        return Ok(reply);
+    }
     if let Some(reply) = plan.reply {
         reply_override = Some(reply);
     }
@@ -489,7 +551,7 @@ fn execute(
             .map(|e| (x100_core::party::Actor::Agent(agent), e)),
     );
     if let Some(new) = &plan.code_dir {
-        match make_code_dir(new) {
+        match crate::workdir::make_code_dir(new) {
             Ok(dir) => events.insert(0, (x100_core::party::Actor::Agent(agent), dir)),
             Err(e) => return fail(head, e),
         }
@@ -535,37 +597,9 @@ fn execute(
         }
     };
     if let (ToolCall::WriteSpec { spec, body, .. }, Some(git)) = (call, &git) {
-        write_spec_file(git, *spec, body);
+        crate::workdir::write_spec_file(git, *spec, body);
     }
     Ok(reply)
-}
-
-/// Starts or stops a process in the agent's sandbox. Blocks: it runs on a blocking thread with the
-/// runtime's handle at hand. A start answers with where the process's output goes.
-fn carry_out_process(
-    sandboxes: Option<&Sandboxes>,
-    requester: Requester,
-    process: &ProcessPlan,
-) -> Result<Option<String>, String> {
-    let sandboxes = sandboxes.ok_or("this daemon runs no sandboxes")?;
-    let runtime = tokio::runtime::Handle::current();
-    match process {
-        ProcessPlan::Start { name, command } => {
-            let log = runtime.block_on(sandboxes.start_process(requester, name, command))?;
-            Ok(Some(
-                serde_json::json!({
-                    "process": name,
-                    "running": true,
-                    "output": log.display().to_string(),
-                })
-                .to_string(),
-            ))
-        }
-        ProcessPlan::Stop { name } => {
-            runtime.block_on(sandboxes.stop_process(requester.agent, name))?;
-            Ok(None)
-        }
-    }
 }
 
 /// The reply to a call that was carried out. After `wait` or `report`, or the call that sets the
@@ -606,47 +640,4 @@ fn append(w: &Writer, events: Events) -> Result<(), Outcome> {
     w.append(events)
         .map(drop)
         .map_err(|e| Outcome::Refused(format!("the log refused this call: {e}")))
-}
-
-/// Makes a project's code directory under the projects root, named by its slug, or by the slug and
-/// a number when that is taken by a project or anything else, and starts its repository there.
-/// The directory is claimed by creating it, so two projects set up at once cannot get the same one.
-fn make_code_dir(new: &NewCodeDir) -> Result<ProjectEvent, String> {
-    let cannot = |e: &dyn std::fmt::Display| format!("the project's code directory: {e}");
-    std::fs::create_dir_all(&new.root).map_err(|e| cannot(&e))?;
-    let mut n = 1;
-    let dir = loop {
-        let name = match n {
-            1 => new.slug.clone(),
-            _ => format!("{}-{n}", new.slug),
-        };
-        let dir = new.root.join(name);
-        match std::fs::create_dir(&dir) {
-            Ok(()) => break dir,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
-            Err(e) => return Err(cannot(&e)),
-        }
-    };
-    if let Err(e) = Git::new(dir.clone()).prepare() {
-        // Nothing but x100 has used it, since it was made just now.
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err(cannot(&e));
-    }
-    Ok(ProjectEvent::CodeDirSet { dir })
-}
-
-/// Specs are kept as Markdown in the code directory's `.x100/specs/`, written from the log for
-/// people to read. The log is the record, so a file that cannot be written loses nothing.
-fn write_spec_file(git: &Git, kind: SpecKind, body: &str) {
-    let name = match kind {
-        SpecKind::Brd => "BRD.md",
-        SpecKind::Prd => "PRD.md",
-        SpecKind::Add => "ADD.md",
-    };
-    let dir = git.project_dir().join(".x100").join("specs");
-    if let Err(e) =
-        std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(name), body))
-    {
-        eprintln!("x100: could not write {name}: {e}");
-    }
 }

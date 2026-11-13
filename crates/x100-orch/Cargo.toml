@@ -18,6 +18,7 @@ test = false
 [dependencies]
 x100-core = { path = "../x100-core" }
 x100-store = { path = "../x100-store" }
+x100-lab = { path = "../x100-lab" }
 x100-memory = { path = "../x100-memory" }
 x100-drivers = { path = "../x100-drivers" }
 x100-jobs = { path = "../x100-jobs" }

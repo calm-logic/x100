@@ -214,6 +214,28 @@ fn every_tool(f: &x100_core::testing::Fernleaf) -> Vec<(ToolCall, &'static str)>
         ),
         (ToolCall::ReadMemories { agent: f.backend }, "tool.routine"),
         (
+            ToolCall::ProposeChange(Proposal::Trial {
+                change: x100_core::trial::TrialChange::CompactMemory {
+                    agent: f.tech,
+                    notes: vec![(x100_core::memory::NoteName("n".into()), "b".into())],
+                },
+                eval: x100_core::trial::EvalSet {
+                    items: vec![],
+                    runs_per_arm: 3,
+                },
+            }),
+            "tool.routine",
+        ),
+        (
+            ToolCall::ProposeChange(Proposal::Correction {
+                agent: f.tech,
+                note: x100_core::memory::NoteName("deploys".into()),
+                body: "b".into(),
+                sources: vec![x100_core::event::Seq(1)],
+            }),
+            "tool.routine",
+        ),
+        (
             ToolCall::ProposeChange(Proposal::Team {
                 changes: vec![TeamChange::Retire { agent: f.research }],
                 telemetry: "t".into(),
@@ -244,8 +266,9 @@ fn every_tool(f: &x100_core::testing::Fernleaf) -> Vec<(ToolCall, &'static str)>
     ]
 }
 
-/// Maps every variant to a number with no wildcard, so a new `ToolCall` variant stops this test
-/// from compiling until it is added here and given a case in `every_tool`.
+/// Maps every variant, and every kind of proposal, to a number with no wildcard, so a new
+/// `ToolCall` or `Proposal` variant stops this test from compiling until it is added here and
+/// given a case in `every_tool`.
 fn variant_index(call: &ToolCall) -> usize {
     match call {
         ToolCall::Delegate { .. } => 0,
@@ -269,7 +292,9 @@ fn variant_index(call: &ToolCall) -> usize {
         ToolCall::SetBudget { .. } => 18,
         ToolCall::ReadLog { .. } => 19,
         ToolCall::ReadMemories { .. } => 20,
-        ToolCall::ProposeChange(_) => 21,
+        ToolCall::ProposeChange(Proposal::Trial { .. }) => 21,
+        ToolCall::ProposeChange(Proposal::Team { .. }) => 29,
+        ToolCall::ProposeChange(Proposal::Correction { .. }) => 30,
         ToolCall::SetUpProject { .. } => 22,
         ToolCall::ListIntegrations {} => 23,
         ToolCall::LinkProject { .. } => 24,
@@ -286,7 +311,11 @@ fn every_tool_variant_has_a_rule() {
     let calls = every_tool(&f);
     let mut seen: Vec<usize> = calls.iter().map(|(c, _)| variant_index(c)).collect();
     seen.sort_unstable();
-    assert_eq!(seen, (0..29).collect::<Vec<_>>(), "a case per variant");
+    assert_eq!(
+        seen,
+        (0..31).collect::<Vec<_>>(),
+        "a case per variant and kind of proposal"
+    );
     for (call, expected) in calls {
         let r = ruling(&state, &tool(f.backend, call.clone()));
         assert_eq!(rule_of(&r).as_deref(), Some(expected), "{call:?}");
@@ -552,6 +581,8 @@ fn egress_x100_settled_is_recorded_under_its_own_rows() {
             x100_gate::Settled::RefusedByProxy,
             "egress.refused_by_proxy",
         ),
+        (x100_gate::Settled::LabRead, "egress.lab.read"),
+        (x100_gate::Settled::LabWrite, "egress.lab.write"),
     ] {
         let r = x100_gate::settled(how, "API.Example.com:443", "post");
         assert!(!r.is_held());
@@ -559,6 +590,60 @@ fn egress_x100_settled_is_recorded_under_its_own_rows() {
         assert!(r.classification().why.contains("POST api.example.com"));
         assert!(rule::ALL.iter().any(|row| row.id == id));
     }
+}
+
+/// A lab driver's request is settled by its method alone: it may read, and never write.
+#[test]
+fn a_lab_drivers_request_reads_or_is_a_refused_write() {
+    for m in ["GET", "head", "OPTIONS"] {
+        assert_eq!(
+            x100_gate::Settled::lab(m),
+            x100_gate::Settled::LabRead,
+            "{m}"
+        );
+    }
+    for m in ["POST", "put", "PATCH", "DELETE", "PROPFIND"] {
+        assert_eq!(
+            x100_gate::Settled::lab(m),
+            x100_gate::Settled::LabWrite,
+            "{m}"
+        );
+    }
+}
+
+/// A proposed team change is held with what it changes and the telemetry behind it.
+#[test]
+fn a_team_change_shows_its_changes_and_its_telemetry() {
+    let (state, f) = fern(AskMeAbout::Nothing);
+    let call = ToolCall::ProposeChange(Proposal::Team {
+        changes: vec![
+            TeamChange::AddLead(lead(Money::from_dollars(1))),
+            TeamChange::Retire { agent: f.research },
+        ],
+        telemetry: "Research was idle for 9 of the last 10 tasks (events 40 to 90).".into(),
+        team_toml: String::new(),
+    });
+    let action = tool(f.ceo, call);
+    let r = ruling(&state, &action);
+    assert!(r.is_held(), "held even at Nothing");
+    let held = x100_core::fold::ActionRecord {
+        action,
+        state: x100_core::action::ActionState::Held,
+        proposed: Timestamp::from_millis(0),
+        classification: Some(r.classification().clone()),
+        decided: None,
+        error: None,
+    };
+    let shown = x100_gate::Shown::of(&state, &held).expect("shown");
+    assert!(shown.what.contains("add a lead"), "{}", shown.what);
+    assert!(shown.what.contains("retire"), "{}", shown.what);
+    assert!(
+        shown
+            .what
+            .contains("Research was idle for 9 of the last 10 tasks"),
+        "{}",
+        shown.what
+    );
 }
 
 #[test]

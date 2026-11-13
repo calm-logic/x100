@@ -58,6 +58,7 @@ pub(super) fn opening(b: &mut LogBuilder) -> Opening {
         ask_me_about: crate::action::AskMeAbout::HighRiskOnly,
         budget: Money::from_dollars(50),
         lab_share: Percent::new(10).expect("a percentage"),
+        trial_before_commit: false,
         allowed: [opus(), sonnet(), gpt()].into(),
     };
     b.push(

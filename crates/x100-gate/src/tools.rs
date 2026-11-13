@@ -55,7 +55,7 @@ pub fn rule(
             }
         }
         T::ProposeChange(Proposal::Team { .. }) => &rule::TEAM_CHANGE,
-        T::ProposeChange(Proposal::Trial { .. }) => &rule::ROUTINE,
+        T::ProposeChange(Proposal::Trial { .. } | Proposal::Correction { .. }) => &rule::ROUTINE,
         T::SetEffort { agent, range } => {
             let raised = state
                 .project()

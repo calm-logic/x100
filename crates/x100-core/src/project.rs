@@ -27,6 +27,10 @@ pub struct Settings {
     pub budget: Money,
     /// The lab's cap, as a share of the project's budget.
     pub lab_share: Percent,
+    /// Reflection's skill edits, new skills and memory compactions are committed only when a
+    /// trial in the lab supports them. Off, they are committed directly. Corrections of notes
+    /// against the log are never put on trial.
+    pub trial_before_commit: bool,
     /// Harnesses and models the builder allows in this project.
     pub allowed: BTreeSet<HarnessModel>,
 }
@@ -43,6 +47,7 @@ pub enum SettingChange {
     AskMeAbout(AskMeAbout),
     Budget(Money),
     LabShare(Percent),
+    TrialBeforeCommit(bool),
     /// Turning one off hands the work of any driver using it to another driver.
     Allow {
         what: HarnessModel,

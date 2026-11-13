@@ -1,5 +1,6 @@
-//! A real `x100d` as a child process on the fake clock, with the Fernleaf script, and the app's
-//! window on GPUI's test platform: no display, simulated clicks and keys, every frame drawn.
+//! A real `x100d` as a child process on the fake clock, with the Fernleaf script or a test's own,
+//! and the app's window on GPUI's test platform: no display, simulated clicks and keys, every frame
+//! drawn.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -52,6 +53,7 @@ pub fn binary(name: &str) -> PathBuf {
 
 pub struct Daemon {
     pub dir: tempfile::TempDir,
+    scripts: PathBuf,
     env: Vec<(String, String)>,
     child: Option<Child>,
 }
@@ -65,13 +67,33 @@ impl Daemon {
     /// The same, with `env` on top. Without it the daemon is pointed at `docker` and `gh`
     /// programs that do not exist, so it finds none of the builder's.
     pub fn fernleaf_with(env: &[(&str, String)]) -> Daemon {
+        Daemon::start(None, env)
+    }
+
+    /// A daemon that runs `script`, a fake harness's script of the test's own, and otherwise as
+    /// the Fernleaf one.
+    pub fn scripted(script: &str) -> Daemon {
+        Daemon::start(Some(script), &[])
+    }
+
+    fn start(script: Option<&str>, env: &[(&str, String)]) -> Daemon {
         // Under the build's own directory, not `/tmp`, which a sandbox replaces with its own.
         let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
+        let scripts = match script {
+            Some(script) => {
+                let scripts = dir.path().join("scripts");
+                std::fs::create_dir_all(&scripts).expect("the scripts directory");
+                std::fs::write(scripts.join("fake.toml"), script).expect("the script is written");
+                scripts
+            }
+            None => PathBuf::from(SCRIPTS),
+        };
         let env: Vec<(String, String)> =
             env.iter().map(|(k, v)| ((*k).into(), v.clone())).collect();
-        let child = spawn(dir.path(), START, &env);
+        let child = spawn(dir.path(), &scripts, START, &env);
         Daemon {
             dir,
+            scripts,
             env,
             child: Some(child),
         }
@@ -81,7 +103,7 @@ impl Daemon {
     /// the builder's machine restarted.
     pub fn restart(&mut self, at: Timestamp) {
         self.stop();
-        self.child = Some(spawn(self.dir.path(), at, &self.env));
+        self.child = Some(spawn(self.dir.path(), &self.scripts, at, &self.env));
     }
 
     /// SIGKILL leaves driver processes behind; SIGTERM lets the daemon stop them.
@@ -118,7 +140,7 @@ impl Drop for Daemon {
     }
 }
 
-fn spawn(dir: &Path, at: Timestamp, env: &[(String, String)]) -> Child {
+fn spawn(dir: &Path, scripts: &Path, at: Timestamp, env: &[(String, String)]) -> Child {
     Command::new(binary("x100d"))
         .arg("--data-dir")
         .arg(dir.join("data"))
@@ -126,7 +148,7 @@ fn spawn(dir: &Path, at: Timestamp, env: &[(String, String)]) -> Child {
         .arg("--projects-root")
         .arg(dir.join("projects"))
         .arg("--scripts-dir")
-        .arg(SCRIPTS)
+        .arg(scripts)
         .arg("--fake-harness")
         .arg(binary("x100d-fake-harness"))
         .arg("--fake-clock")
@@ -158,8 +180,16 @@ impl Run {
 
     /// A run whose daemon has `env` on top of the usual.
     pub fn start_with(env: &[(&str, String)]) -> Run {
+        Run::with_daemon(Daemon::fernleaf_with(env))
+    }
+
+    /// A run whose daemon runs the test's own `script`.
+    pub fn scripted(script: &str) -> Run {
+        Run::with_daemon(Daemon::scripted(script))
+    }
+
+    fn with_daemon(daemon: Daemon) -> Run {
         let rt = tokio::runtime::Runtime::new().expect("a runtime");
-        let daemon = Daemon::fernleaf_with(env);
         let cx = TestAppContext::single();
         cx.update(x100_app::init);
         Run { rt, daemon, cx }
@@ -213,6 +243,7 @@ impl Run {
                 ask_me_about: AskMeAbout::HighRiskOnly,
                 budget: Money::from_dollars(50),
                 lab_share: Percent::new(10).unwrap(),
+                trial_before_commit: false,
                 allowed: [HarnessModel {
                     harness,
                     model: ModelName("fake-brief".into()),

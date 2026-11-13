@@ -177,6 +177,7 @@ impl Loop {
         self.commit(|s, clock| {
             let mut events = settle::reconcile(s, clock);
             events.extend(crate::decide::unfinished(s, clock));
+            events.extend(crate::lab::unfinished(s));
             events
         })
         .await;

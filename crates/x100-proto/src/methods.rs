@@ -250,7 +250,9 @@ methods! {
     /// a deploy that fails is `rejected` with why.
     DeployProject, "projects.deploy", DeployProject => ProjectDeployed, [NotFound, WrongState, Rejected];
 
-    /// Reflect now: delegates a reflection task to the CEO.
+    /// Reflect now: delegates a reflection task to the CEO over the work since the last one.
+    /// `wrong_state` before the project is set up, and while the CEO holds another task of the
+    /// builder's.
     Reflect, "projects.reflect", Reflect => Reflecting, [NotFound, WrongState, Unavailable];
 
     /// Sends a message to the CEO, with files already uploaded attached. The builder talks to no
@@ -317,7 +319,8 @@ methods! {
     /// an event, and agents started after it load the new text.
     WriteSkill, "skills.write", WriteSkill => SkillWritten, [NotFound, Rejected, WrongState];
 
-    /// Reflection's trials with both arms' runs and scores.
+    /// Reflection's trials, oldest first, with both arms' runs and scores, the verdict, and why
+    /// one was discarded or stopped.
     ListTrials, "trials.list", ListTrials => Trials, [NotFound];
 }
 

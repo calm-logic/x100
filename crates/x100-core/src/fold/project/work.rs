@@ -167,6 +167,7 @@ impl ProjectState {
                 proposed: s.at,
                 runs: Vec::new(),
                 commit: None,
+                why: None,
             },
         );
         ch.part(ProjectPart::Team).record(Record::Trial(t.id));
@@ -185,6 +186,9 @@ impl ProjectState {
         match event {
             TrialEvent::RunFinished(score) => rec.runs.push(score.clone()),
             TrialEvent::Committed { commit } => rec.commit = Some(commit.clone()),
+            TrialEvent::Discarded { why } | TrialEvent::Stopped { why } => {
+                rec.why = Some(why.clone())
+            }
             _ => {}
         }
         ch.part(ProjectPart::Team).record(id);

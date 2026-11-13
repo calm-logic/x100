@@ -325,6 +325,116 @@ impl Sandboxes {
         }
     }
 
+    /// Places one lab run's driver in a fresh sandbox of its own over `dir`, the run's throwaway
+    /// copy, made now and destroyed by [`Sandboxes::end_lab`]. Its route on the proxy is a lab
+    /// driver's: no credential is given to it, and the gate lets it read but never write. Where
+    /// no sandbox can be made it runs as work drivers do then: only if the builder turned on
+    /// `run_without_sandbox`, uncontained.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn place_lab(
+        &self,
+        settings: &DaemonSettings,
+        requester: Requester,
+        dir: &Path,
+        tools: Option<SocketAddr>,
+        logins: Vec<PathBuf>,
+        login_hosts: &[String],
+        provider: &[String],
+    ) -> Result<LabBox, String> {
+        let driver = requester.driver;
+        if settings.run_without_sandbox {
+            eprintln!(
+                "x100: lab driver {driver} runs without a sandbox, as the daemon's \
+                 run_without_sandbox setting allows"
+            );
+            let (route, env) = self.route(requester, login_hosts, provider, None).await?;
+            return Ok(LabBox {
+                placed: Placed {
+                    wrap: CommandWrapper::identity(),
+                    expose: Expose::nothing(),
+                    state: dir.with_extension("state"),
+                    tmp: None,
+                    env,
+                    contained: false,
+                    ended: Vec::new(),
+                    _route: route,
+                },
+                sandbox: None,
+                name: String::new(),
+            });
+        }
+        let backend = self.containment.backend.as_ref().map_err(|why| {
+            format!("no sandbox can be made on this machine ({why}), so the lab cannot run")
+        })?;
+        let name = format!("{}-lab-{}", self.containment.tag, short(driver));
+        let mut paths: Vec<Mount> = logins
+            .into_iter()
+            .filter(|l| l.is_dir())
+            .map(Mount::read_write)
+            .collect();
+        if let Some((_, cert)) = &self.containment.proxy {
+            paths.push(Mount::read_only(cert));
+        }
+        let mut programs = self.programs.read().expect("programs lock").clone();
+        programs.extend(settings.sandbox_programs.iter().cloned());
+        programs.retain(|p| p.exists());
+        programs.sort();
+        programs.dedup();
+        let spec = SandboxSpec {
+            dir: self.containment.dir.join(format!("lab-{}", short(driver))),
+            name: name.clone(),
+            worktree: dir.to_path_buf(),
+            programs,
+            paths,
+            endpoints: tools.into_iter().collect(),
+        };
+        let sandbox = backend
+            .create(spec)
+            .await
+            .map_err(|e| format!("the lab's sandbox could not be made: {e}"))?;
+        if let Err(e) = self.registry.record_named(&key(&name), sandbox.anchor()) {
+            eprintln!("x100: could not write down sandbox {name}'s process: {e}");
+        }
+        let (route, env) = self
+            .route(requester, login_hosts, provider, Some(&sandbox))
+            .await?;
+        let forwarder = sandbox.forwarder();
+        let placed = Placed {
+            wrap: sandbox.wrap(),
+            expose: Expose::new(move |addr| {
+                let forwarder = forwarder.clone();
+                async move { forwarder.forward(addr).await.map_err(std::io::Error::other) }
+            }),
+            state: sandbox.home().join("d").join(short(driver)),
+            tmp: Some(sandbox.tmp()),
+            env,
+            contained: true,
+            ended: Vec::new(),
+            _route: route,
+        };
+        Ok(LabBox {
+            placed,
+            sandbox: Some(sandbox),
+            name,
+        })
+    }
+
+    /// Destroys a lab run's sandbox, with everything still running in it, and closes its route.
+    pub async fn end_lab(&self, lab: LabBox) {
+        let LabBox {
+            placed,
+            sandbox,
+            name,
+        } = lab;
+        drop(placed);
+        if let Some(sandbox) = sandbox {
+            if let Err(e) = sandbox.destroy().await {
+                eprintln!("x100: a lab sandbox could not be removed: {e}");
+            }
+            let _ = self.registry.forget_named(&key(&name));
+        }
+    }
+
     /// Destroys every sandbox of `project`, returning the processes that ended with each agent's.
     pub async fn destroy_project(&self, project: ProjectId) -> Vec<(AgentId, Vec<ProcessName>)> {
         let gone: Vec<(AgentId, Arc<AgentBox>)> = {
@@ -367,6 +477,23 @@ impl Sandboxes {
         }
         let _ = self.registry.forget_named(&name);
         names
+    }
+}
+
+/// One lab run's place: its driver's, and the sandbox made for it alone.
+pub(crate) struct LabBox {
+    pub placed: Placed,
+    sandbox: Option<Sandbox>,
+    name: String,
+}
+
+impl LabBox {
+    /// `script` as a command run inside the run's sandbox, in its working directory.
+    pub fn command(&self, script: &str) -> CommandLine {
+        self.placed.wrap.apply(CommandLine {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+        })
     }
 }
 

@@ -9,9 +9,9 @@
 
 mod catalogue;
 mod integrate;
-mod later;
 mod memory;
 mod process;
+mod reflect;
 mod schema;
 mod setup;
 mod talk;
@@ -37,6 +37,7 @@ use crate::ctx::Events;
 pub(crate) use catalogue::{END_THE_TURN, SET_UP, Tool};
 pub(crate) use memory::{MemoryPlan, QUERY_WORDS};
 pub(crate) use process::ProcessPlan;
+pub(crate) use reflect::{READ_LOG_MAX, TrialPlan};
 pub(crate) use schema::schema;
 pub(crate) use work::{merged, report_failed};
 
@@ -77,6 +78,9 @@ pub(crate) struct Plan {
     /// A deploy, which the daemon does after the call returns, since it takes minutes; its result
     /// reaches the agent's inbox.
     pub deploy: Option<DeployJob>,
+    /// A change to try in the lab, which also runs after the call returns; its verdict reaches the
+    /// agent's inbox.
+    pub trial: Option<TrialPlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,12 +135,6 @@ pub(crate) type Refusal = String;
 /// Decides a call. The caller's driver is assumed to be the agent's current one; the desk checks.
 pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<Plan, Refusal> {
     let tool = Tool::of(call);
-    if let Some(milestone) = later::arrives_with(tool) {
-        return Err(format!(
-            "`{}` is not available yet: it arrives with {milestone}",
-            tool.name()
-        ));
-    }
     let project = state.project().ok_or("the project is not created yet")?;
     let me = state
         .agent(ctx.agent)
@@ -220,9 +218,8 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
         ToolCall::SearchLog { query, limit } => memory::search_log(&at, query, *limit),
         ToolCall::LoadSkill { skill } => memory::load_skill(&at, skill),
         ToolCall::ReadMemories { agent } => memory::read_memories(&at, *agent),
-        ToolCall::ReadLog { .. } | ToolCall::ProposeChange(_) => {
-            unreachable!("answered by later::arrives_with")
-        }
+        ToolCall::ReadLog { from, to } => reflect::read_log(&at, *from, *to),
+        ToolCall::ProposeChange(proposal) => reflect::propose(&at, proposal),
     }
 }
 

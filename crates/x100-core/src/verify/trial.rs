@@ -3,9 +3,9 @@
 //!
 //! In the log a skill change or memory compaction is `SkillCommitted` or `MemoryCompacted`. One
 //! that names a trial needs it Committed, which the fold checks. One that names none was
-//! committed directly, as the project's "trial before commit" setting, off by default, allows; the
-//! setting is M14's, so the model covers the gated path: whether a trial can be committed without
-//! the evidence. The environment tries every trial event in every state; a change reaches the main
+//! committed directly, as the project's "trial before commit" setting, off by default, allows.
+//! The model covers the gated path: whether a trial can be committed without the evidence. The
+//! environment tries every trial event in every state; a change reaches the main
 //! branch exactly when the machine accepts `Committed`.
 
 use std::time::Duration;
@@ -53,8 +53,8 @@ fn events() -> Vec<TrialEvent> {
         TrialEvent::Committed {
             commit: CommitId(String::new()),
         },
-        TrialEvent::Discarded,
-        TrialEvent::Stopped,
+        TrialEvent::Discarded { why: String::new() },
+        TrialEvent::Stopped { why: String::new() },
     ]
 }
 

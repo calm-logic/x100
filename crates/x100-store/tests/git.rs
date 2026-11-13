@@ -384,3 +384,58 @@ fn a_commit_puts_a_worktrees_work_on_its_branch_so_a_merge_carries_it() {
     assert_eq!(tree["src/main.rs"].0, 0o755);
     assert!(!tree.contains_key("src/old.rs") && !tree.contains_key("debug.log"));
 }
+
+/// Every file under a repository's `.git`, by path, with its bytes.
+fn git_dir_of(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        for e in fs::read_dir(dir).unwrap() {
+            let path = e.unwrap().path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.insert(rel, fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(&dir.join(".git"), &dir.join(".git"), &mut out);
+    out
+}
+
+#[test]
+fn an_export_holds_a_checkpoints_files_in_a_repository_of_its_own_and_writes_nothing_of_the_project()
+ {
+    let (dir, git) = project_with_history();
+    let wt = git
+        .create_worktree(AgentId::from_u128(1), "x100/a", "main")
+        .unwrap();
+    write(&wt.join("src/main.rs"), "fn main() { work(); }\n");
+    write(&wt.join("untracked.txt"), "new\n");
+    let checkpoint = git.checkpoint(&wt, "a").unwrap();
+    let want = files_of(&wt);
+    let project = (files_of(dir.path()), git_dir_of(dir.path()));
+
+    let lab = tempfile::tempdir().unwrap();
+    let into = lab.path().join("run");
+    git.export(&checkpoint, &into).unwrap();
+
+    assert_eq!(
+        files_of(&into),
+        want,
+        "the checkpoint's files, modes included"
+    );
+    assert_eq!(sh(&into, &["rev-list", "--count", "HEAD"]).trim(), "1");
+    assert_eq!(sh(&into, &["status", "--porcelain"]), "");
+    assert_eq!(
+        (files_of(dir.path()), git_dir_of(dir.path())),
+        project,
+        "the project's files and its git directory are byte for byte as they were"
+    );
+    // A second export into the same place is refused rather than mixed with the first.
+    assert!(git.export(&checkpoint, &into).is_err());
+}

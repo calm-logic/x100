@@ -49,7 +49,8 @@ pub(crate) fn workspace(scratch: bool, contained: bool) -> String {
     format!("{place} {rules}")
 }
 
-/// `dir` is the agent's worktree, or the project's scratch directory before it has code.
+/// `dir` is the agent's worktree, or the project's scratch directory before it has code, or a
+/// lab run's copy. `tools` is where it reaches the daemon's tools, which the desk issued it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build(
     shared: &Shared,
@@ -60,6 +61,7 @@ pub(crate) fn build(
     dir: PathBuf,
     start_pack: String,
     placed: &Placed,
+    tools: x100_drivers::ToolEndpoint,
 ) -> DriverSpec {
     // The path is passed on to the harness, which reaches the login there; x100 never opens it.
     let login = shared.daemon.with_state(|d| {
@@ -79,7 +81,7 @@ pub(crate) fn build(
         expose: placed.expose.clone(),
         tmp: placed.tmp.clone(),
         start_pack,
-        tools: Some(shared.desk.issue(driver, Arc::clone(ctx))),
+        tools: Some(tools),
         env,
         stall: StallPolicy::from_settings(&(shared.settings)()),
         permissions: PERMISSIONS,
@@ -132,7 +134,7 @@ pub(crate) async fn place(
 
 /// The hosts of the model provider a harness's drivers reach: its login's hosts, or the host its
 /// API key goes to. The gate is not asked about them, since x100 chose them, not the agent.
-fn provider_hosts(harness: &dyn Harness) -> Vec<String> {
+pub(crate) fn provider_hosts(harness: &dyn Harness) -> Vec<String> {
     let mut hosts = harness.login_hosts();
     hosts.extend(harness.api_key().map(|k| k.host));
     hosts

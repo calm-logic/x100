@@ -210,6 +210,7 @@ fn settings(total: u64) -> Settings {
         ask_me_about: AskMeAbout::HighRiskOnly,
         budget: Money::from_dollars(total),
         lab_share: Percent::new(10).unwrap(),
+        trial_before_commit: false,
         allowed: Default::default(),
     }
 }

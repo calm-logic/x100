@@ -115,6 +115,15 @@ impl Repo {
             .then(|| CommitId(String::from_utf8_lossy(&o.stdout).trim().to_owned())))
     }
 
+    /// `target`, or main where this repository has no such branch: a change on trial lives in
+    /// one repository, and the others are read as they are.
+    pub fn or_main(&self, target: &Target) -> Result<Target> {
+        Ok(match target {
+            Target::Branch(_) if self.tip(target)?.is_none() => Target::Main,
+            other => other.clone(),
+        })
+    }
+
     /// The names of the trial branches.
     pub fn branches(&self) -> Result<Vec<String>> {
         let text = out(
@@ -140,6 +149,31 @@ impl Repo {
             args.extend(["--", prefix]);
         }
         let listed = run(&self.dir, &args, &[], None)?;
+        let paths: Vec<String> = listed
+            .stdout
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| String::from_utf8_lossy(p).into_owned())
+            .collect();
+        self.blobs(&rev, &paths)
+    }
+
+    /// The commit main and a branch last had in common, which is where the change on the branch
+    /// began.
+    pub fn base(&self, branch: &str) -> Result<CommitId> {
+        let rev = Self::branch_ref(branch)?;
+        out(&self.dir, &["merge-base", MAIN, &rev]).map(CommitId)
+    }
+
+    /// Every file under `prefix` at a commit, by path.
+    pub fn files_at(&self, commit: &CommitId, prefix: &str) -> Result<BTreeMap<String, String>> {
+        let rev = commit.0.clone();
+        let listed = run(
+            &self.dir,
+            &["ls-tree", "-r", "-z", "--name-only", &rev, "--", prefix],
+            &[],
+            None,
+        )?;
         let paths: Vec<String> = listed
             .stdout
             .split(|b| *b == 0)

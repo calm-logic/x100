@@ -129,9 +129,46 @@ impl x100_vault::Admission for Gatekeeper {
             host: host.to_owned(),
             method: method.to_owned(),
         };
+        if matches!(requester.purpose, x100_core::driver::Purpose::Lab { .. }) {
+            return lab(&ctx, requester.agent, request).await;
+        }
         match admit::admit(shared, &ctx, requester.agent, request).await {
             admit::Admitted::Go(action) => x100_vault::Admit::Go { action },
             admit::Admitted::Refused { action, why } => x100_vault::Admit::Refuse { action, why },
         }
+    }
+}
+
+/// A lab driver's request out, settled without the gate's judging and recorded: a read goes, and
+/// its report ends the action; a write is refused and ended here, and nothing of it goes out.
+async fn lab(ctx: &Arc<ctx::ProjectCtx>, agent: AgentId, request: Request) -> x100_vault::Admit {
+    let Request::Egress { host, method, .. } = &request else {
+        unreachable!("only a request out is admitted here")
+    };
+    let how = x100_gate::Settled::lab(method);
+    let ruling = x100_gate::settled(how, host, method);
+    let action = Action {
+        id: new_id(&*ctx.clock, ActionId::new),
+        agent,
+        request: request.clone(),
+    };
+    let id = action.id;
+    let mut events = gate::proposed(&action, &ruling);
+    let why = "x100 refused this: a lab driver never writes outside the lab";
+    if how == x100_gate::Settled::LabWrite {
+        events.push(gate::finished(id, Some(why.to_owned())));
+    }
+    let ctx = Arc::clone(ctx);
+    let recorded = blocking(move || ctx.writer().append(events)).await;
+    match (recorded, how) {
+        (Ok(_), x100_gate::Settled::LabRead) => x100_vault::Admit::Go { action: id },
+        (Ok(_), _) => x100_vault::Admit::Refuse {
+            action: Some(id),
+            why: why.into(),
+        },
+        (Err(e), _) => x100_vault::Admit::Refuse {
+            action: None,
+            why: format!("x100 refused this: it could not be recorded ({e})"),
+        },
     }
 }

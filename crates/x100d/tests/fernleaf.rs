@@ -89,6 +89,7 @@ impl Run {
             ask_me_about: AskMeAbout::HighRiskOnly,
             budget: Money::from_dollars(50),
             lab_share: Percent::new(10).unwrap(),
+            trial_before_commit: false,
             allowed: [HarnessModel {
                 harness,
                 model: ModelName("fake-brief".into()),

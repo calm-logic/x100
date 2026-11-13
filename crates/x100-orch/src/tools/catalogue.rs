@@ -6,8 +6,6 @@
 use serde_json::{Value, json};
 use x100_core::tool::ToolCall;
 
-use super::later::arrives_with;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Tool {
     Delegate,
@@ -175,11 +173,6 @@ impl Tool {
         )
     }
 
-    /// Whether calling it does something yet. A tool a later milestone builds is not offered.
-    pub fn served(self) -> bool {
-        arrives_with(self).is_none()
-    }
-
     /// Whether it only reads, so a driver that does not remember its result can ask again. The
     /// start pack's list of calls that took effect leaves these out.
     pub fn reads_only(self) -> bool {
@@ -335,14 +328,28 @@ impl Tool {
                 "CEO only. Set a lead's budget in millionths of a dollar. The leads' budgets \
                  together must fit the project's. Returns the lead's id."
             }
-            Tool::ReadLog => "CEO only, for reflection. Read the project's log between two points.",
+            Tool::ReadLog => {
+                "CEO only, for reflection. Read the project's log from event `from` (its number, \
+                 as `search_log` shows it) to `to` or the end, at most 200 events a call: \
+                 messages, tasks and reports in words, every other event as its record, with \
+                 drivers, failures, charges and trials among them. This is the ground truth \
+                 notes are checked against."
+            }
             Tool::ReadMemories => {
                 "CEO only, for reflection. Read all of an agent's notes, with the events each cites. \
                  This does not count as the agent reading them."
             }
             Tool::ProposeChange => {
-                "CEO only, for reflection. Propose a change to a skill or a memory, put on trial, \
-                 or to the team, which goes to the builder."
+                "CEO only, for reflection. One of three. `trial`: a change to a skill (an edit or \
+                 a new one) or a compaction of an agent's memory, with an eval set: past tasks \
+                 that ended accepted, script or rubric checks to run on them, and for a \
+                 compaction, probe questions whose answers are in the notes now. If the \
+                 project's \"trial before commit\" setting is off, the change is committed at \
+                 once; if it is on, it is tried in the lab, both with and without it, each at \
+                 least three times, and committed only if it helps, and the verdict comes to \
+                 your inbox. `correction`: rewrite a note the log shows to be wrong, citing the \
+                 events that show it; never put on trial. `team`: a change to the team, with the \
+                 telemetry that prompted it; it waits for the builder's approval."
             }
             Tool::SetUpProject => {
                 "CEO only. Name a new project and say what it is for, once the builder has told \

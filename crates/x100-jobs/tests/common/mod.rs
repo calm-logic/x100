@@ -91,6 +91,7 @@ pub fn open_project_on(
                     ask_me_about: AskMeAbout::HighRiskOnly,
                     budget: Money::from_dollars(1),
                     lab_share: Percent::new(10).unwrap(),
+                    trial_before_commit: false,
                     allowed: Default::default(),
                 },
             },

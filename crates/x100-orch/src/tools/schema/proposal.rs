@@ -1,5 +1,4 @@
-//! The schema of `propose_change`'s proposal, which reflection (M14) makes: kept with the rest so
-//! that every tool has one, though the tool is not offered yet.
+//! The schema of `propose_change`'s proposal, which reflection makes.
 
 use serde_json::{Value, json};
 use x100_core::id::{AgentId, TaskId};
@@ -119,6 +118,24 @@ pub(super) fn proposal() -> Value {
     one_of(
         vec![
             variant("trial", object(&[("change", change), ("eval", eval)], &[])),
+            variant(
+                "correction",
+                object(
+                    &[
+                        ("agent", agent("Whose note.")),
+                        ("note", text("The note's name.")),
+                        ("body", text("The note as it should read.")),
+                        (
+                            "sources",
+                            array(
+                                json!({ "type": "integer", "minimum": 1 }),
+                                "The events in the log that show the note was wrong.",
+                            ),
+                        ),
+                    ],
+                    &[],
+                ),
+            ),
             variant(
                 "team",
                 object(

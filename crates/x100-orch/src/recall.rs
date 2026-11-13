@@ -169,6 +169,14 @@ pub(crate) fn run(
                 reply,
             })
         }
+        MemoryPlan::ReadLog { from, to } => crate::reflect::read_log(store, *from, *to),
+        MemoryPlan::Correct {
+            agent: whose,
+            note,
+            body,
+            sources,
+        } => crate::reflect::correct(&memory, *whose, note, body, sources, now),
+        MemoryPlan::Commit { change } => crate::reflect::commit(&memory, change, now),
         MemoryPlan::SearchLog { query, limit } => {
             let hits = search_log(store, query, *limit)?;
             let reply = if hits.is_empty() {
@@ -246,7 +254,7 @@ fn search_log(store: &ProjectStore, query: &str, limit: usize) -> Result<Vec<Hit
 }
 
 /// What an event says in words, for the kinds a search covers.
-fn readable(event: &ProjectEvent) -> Option<(&'static str, String)> {
+pub(crate) fn readable(event: &ProjectEvent) -> Option<(&'static str, String)> {
     Some(match event {
         ProjectEvent::MessageSent(m) => ("message", m.body.clone()),
         ProjectEvent::TaskOpened { task, .. } => ("task", format!("{}: {}", task.title, task.ask)),

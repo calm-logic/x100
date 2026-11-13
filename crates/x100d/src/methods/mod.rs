@@ -105,6 +105,8 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ListMemories(p) => out(shelf::memories(hub, p).await),
         Call::ListSkills(p) => out(shelf::skills(hub, p).await),
         Call::WriteSkill(p) => out(shelf::write_skill(hub, p).await),
+        Call::Reflect(p) => out(shelf::reflect(hub, p).await),
+        Call::ListTrials(p) => out(shelf::trials(hub, p)),
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)

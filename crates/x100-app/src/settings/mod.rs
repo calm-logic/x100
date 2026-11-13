@@ -1,15 +1,17 @@
 //! The Settings tab: the project's name, intent and code directory, which only the name of may be
 //! changed here, Ask me about, the project's budget, each lead's budget and effort range, the
-//! harnesses and models x100 may use, the Homebox project it deploys to, the Sandbox part with the
-//! daemon's one unsafe setting, the Decision model part, the Integrations part, and the
-//! Credentials part. Each control sends its protocol request and says beside itself what came
-//! back: where the daemon has not made a method yet it says so, and the control does not pretend
-//! to have worked. What a control changed shows when the state changes.
+//! harnesses and models x100 may use, the Reflection part with "trial before commit" and Reflect
+//! now, the Homebox project it deploys to, the Sandbox part with the daemon's one unsafe setting,
+//! the Decision model part, the Integrations part, and the Credentials part. Each control sends
+//! its protocol request and says beside itself what came back: where the daemon has not made a
+//! method yet it says so, and the control does not pretend to have worked. What a control changed
+//! shows when the state changes.
 
 mod credentials;
 mod decision;
 mod homebox;
 mod integrations;
+mod reflection;
 mod sandbox;
 
 use std::collections::HashMap;
@@ -29,6 +31,7 @@ pub use credentials::{CredentialModel, Credentials};
 pub use decision::{DecisionPart, DecisionPartModel};
 pub use homebox::{HomeboxModel, HomeboxPart};
 pub use integrations::{IntegrationsModel, IntegrationsPart};
+pub use reflection::{Reflected, ReflectionPart};
 pub use sandbox::{SandboxModel, SandboxPart};
 
 use crate::glass;
@@ -147,6 +150,7 @@ pub struct SettingsView {
     decision: Entity<DecisionPart>,
     integrations: Entity<IntegrationsPart>,
     homebox: Entity<HomeboxPart>,
+    reflection: Entity<ReflectionPart>,
     _subscription: Subscription,
 }
 
@@ -176,6 +180,7 @@ impl SettingsView {
         let decision = cx.new(|cx| DecisionPart::new(session.clone(), cx));
         let integrations = cx.new(|cx| IntegrationsPart::new(session.clone(), cx));
         let homebox = cx.new(|cx| HomeboxPart::new(session.clone(), project, cx));
+        let reflection = cx.new(|cx| ReflectionPart::new(session.clone(), project, cx));
         let mut view = Self {
             session,
             project,
@@ -187,6 +192,7 @@ impl SettingsView {
             decision,
             integrations,
             homebox,
+            reflection,
             _subscription: subscription,
         };
         view.refresh(cx);
@@ -220,6 +226,10 @@ impl SettingsView {
 
     pub fn homebox(&self) -> &Entity<HomeboxPart> {
         &self.homebox
+    }
+
+    pub fn reflection(&self) -> &Entity<ReflectionPart> {
+        &self.reflection
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -611,6 +621,7 @@ impl Render for SettingsView {
                     .text_color(theme::dim())
                     .child("The CEO sets each lead's effort range. For every task x100 picks the cheapest allowed model that meets the effort the task needs."),
             )
+            .child(self.reflection.clone())
             .child(self.homebox.clone())
             .child(self.sandbox.clone())
             .child(self.decision.clone())

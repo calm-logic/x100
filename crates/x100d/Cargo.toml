@@ -48,6 +48,7 @@ ulid = "3"
 
 [dev-dependencies]
 x100-client = { path = "../x100-client" }
+x100-gate = { path = "../x100-gate" }
 x100-memory = { path = "../x100-memory" }
 base64 = "0.22"
 x100-drivers = { path = "../x100-drivers", features = ["testing"] }

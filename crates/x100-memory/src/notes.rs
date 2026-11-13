@@ -12,7 +12,7 @@ use crate::format::{self, Entry};
 use crate::repo::{Change, Target};
 use crate::{INDEX, INDEX_LIMIT, Memory, NOTE_LIMIT};
 
-const DIR: &str = "memory";
+pub(crate) const DIR: &str = "memory";
 const SUMMARY_CHARS: usize = 100;
 
 /// One note, as it stands on main.
@@ -163,34 +163,50 @@ impl Memory {
 
     /// One note as it stands on main, and the commit main was at.
     pub fn note(&self, agent: AgentId, name: &NoteName) -> Result<Note> {
+        self.note_on(agent, name, &Target::Main)
+    }
+
+    /// One note on a trial branch, or on main if the agent has no such branch, as a lab driver
+    /// reads it.
+    pub fn note_on(&self, agent: AgentId, name: &NoteName, target: &Target) -> Result<Note> {
         let name = format::note_name(name)?;
         let repo = self.agent_repo(agent);
         let missing = || Error::NotFound(format!("note {}", name.0));
         if !repo.exists() {
             return Err(missing());
         }
+        let target = repo.or_main(target)?;
         let text = repo
-            .file(&Target::Main, &format!("{DIR}/{}", name.0))?
+            .file(&target, &format!("{DIR}/{}", name.0))?
             .ok_or_else(missing)?;
+        let commit = repo.tip(&target)?.ok_or_else(missing)?;
         let stored = format::decode_note(&text);
         Ok(Note {
             name,
             written: stored.written,
             sources: stored.sources,
             body: stored.body,
-            commit: repo.main_tip()?,
+            commit,
         })
     }
 
     /// Every note on main, newest first, with the commit main was at.
     pub fn notes(&self, agent: AgentId) -> Result<Vec<Note>> {
+        self.notes_on(agent, &Target::Main)
+    }
+
+    /// Every note on a trial branch, or on main if the agent has no such branch, newest first.
+    pub fn notes_on(&self, agent: AgentId, target: &Target) -> Result<Vec<Note>> {
         let repo = self.agent_repo(agent);
         if !repo.exists() {
             return Ok(Vec::new());
         }
-        let commit = repo.main_tip()?;
+        let target = repo.or_main(target)?;
+        let Some(commit) = repo.tip(&target)? else {
+            return Ok(Vec::new());
+        };
         let mut notes: Vec<Note> = repo
-            .files(&Target::Main, DIR)?
+            .files(&target, DIR)?
             .into_iter()
             .filter(|(p, _)| p.ends_with(".md") && p != &format!("{DIR}/{INDEX}"))
             .map(|(path, text)| {

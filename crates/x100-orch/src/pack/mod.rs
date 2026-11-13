@@ -101,7 +101,7 @@ pub(crate) fn build(
     let room = usize::try_from(budget)
         .unwrap_or(usize::MAX)
         .saturating_sub(pack.len());
-    let tail = transcript_tail(store, agent, room);
+    let tail = transcript_tail(store, &state, agent, room);
     if !tail.is_empty() {
         let _ = write!(pack, "\nYOUR TRANSCRIPT, LATEST LAST:\n{tail}");
     }
@@ -159,6 +159,19 @@ fn memory(git: Option<&Git>, agent: AgentId, position: guide::Position) -> Memor
             skills: x100_memory::builtin_section(always),
         }
     })
+}
+
+/// The skills an agent's pack carries in full, and those it is not told of, by its position.
+pub(crate) fn skill_rules(
+    state: &ProjectState,
+    agent: AgentId,
+) -> (&'static [&'static str], &'static [&'static str]) {
+    let position = match state.project().and_then(|p| p.team.position(agent)) {
+        Some(Position::Ceo { .. }) => guide::Position::Ceo,
+        Some(Position::Lead { .. }) => guide::Position::Lead,
+        _ => guide::Position::Worker,
+    };
+    (always(position), hidden(position))
 }
 
 /// Everything but the calls, the diff and the transcript.
@@ -522,8 +535,15 @@ pub(crate) fn recorded(store: &ProjectStore, driver: DriverId) -> Option<String>
     }
 }
 
-/// As much of the transcript's end as fits in `room` characters, oldest first.
-fn transcript_tail(store: &ProjectStore, agent: AgentId, room: usize) -> String {
+/// As much of the transcript's end as fits in `room` characters, oldest first. Lab drivers' runs
+/// are recorded in the agent's transcript for the builder to see, and left out here: they were
+/// trials, not the agent's work.
+fn transcript_tail(
+    store: &ProjectStore,
+    state: &ProjectState,
+    agent: AgentId,
+    room: usize,
+) -> String {
     let Ok(Some(last)) = store.transcripts.last(agent) else {
         return String::new();
     };
@@ -539,7 +559,15 @@ fn transcript_tail(store: &ProjectStore, agent: AgentId, room: usize) -> String 
     };
     let mut lines: Vec<String> = Vec::new();
     let mut used = 0;
+    let lab = |d: DriverId| {
+        state
+            .driver(d)
+            .is_some_and(|r| r.driver.purpose != x100_core::driver::Purpose::Work)
+    };
     for entry in entries.iter().rev() {
+        if lab(entry.1.driver) {
+            continue;
+        }
         let Some(line) = entry_line(&entry.1) else {
             continue;
         };

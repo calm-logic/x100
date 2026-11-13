@@ -253,6 +253,7 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
 - **v1** A skill written once can be loaded by any agent in the project.
 - **v1** Reflect now: on request, the CEO reads the log and telemetry of the last piece of work across all leads
   and workers, then compacts memories, improves existing skills, writes new ones, and proposes changes to the team.
+  It waits its turn: it is refused while the CEO is still on another task from the builder.
 - **v1** Reflection checks its notes against the log. A note the log shows to be wrong is corrected, with the
   events that show it.
 - **v1** Trial before commit, a project setting, off by default. Off, reflection commits its changes directly,

@@ -319,6 +319,7 @@ impl ProjectState {
             SettingChange::AskMeAbout(level) => settings.ask_me_about = *level,
             SettingChange::Budget(total) => settings.budget = *total,
             SettingChange::LabShare(share) => settings.lab_share = *share,
+            SettingChange::TrialBeforeCommit(on) => settings.trial_before_commit = *on,
             SettingChange::Allow { what, allowed } => {
                 if *allowed {
                     settings.allowed.insert(what.clone());

@@ -26,6 +26,7 @@ mod git;
 mod notes;
 mod repo;
 mod skills;
+mod trial;
 
 use std::path::{Path, PathBuf};
 
@@ -36,6 +37,7 @@ pub use error::{Error, Result};
 pub use notes::{Note, NoteChange, NoteHit};
 pub use repo::Target;
 pub use skills::{EXECUTIVE_SUMMARY, Seeded, Skill, builtin_section};
+pub use trial::Size;
 
 use repo::Repo;
 

@@ -13,7 +13,7 @@ use x100_core::project::SettingChange;
 use x100_proto::{
     AddCredential, ChangeProjectSetting, ConnectDecisionModel, DecideAction,
     DisconnectDecisionModel, ListMemories, ListSkills, ListTrials, LogId, LogPage, Memories, Page,
-    RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject, ReplaceCredential,
+    RaiseTask, ReadLog, Reflect, RemoveCredential, RemoveFile, RenameProject, ReplaceCredential,
     ResizeTerminal, ScopeCredential, Secret, SetAppearance, SetEffortRange, SetLeadBudget,
     SkillWritten, Skills, Trials, WriteSkill,
 };
@@ -293,5 +293,20 @@ impl Client {
 
     pub async fn list_trials(&self, project: ProjectId) -> Result<Trials, ClientError> {
         self.request(ListTrials { project }).await
+    }
+
+    /// Reflect now: the CEO is given a reflection task, which is returned.
+    pub async fn reflect(&self, project: ProjectId) -> Result<TaskId, ClientError> {
+        Ok(self.request(Reflect { project }).await?.task)
+    }
+
+    /// Turns the project's "trial before commit" setting on or off.
+    pub async fn set_trial_before_commit(
+        &self,
+        project: ProjectId,
+        on: bool,
+    ) -> Result<(), ClientError> {
+        self.change_setting(project, SettingChange::TrialBeforeCommit(on))
+            .await
     }
 }

@@ -116,6 +116,7 @@ impl Run {
                 ask_me_about: x100_core::action::AskMeAbout::HighRiskOnly,
                 budget: Money::from_dollars(5),
                 lab_share: Percent::new(10).unwrap(),
+                trial_before_commit: false,
                 allowed: Default::default(),
             },
         };
