@@ -374,6 +374,19 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Fixed on the way:** a deploy ships main, but the CEO's edit reached main only on its report, after
     which it was told to make no more calls. Deploy now refuses unmerged work and the report's reply says to
     deploy. The Team tab drew the CEO's output over its skills.
+- **The real two-part end-to-end run, 2026-11-13: passed.** `capture-e2e.sh` on the owner's logins, in
+  about four minutes, all on Codex (gpt-6-luna). Part one: "hi", the todo brief, `index.html` on main. Part
+  two: Homebox connected by "Use local" and GitHub by the local `gh`, then "Add a 'Clear completed' button,
+  then deploy it with Homebox.": the CEO made the edit, reported, asked for the deploy, the held action was
+  approved, and `https://todo-app.x100.dev` answered 200 with the button. It made the private repository
+  `aleontiev/todo-app`, the Homebox project `todo-app` and a Homebox key named `x100`.
+  - **The first attempt stalled:** the CEO tried to link to an existing Homebox project named todo-app,
+    found none and asked the builder which. The guide and `link_project` now say that a deploy with no
+    existing project named needs no link. The orchestrator's run after that change: 673 pass, 0 fail, 15
+    ignored.
+  - The screenshots and videos show the owner's GitHub account, other Homebox projects and home paths, so
+    they are kept outside the repository. Claude Code did no work in this run. `cleanup-e2e.sh` has not been
+    run against the real Homebox. The first attempt's key named `x100` is also still there.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
@@ -383,8 +396,7 @@ Nothing. Every milestone that runs on the fake harness is built.
 
 Queued, in this order:
 
-1. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
-2. M17, hardening and release. Needs real providers.
+1. M17, hardening and release. Needs real providers.
 
 ## Waiting on the owner
 

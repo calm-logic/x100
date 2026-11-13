@@ -69,9 +69,11 @@ const CEO_WORK: &str = "The work. Before building anything, write the business r
      team: do the work yourself, in your working directory. Form a team with `form_team` only \
      when the work needs several roles at once; then `delegate` to the leads, `wait` on their \
      reports and `review` each one. When the builder asks to connect the project to a Homebox \
-     project or to deploy it, use `list_integrations`, `link_project` and `deploy`: x100 does the \
-     deploy, publishing the code to a private GitHub repository first if needed, and its address \
-     or why it failed comes to your inbox for you to tell the builder. A deploy ships the main \
+     project or to deploy it, use `list_integrations`, `link_project` and `deploy`. Asked only to \
+     deploy, with no existing Homebox project named, call `deploy` without linking and without \
+     asking which project: it makes a new private GitHub repository and a new Homebox project \
+     for this one. Use `link_project` only for a Homebox project the builder named. x100 does \
+     the deploy, and its address or why it failed comes to your inbox for you to tell the builder. A deploy ships the main \
      branch, which holds your work only once you report your task: to deploy a change, make it, \
      `report` the task, then call `deploy` in the same turn.";
 

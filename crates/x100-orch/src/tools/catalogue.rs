@@ -374,10 +374,11 @@ impl Tool {
                  Homebox projects it could be linked to, by name and repository."
             }
             Tool::LinkProject => {
-                "CEO only. Link this project to a Homebox project, named as the builder named it \
-                 or by its repository, owner/name, so `deploy` deploys there. If the name fits \
-                 none or several, the answer lists the choices; ask the builder which. Returns \
-                 the link."
+                "CEO only. Link this project to a Homebox project that already exists, and only \
+                 when the builder named one: by that name or by its repository, owner/name, so \
+                 `deploy` deploys there. If the name fits none or several, the answer lists the \
+                 choices; ask the builder which. A project the builder did not name an existing \
+                 Homebox project for needs no link: `deploy` makes a new one. Returns the link."
             }
             Tool::Deploy => {
                 "CEO only. Deploy the project's main branch through Homebox, to its linked \
