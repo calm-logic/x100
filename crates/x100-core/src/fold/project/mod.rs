@@ -225,6 +225,7 @@ impl ProjectState {
                 note,
                 commit,
             } => self.memory_written(agent, note, commit, ch),
+            P::NoteRead { agent, .. } => self.note_read(agent),
             P::SkillLoaded {
                 agent,
                 skill,

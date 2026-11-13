@@ -201,13 +201,13 @@ impl LogBuilder {
                         skill,
                         version,
                         commit,
-                        trial: id,
+                        trial: Some(id),
                     }
                 }
                 TrialChange::CompactMemory { agent, .. } => ProjectEvent::MemoryCompacted {
                     agent,
                     commit,
-                    trial: id,
+                    trial: Some(id),
                 },
             };
             self.push(Actor::Daemon, event);

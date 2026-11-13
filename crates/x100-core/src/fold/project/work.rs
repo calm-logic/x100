@@ -12,7 +12,7 @@ use crate::fold::{Corrupt, Fail, Record, on, unknown};
 use crate::git::CommitId;
 use crate::id::{ActionId, AgentId, FileId, JobId, TaskId, TrialId};
 use crate::job::{self, Job, JobEvent, ProjectJob};
-use crate::memory::{NoteName, SkillRef, SkillVersion};
+use crate::memory::{NoteName, SkillRef, SkillScope, SkillVersion};
 use crate::message::Route;
 use crate::party::Party;
 use crate::spec::SpecRevision;
@@ -196,36 +196,56 @@ impl ProjectState {
         skill: &SkillRef,
         version: &SkillVersion,
         commit: &CommitId,
-        trial: &TrialId,
+        trial: &Option<TrialId>,
         ch: &mut Ch,
     ) -> Result<(), Fail> {
-        self.committed_trial(*trial)?;
+        if let Some(trial) = trial {
+            self.committed_trial(*trial)?;
+        }
         let record = SkillRecord {
             skill: skill.clone(),
             version: *version,
             commit: commit.clone(),
             trial: *trial,
         };
+        if let SkillScope::Agent(owner) = skill.scope {
+            self.agent_mut(owner)?;
+        }
         match self.skills.binary_search_by(|r| r.skill.cmp(skill)) {
             Ok(i) => self.skills[i] = record,
             Err(i) => self.skills.insert(i, record),
         }
-        ch.part(ProjectPart::Team).record(Record::Trial(*trial));
+        let part = ch.part(ProjectPart::Team);
+        if let Some(trial) = trial {
+            part.record(Record::Trial(*trial));
+        }
+        if let SkillScope::Agent(owner) = skill.scope {
+            part.record(Record::Agent(owner));
+        }
         Ok(())
     }
 
     pub(super) fn memory_compacted(
         &mut self,
         agent: &AgentId,
-        trial: &TrialId,
+        trial: &Option<TrialId>,
         ch: &mut Ch,
     ) -> Result<(), Fail> {
-        self.committed_trial(*trial)?;
+        if let Some(trial) = trial {
+            self.committed_trial(*trial)?;
+        }
         self.agent_mut(*agent)?;
-        ch.part(ProjectPart::Team)
-            .record(Record::Trial(*trial))
-            .record(Record::Agent(*agent));
+        let part = ch.part(ProjectPart::Team);
+        if let Some(trial) = trial {
+            part.record(Record::Trial(*trial));
+        }
+        part.record(Record::Agent(*agent));
         Ok(())
+    }
+
+    /// Reading a note changes nothing in the state; the event is the record, for reflection.
+    pub(super) fn note_read(&mut self, agent: &AgentId) -> Result<(), Fail> {
+        self.agent_mut(*agent).map(drop)
     }
 
     pub(super) fn task_opened(

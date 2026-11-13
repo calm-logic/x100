@@ -713,6 +713,23 @@ other than `x100-memory` touches these files, so the second engine has one place
 only writer, which is why one writer at a time is enough. The need for several arrives with more than one
 machine.
 
+**As built (M13).** `x100-memory` is the only crate that reads or writes these files.
+
+- The project's skills are one git repository at `.x100/skills/`. Each agent has its own at
+  `.x100/agents/<agent-id>/`, holding `memory/INDEX.md`, `memory/<note>.md` and `skills/<name>/SKILL.md`.
+- Agents load from `main`. A change on trial sits on a `trial/...` branch, written with git plumbing so the
+  checkout never shows it. Reads come from commits, never from the checkout, so a hand edit reaches agents
+  only once it is committed.
+- Tools: `remember` with the events a note cites, which must be in the log; `read_note`, `search_notes` and
+  `search_log`, one low-risk gate row; `load_skill`. Each note read is a `NoteRead` event and each skill load
+  a `SkillLoaded` event. `search_log` covers messages, tasks, reports, progress notes and specs, not
+  transcripts.
+- A start pack carries the note index, at most 4 KiB with the newest first, and the skills list, at most
+  6 KiB with only the always-loaded skills in full. Note bodies are never in a pack.
+- A skill or memory change committed without a trial has `trial: None` in its event. `skills.write` is the
+  builder's way to write a skill to main.
+- Memory needs the project's code directory. Before the project is set up the tools refuse.
+
 ## Evals, trials and the lab
 
 **decided (owner, 2026-11-11)** Reflection is driven by evals. The CEO uses evals, data and checks to decide

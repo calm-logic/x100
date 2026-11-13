@@ -14,8 +14,8 @@ use x100_proto::{
     AddCredential, ChangeProjectSetting, ConnectDecisionModel, DecideAction,
     DisconnectDecisionModel, ListMemories, ListSkills, ListTrials, LogId, LogPage, Memories, Page,
     RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject, ReplaceCredential,
-    ResizeTerminal, ScopeCredential, Secret, SetAppearance, SetEffortRange, SetLeadBudget, Skills,
-    Trials,
+    ResizeTerminal, ScopeCredential, Secret, SetAppearance, SetEffortRange, SetLeadBudget,
+    SkillWritten, Skills, Trials, WriteSkill,
 };
 
 use crate::{Client, ClientError};
@@ -274,6 +274,21 @@ impl Client {
         scope: Option<x100_core::memory::SkillScope>,
     ) -> Result<Skills, ClientError> {
         self.request(ListSkills { project, scope }).await
+    }
+
+    /// Writes a skill, new or changed, to the main branch as the builder.
+    pub async fn write_skill(
+        &self,
+        project: ProjectId,
+        skill: x100_core::memory::SkillRef,
+        text: String,
+    ) -> Result<SkillWritten, ClientError> {
+        self.request(WriteSkill {
+            project,
+            skill,
+            text,
+        })
+        .await
     }
 
     pub async fn list_trials(&self, project: ProjectId) -> Result<Trials, ClientError> {

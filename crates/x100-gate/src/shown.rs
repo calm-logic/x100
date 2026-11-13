@@ -205,6 +205,11 @@ fn describe(state: &ProjectState, call: &ToolCall) -> String {
         }
         T::StopProcess { name } => format!("Stop the process {}", name.0),
         T::Remember { note, .. } => format!("Save the memory note {}", note.0),
+        T::ReadNote { note } => format!("Read the memory note {}", note.0),
+        T::SearchNotes { query } => format!("Search its notes for \"{}\"", shorten(query, 120)),
+        T::SearchLog { query, .. } => {
+            format!("Search the project's log for \"{}\"", shorten(query, 120))
+        }
         T::FormTeam { leads } => {
             let roles: Vec<&str> = leads.iter().map(|l| l.role.as_str()).collect();
             format!(

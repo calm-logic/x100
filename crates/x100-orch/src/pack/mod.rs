@@ -4,9 +4,10 @@
 //! own memory of the work, so a fresh task, a wake after a long wait and a new driver after a
 //! failure all start the same way and differ only in what the records hold. A guide to the agent's
 //! position and to what its driver may do comes first, since nothing else tells a model how x100
-//! works; the sections after it follow ARCHITECTURE "What lives outside a driver". Skills have a
-//! section, which until M13 holds only the CEO's one built-in skill. Memories arrive with M13 and
-//! have no section yet.
+//! works; the sections after it follow ARCHITECTURE "What lives outside a driver". Memory and
+//! skills come from `x100-memory`: the agent's index of notes and a list of the skills it can
+//! load, each cut to a fixed size however much exists, so they add a bounded amount to the pack.
+//! The notes and the skills' texts are read with `read_note` and `load_skill`, not carried.
 //!
 //! The pack takes at most the daemon's set share of the model's context window. The transcript's
 //! older part is what gets cut, which is why the progress note matters.
@@ -41,7 +42,7 @@ const CHARS_PER_TOKEN: u64 = 4;
 const TRANSCRIPT_ENTRIES: u64 = 400;
 const RESULT_CHARS: usize = 400;
 /// How many of its finished tasks an agent's pack recalls, with their reports and last notes. A
-/// retired driver's context is gone, and this is what the next one needs of it until memories.
+/// retired driver's context is gone; this and the agent's notes are what the next one has of it.
 const RECENT_TASKS: usize = 5;
 /// How many of the latest chat messages a CEO's pack recalls, and how much of each.
 const CHAT_MESSAGES: usize = 20;
@@ -75,7 +76,7 @@ pub(crate) fn build(
         .as_ref()
         .zip(git)
         .and_then(|(base, git)| branches::diff_since(git, agent, base));
-    let mut pack = head(&state, agent, for_);
+    let mut pack = head(&state, agent, for_, git);
     let running = state.agent(agent).map(|a| &a.processes);
     if let Some(running) = running.filter(|r| !r.is_empty()) {
         pack.push_str(
@@ -107,21 +108,61 @@ pub(crate) fn build(
     pack
 }
 
-/// The skills an agent holds, each its whole `SKILL.md`. Until M13 serves skills from their
-/// repositories, the CEO holds one, built in, and nobody else holds any.
-fn skills(position: guide::Position) -> &'static [&'static str] {
+/// The skills a pack carries in full, not just lists: how the CEO writes to the builder, which
+/// applies to everything it sends and so cannot wait to be loaded.
+fn always(position: guide::Position) -> &'static [&'static str] {
     match position {
-        guide::Position::Ceo => &[EXECUTIVE_SUMMARY],
+        guide::Position::Ceo => &[x100_memory::EXECUTIVE_SUMMARY],
         guide::Position::Lead | guide::Position::Worker => &[],
     }
 }
 
-/// How the CEO writes to the builder.
-const EXECUTIVE_SUMMARY: &str =
-    include_str!("../../../x100-memory/skills/executive-summary/SKILL.md");
+/// The skills a position is not told of: the CEO's way of writing to the builder is nothing a lead
+/// or a worker uses.
+fn hidden(position: guide::Position) -> &'static [&'static str] {
+    match position {
+        guide::Position::Ceo => &[],
+        guide::Position::Lead | guide::Position::Worker => &[x100_memory::EXECUTIVE_SUMMARY],
+    }
+}
+
+/// What `x100-memory` adds to an agent's pack.
+#[derive(Default)]
+struct Memory {
+    /// The agent's index of notes, or nothing if it has none.
+    index: String,
+    skills: String,
+}
+
+/// Reads the agent's index and skills. A project without a code directory has no repositories, so
+/// it carries the built-in skills alone. Memory that cannot be read leaves the pack without it
+/// and says so, since a pack that cannot be built starts no driver.
+fn memory(git: Option<&Git>, agent: AgentId, position: guide::Position) -> Memory {
+    let always = always(position);
+    let Some(git) = git else {
+        return Memory {
+            index: String::new(),
+            skills: x100_memory::builtin_section(always),
+        };
+    };
+    let mem = x100_memory::Memory::new(git.project_dir());
+    let read = || -> x100_memory::Result<Memory> {
+        Ok(Memory {
+            index: mem.index(agent)?,
+            skills: mem.skills_section(agent, always, hidden(position))?,
+        })
+    };
+    read().unwrap_or_else(|e| {
+        eprintln!("x100: could not read {agent}'s memory for its start pack: {e}");
+        Memory {
+            index: String::new(),
+            skills: x100_memory::builtin_section(always),
+        }
+    })
+}
 
 /// Everything but the calls, the diff and the transcript.
-fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
+fn head(state: &ProjectState, agent: AgentId, for_: &Pack, git: Option<&Git>) -> String {
     let Some(a) = state.agent(agent) else {
         return String::new();
     };
@@ -175,8 +216,14 @@ fn head(state: &ProjectState, agent: AgentId, for_: &Pack) -> String {
             );
         }
         let _ = write!(p, "\nCHARTER:\n{}\n", a.charter);
-        for skill in skills(position) {
-            let _ = write!(p, "\nSKILL (follow it where it says it applies):\n{skill}");
+        let mem = memory(git, agent, position);
+        if mem.index.trim().is_empty() {
+            p.push_str("\nYOUR MEMORY: no notes yet.\n");
+        } else {
+            let _ = write!(p, "\nYOUR MEMORY:\n{}", mem.index);
+        }
+        if !mem.skills.is_empty() {
+            let _ = write!(p, "\n{}", mem.skills);
         }
         let children = state.children(agent);
         if !children.is_empty() {

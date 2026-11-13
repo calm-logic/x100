@@ -373,3 +373,50 @@ fn a_follower_sees_a_batch_whole_between_concurrent_single_appends() {
         }
     }
 }
+
+#[test]
+fn matching_finds_events_by_the_words_in_them_newest_first_and_in_pages() {
+    let recorded = fernleaf().log;
+    let dir = tempfile::tempdir().unwrap();
+    let (fake, clock) = common::clock();
+    let store = ProjectStore::open(dir.path(), clock).unwrap();
+    replay(&store.log, &fake, &recorded);
+
+    // A word from a message in the log is found in that message, whatever the case.
+    let body = recorded
+        .iter()
+        .find_map(|e| match &e.event {
+            ProjectEvent::MessageSent(m) if m.body.split_whitespace().count() > 3 => {
+                Some(m.body.clone())
+            }
+            _ => None,
+        })
+        .expect("the scenario has a message");
+    let word = body.split_whitespace().nth(1).unwrap();
+    let hits = store
+        .log
+        .matching(&[&word.to_uppercase()], None, 1000)
+        .unwrap();
+    assert!(
+        hits.iter()
+            .any(|e| matches!(&e.event, ProjectEvent::MessageSent(m) if m.body == body))
+    );
+    // Newest first, and a page ends where the next begins.
+    assert!(hits.windows(2).all(|w| w[0].seq > w[1].seq));
+    let first = store.log.matching(&[word], None, 1).unwrap();
+    let second = store.log.matching(&[word], Some(first[0].seq), 1).unwrap();
+    assert_eq!(first[0].seq, hits.iter().map(|e| e.seq).max().unwrap());
+    assert!(second[0].seq < first[0].seq);
+
+    // Every term must be there, and nothing matches a word that is not.
+    assert!(
+        store
+            .log
+            .matching(&[word, "no-such-word-anywhere"], None, 10)
+            .unwrap()
+            .is_empty()
+    );
+    // LIKE's wildcards are text, not patterns.
+    assert!(store.log.matching(&["%"], None, 10).unwrap().is_empty());
+    assert!(store.log.matching(&["_"], None, 10).unwrap().len() < recorded.len());
+}

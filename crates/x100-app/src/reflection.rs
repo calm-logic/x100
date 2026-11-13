@@ -1,9 +1,10 @@
 //! An agent's memories, skills and trials, as a small view of its own for the Team tab's view of
 //! an agent: `Reflection::new(session, project, agent, cx)` makes it, and the Team tab places it
-//! beside or under the agent's output. What exists comes from the folded state; the text of each
-//! note and skill comes from `memories.list` and `skills.list`, and `trials.list` is asked too.
-//! Where the daemon has not made one of those yet the section says so, and the names the state
-//! holds still show.
+//! beside or under the agent's output. The notes and skills are what the repositories hold, from
+//! `memories.list` and `skills.list`, asked again whenever the folded state says one changed; the
+//! state's own record of them only says when to ask, and stands in for the notes' names while the
+//! answer is on its way. Trials are not served until the lab is built (M14), so they are neither
+//! asked for nor shown.
 
 use gpui::{Context, Entity, FontWeight, SharedString, Subscription, Window, div, prelude::*, px};
 use x100_client::Change;
@@ -34,11 +35,17 @@ impl<T> Fetch<T> {
     }
 }
 
+/// Whether the daemon serves trials. It does not until M14 builds the lab, and until then the
+/// agent view leaves them out rather than say so.
+const TRIALS_SERVED: bool = false;
+
 /// What the state holds of the agent's lists, to know when to ask again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Signature {
     notes: Vec<(String, String)>,
+    /// The skills the agent has loaded, and every skill change that reached a main branch.
     skills: Vec<(SkillRef, u32)>,
+    committed: Vec<(SkillRef, u32, String)>,
     trials: Vec<(String, TrialState)>,
 }
 
@@ -55,6 +62,11 @@ impl Signature {
                 .skills
                 .iter()
                 .map(|s| (s.skill.clone(), s.version.0))
+                .collect(),
+            committed: p
+                .skills()
+                .iter()
+                .map(|s| (s.skill.clone(), s.version.0, s.commit.0.clone()))
                 .collect(),
             trials: p
                 .trials_about(agent)
@@ -151,14 +163,16 @@ impl Reflection {
                 cx.notify();
             },
         );
-        notice::run(
-            cx,
-            async move { client.list_trials(project).await },
-            |this, r, cx| {
-                this.trials = r.map_or_else(Fetch::Said, Fetch::Ready);
-                cx.notify();
-            },
-        );
+        if TRIALS_SERVED {
+            notice::run(
+                cx,
+                async move { client.list_trials(project).await },
+                |this, r, cx| {
+                    this.trials = r.map_or_else(Fetch::Said, Fetch::Ready);
+                    cx.notify();
+                },
+            );
+        }
         cx.notify();
     }
 }
@@ -260,10 +274,38 @@ fn trial_state(state: TrialState) -> &'static str {
     }
 }
 
-impl Render for Reflection {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+/// One card: a note or a skill as the view lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Card {
+    pub name: String,
+    pub subtitle: String,
+    /// The Markdown shown under it, once the daemon has answered.
+    pub body: Option<String>,
+}
+
+/// What the view lists: the agent's notes and the skills it can load.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Listed {
+    pub notes: Vec<Card>,
+    pub skills: Vec<Card>,
+}
+
+/// A skill's text without its front matter, which the card's subtitle says the useful part of.
+fn without_front_matter(text: &str) -> &str {
+    text.strip_prefix("---\n")
+        .and_then(|rest| {
+            rest.split_once("\n---\n")
+                .map(|(_, body)| body.trim_start())
+        })
+        .unwrap_or(text)
+}
+
+impl Reflection {
+    /// The cards, from the daemon's answers where it has given them and from the state's record
+    /// until then.
+    pub fn listed(&self, cx: &gpui::App) -> Listed {
         let agent = self.agent;
-        let (notes, skills, trials) = self
+        let (names, loaded) = self
             .session
             .read(cx)
             .project(self.project, |p, _| {
@@ -272,46 +314,108 @@ impl Render for Reflection {
                     a.map(|a| a.memories.keys().map(|n| n.0.clone()).collect::<Vec<_>>())
                         .unwrap_or_default(),
                     a.map(|a| a.skills.clone()).unwrap_or_default(),
-                    p.trials_about(agent).cloned().collect::<Vec<_>>(),
                 )
             })
             .unwrap_or_default();
+        let notes = match &self.memories {
+            Fetch::Ready(m) => m
+                .notes
+                .iter()
+                .map(|n| Card {
+                    name: n.name.0.clone(),
+                    subtitle: match n.sources.len() {
+                        0 => "memory note".into(),
+                        1 => "memory note \u{b7} cites 1 event".into(),
+                        k => format!("memory note \u{b7} cites {k} events"),
+                    },
+                    body: Some(n.body.clone()),
+                })
+                .collect(),
+            _ => names
+                .into_iter()
+                .map(|name| Card {
+                    name,
+                    subtitle: "memory note".into(),
+                    body: None,
+                })
+                .collect(),
+        };
+        let scope = |s: &SkillRef| match s.scope {
+            SkillScope::Shared => "shared",
+            SkillScope::Agent(_) => "its own",
+        };
+        let skills = match &self.skills {
+            Fetch::Ready(all) => all
+                .skills
+                .iter()
+                .filter(|k| match k.skill.scope {
+                    SkillScope::Shared => true,
+                    SkillScope::Agent(a) => a == agent,
+                })
+                .map(|k| {
+                    let used = loaded.iter().any(|l| l.skill == k.skill);
+                    Card {
+                        name: k.skill.name.0.clone(),
+                        subtitle: format!(
+                            "{} \u{b7} version {}{}",
+                            scope(&k.skill),
+                            k.version.0,
+                            if used { " \u{b7} loaded" } else { "" }
+                        ),
+                        body: Some(format!(
+                            "{}\n\n{}",
+                            k.description,
+                            without_front_matter(&k.body)
+                        )),
+                    }
+                })
+                .collect(),
+            _ => loaded
+                .iter()
+                .map(|l: &x100_core::fold::LoadedSkill| Card {
+                    name: l.skill.name.0.clone(),
+                    subtitle: format!("{} \u{b7} version {}", scope(&l.skill), l.version.0),
+                    body: None,
+                })
+                .collect(),
+        };
+        Listed { notes, skills }
+    }
+}
 
-        let memory_cards: Vec<_> = notes
+impl Render for Reflection {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let agent = self.agent;
+        let listed = self.listed(cx);
+        let trials = if TRIALS_SERVED {
+            self.session
+                .read(cx)
+                .project(self.project, |p, _| {
+                    p.trials_about(agent).cloned().collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let card_of = |prefix: &str, i: usize, c: &Card| {
+            let body = c.body.as_ref().map(|text| {
+                let id: SharedString = format!("{prefix}-{i}").into();
+                AnyBody(Markdown::parse(text).render(&id))
+            });
+            card(c.name.clone(), c.subtitle.clone(), body)
+        };
+        let memory_cards: Vec<_> = listed
+            .notes
             .iter()
             .enumerate()
-            .map(|(i, name)| {
-                let body = match &self.memories {
-                    Fetch::Ready(m) => m.notes.iter().find(|n| &n.name.0 == name).map(|n| {
-                        let id: SharedString = format!("note-{i}").into();
-                        AnyBody(Markdown::parse(&n.body).render(&id))
-                    }),
-                    _ => None,
-                };
-                card(name.clone(), "memory note".into(), body)
-            })
+            .map(|(i, c)| card_of("note", i, c))
             .collect();
-        let skill_cards: Vec<_> = skills
+        let skill_cards: Vec<_> = listed
+            .skills
             .iter()
             .enumerate()
-            .map(|(i, loaded)| {
-                let body = match &self.skills {
-                    Fetch::Ready(s) => s.skills.iter().find(|k| k.skill == loaded.skill).map(|k| {
-                        let id: SharedString = format!("skill-{i}").into();
-                        AnyBody(Markdown::parse(&k.body).render(&id))
-                    }),
-                    _ => None,
-                };
-                let scope = match loaded.skill.scope {
-                    SkillScope::Shared => "shared",
-                    SkillScope::Agent(_) => "its own",
-                };
-                card(
-                    loaded.skill.name.0.clone(),
-                    format!("{scope} \u{b7} version {}", loaded.version.0),
-                    body,
-                )
-            })
+            .map(|(i, c)| card_of("skill", i, c))
             .collect();
         let trial_cards: Vec<_> = trials
             .iter()
@@ -343,14 +447,20 @@ impl Render for Reflection {
             .gap(px(6.))
             .child(heading("Memories", self.memories.note()))
             .children(memory_cards)
-            .when(notes.is_empty(), |d| d.child(empty("No memory notes yet.")))
+            .when(listed.notes.is_empty(), |d| {
+                d.child(empty("No memory notes yet."))
+            })
             .child(heading("Skills", self.skills.note()))
             .children(skill_cards)
-            .when(skills.is_empty(), |d| d.child(empty("No skills loaded.")))
-            .child(heading("Trials", self.trials.note()))
-            .children(trial_cards)
-            .when(trials.is_empty(), |d| {
-                d.child(empty("No trials about this agent."))
+            .when(listed.skills.is_empty(), |d| {
+                d.child(empty("No skills yet."))
+            })
+            .when(TRIALS_SERVED, |d| {
+                d.child(heading("Trials", self.trials.note()))
+                    .children(trial_cards)
+                    .when(trials.is_empty(), |d| {
+                        d.child(empty("No trials about this agent."))
+                    })
             })
     }
 }

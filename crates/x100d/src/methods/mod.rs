@@ -8,6 +8,7 @@ mod decision;
 mod files;
 mod integrations;
 mod projects;
+mod shelf;
 
 pub(crate) use daemon::terminal_of;
 pub(crate) use integrations::without as integration_without;
@@ -101,6 +102,9 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::LinkHomebox(p) => out(integrations::link(hub, p).await),
         Call::UnlinkHomebox(p) => out(integrations::unlink(hub, p).await),
         Call::DeployProject(p) => out(integrations::deploy(hub, p).await),
+        Call::ListMemories(p) => out(shelf::memories(hub, p).await),
+        Call::ListSkills(p) => out(shelf::skills(hub, p).await),
+        Call::WriteSkill(p) => out(shelf::write_skill(hub, p).await),
         Call::Hello(_)
         | Call::Subscribe(_)
         | Call::Unsubscribe(_)

@@ -74,7 +74,9 @@ pub(crate) fn history(store: &ProjectStore, agent: AgentId, task: TaskId) -> His
     for event in events {
         match &event {
             ProjectEvent::ActionProposed(a) if a.agent == agent => {
-                if let Request::Tool { call, .. } = &a.request {
+                if let Request::Tool { call, .. } = &a.request
+                    && !Tool::of(call).reads_only()
+                {
                     history.calls.push(Call {
                         call: call.clone(),
                         result: None,

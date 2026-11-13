@@ -7,3 +7,10 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+x100-core = { path = "../x100-core" }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

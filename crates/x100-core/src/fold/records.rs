@@ -195,11 +195,11 @@ pub struct TrialRecord {
     pub commit: Option<CommitId>,
 }
 
-/// A skill change that reached the main branch, by the trial that put it there.
+/// A skill change that reached the main branch, with the trial that put it there if one did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillRecord {
     pub skill: SkillRef,
     pub version: SkillVersion,
     pub commit: CommitId,
-    pub trial: TrialId,
+    pub trial: Option<TrialId>,
 }

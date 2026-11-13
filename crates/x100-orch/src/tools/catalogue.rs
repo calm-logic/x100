@@ -26,6 +26,9 @@ pub(crate) enum Tool {
     StartProcess,
     StopProcess,
     Remember,
+    ReadNote,
+    SearchNotes,
+    SearchLog,
     FormTeam,
     SetEffort,
     SetBudget,
@@ -50,7 +53,7 @@ pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the t
      reaches your inbox.";
 
 impl Tool {
-    pub const ALL: [Tool; 26] = [
+    pub const ALL: [Tool; 29] = [
         Tool::Delegate,
         Tool::Review,
         Tool::Report,
@@ -67,6 +70,9 @@ impl Tool {
         Tool::StartProcess,
         Tool::StopProcess,
         Tool::Remember,
+        Tool::ReadNote,
+        Tool::SearchNotes,
+        Tool::SearchLog,
         Tool::FormTeam,
         Tool::SetEffort,
         Tool::SetBudget,
@@ -97,6 +103,9 @@ impl Tool {
             ToolCall::StartProcess { .. } => Tool::StartProcess,
             ToolCall::StopProcess { .. } => Tool::StopProcess,
             ToolCall::Remember { .. } => Tool::Remember,
+            ToolCall::ReadNote { .. } => Tool::ReadNote,
+            ToolCall::SearchNotes { .. } => Tool::SearchNotes,
+            ToolCall::SearchLog { .. } => Tool::SearchLog,
             ToolCall::FormTeam { .. } => Tool::FormTeam,
             ToolCall::SetEffort { .. } => Tool::SetEffort,
             ToolCall::SetBudget { .. } => Tool::SetBudget,
@@ -133,6 +142,9 @@ impl Tool {
             Tool::StartProcess => "start_process",
             Tool::StopProcess => "stop_process",
             Tool::Remember => "remember",
+            Tool::ReadNote => "read_note",
+            Tool::SearchNotes => "search_notes",
+            Tool::SearchLog => "search_log",
             Tool::FormTeam => "form_team",
             Tool::SetEffort => "set_effort",
             Tool::SetBudget => "set_budget",
@@ -166,6 +178,20 @@ impl Tool {
     /// Whether calling it does something yet. A tool a later milestone builds is not offered.
     pub fn served(self) -> bool {
         arrives_with(self).is_none()
+    }
+
+    /// Whether it only reads, so a driver that does not remember its result can ask again. The
+    /// start pack's list of calls that took effect leaves these out.
+    pub fn reads_only(self) -> bool {
+        matches!(
+            self,
+            Tool::LoadSkill
+                | Tool::ReadNote
+                | Tool::SearchNotes
+                | Tool::SearchLog
+                | Tool::ReadMemories
+                | Tool::ReadLog
+        )
     }
 
     /// After it, the agent has nothing left to do in the turn.
@@ -257,7 +283,11 @@ impl Tool {
                 "Point the project's preview at an address, such as a dev server you started, so \
                  the builder can open it. Returns the address."
             }
-            Tool::LoadSkill => "Load a skill, shared or your own, into your instructions.",
+            Tool::LoadSkill => {
+                "Load a skill, shared or your own, and read its instructions. Your start pack \
+                 lists the skills you can load, each with when to use it; load one when the work \
+                 in front of you is what it describes. Returns the skill's SKILL.md."
+            }
             Tool::StartProcess => {
                 "Start a long-running command, such as a dev server, in your sandbox, run by \
                  `sh -c` in your working directory. It is owned by the sandbox, so it keeps \
@@ -268,7 +298,28 @@ impl Tool {
                 "Stop a process you started with `start_process`, and everything it started."
             }
             Tool::Remember => {
-                "Write a note to your memory, which every later driver of yours reads."
+                "Write a note to your memory, which every later driver of yours can read. Memory \
+                 is for what you will need again and cannot get back from the project's files or \
+                 its log: what was decided and why, what you learned about how this project works, \
+                 what the builder said they want. Name the note for what it is about and write \
+                 it so someone who has lost your context can use it; quote decisions and terms \
+                 word for word. `sources` are the log events it comes from, as the numbers \
+                 `search_log` shows, so it can be checked against what happened. A note with the \
+                 same name is replaced. Returns the note's name and the commit that holds it."
+            }
+            Tool::ReadNote => {
+                "Read one of your own notes, listed in the memory index of your start pack. Read \
+                 your memory before you act on a task it may bear on. Returns the note."
+            }
+            Tool::SearchNotes => {
+                "Find your own notes by words in their name or text, for the ones your memory \
+                 index has no room to list. Returns each match's name and first line."
+            }
+            Tool::SearchLog => {
+                "Search the project's log, the record of everything said and done: messages, \
+                 tasks, reports, specs, decisions. It is the ground truth; notes only summarise \
+                 it. Every word of `query` must appear in an event. Returns the newest matches \
+                 first, each with its number, which `remember` takes as a source."
             }
             Tool::FormTeam => {
                 "CEO only. Form the first team: each lead with a role, a charter, an effort range \
@@ -285,7 +336,10 @@ impl Tool {
                  together must fit the project's. Returns the lead's id."
             }
             Tool::ReadLog => "CEO only, for reflection. Read the project's log between two points.",
-            Tool::ReadMemories => "CEO only, for reflection. Read an agent's memories.",
+            Tool::ReadMemories => {
+                "CEO only, for reflection. Read all of an agent's notes, with the events each cites. \
+                 This does not count as the agent reading them."
+            }
             Tool::ProposeChange => {
                 "CEO only, for reflection. Propose a change to a skill or a memory, put on trial, \
                  or to the team, which goes to the builder."

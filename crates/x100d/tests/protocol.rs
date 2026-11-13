@@ -344,22 +344,6 @@ async fn methods_that_later_milestones_make_real_say_which() {
             .into(),
             "M9",
         ),
-        (
-            ListMemories {
-                project: p,
-                agent: a,
-            }
-            .into(),
-            "M13",
-        ),
-        (
-            ListSkills {
-                project: p,
-                scope: None,
-            }
-            .into(),
-            "M13",
-        ),
         (Reflect { project: p }.into(), "M14"),
         (ListTrials { project: p }.into(), "M14"),
     ];
@@ -428,6 +412,9 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "projects.link_homebox",
         "projects.unlink_homebox",
         "projects.deploy",
+        "memories.list",
+        "skills.list",
+        "skills.write",
     ];
     let mut named: Vec<&str> = real.to_vec();
     named.extend(later_names);

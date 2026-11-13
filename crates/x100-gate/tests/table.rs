@@ -167,8 +167,23 @@ fn every_tool(f: &x100_core::testing::Fernleaf) -> Vec<(ToolCall, &'static str)>
             ToolCall::Remember {
                 note: x100_core::memory::NoteName("n".into()),
                 body: "b".into(),
+                sources: vec![],
             },
             "tool.routine",
+        ),
+        (
+            ToolCall::ReadNote {
+                note: x100_core::memory::NoteName("n".into()),
+            },
+            "tool.recall",
+        ),
+        (ToolCall::SearchNotes { query: "q".into() }, "tool.recall"),
+        (
+            ToolCall::SearchLog {
+                query: "q".into(),
+                limit: None,
+            },
+            "tool.recall",
         ),
         (
             ToolCall::FormTeam {
@@ -259,6 +274,9 @@ fn variant_index(call: &ToolCall) -> usize {
         ToolCall::ListIntegrations {} => 23,
         ToolCall::LinkProject { .. } => 24,
         ToolCall::Deploy { .. } => 25,
+        ToolCall::ReadNote { .. } => 26,
+        ToolCall::SearchNotes { .. } => 27,
+        ToolCall::SearchLog { .. } => 28,
     }
 }
 
@@ -268,7 +286,7 @@ fn every_tool_variant_has_a_rule() {
     let calls = every_tool(&f);
     let mut seen: Vec<usize> = calls.iter().map(|(c, _)| variant_index(c)).collect();
     seen.sort_unstable();
-    assert_eq!(seen, (0..26).collect::<Vec<_>>(), "a case per variant");
+    assert_eq!(seen, (0..29).collect::<Vec<_>>(), "a case per variant");
     for (call, expected) in calls {
         let r = ruling(&state, &tool(f.backend, call.clone()));
         assert_eq!(rule_of(&r).as_deref(), Some(expected), "{call:?}");

@@ -126,6 +126,17 @@ fn every_tool_call_round_trips_inside_an_action() {
         ToolCall::Remember {
             note: NoteName("deploys".into()),
             body: "Use the staging slot first.".into(),
+            sources: vec![x100_core::event::Seq(12), x100_core::event::Seq(40)],
+        },
+        ToolCall::ReadNote {
+            note: NoteName("deploys".into()),
+        },
+        ToolCall::SearchNotes {
+            query: "staging".into(),
+        },
+        ToolCall::SearchLog {
+            query: "staging slot".into(),
+            limit: Some(5),
         },
         ToolCall::FormTeam {
             leads: vec![LeadSpec {

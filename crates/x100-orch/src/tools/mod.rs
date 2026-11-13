@@ -10,6 +10,7 @@
 mod catalogue;
 mod integrate;
 mod later;
+mod memory;
 mod process;
 mod schema;
 mod setup;
@@ -34,6 +35,7 @@ use crate::branches::Target;
 use crate::ctx::Events;
 
 pub(crate) use catalogue::{END_THE_TURN, SET_UP, Tool};
+pub(crate) use memory::{MemoryPlan, QUERY_WORDS};
 pub(crate) use process::ProcessPlan;
 pub(crate) use schema::schema;
 pub(crate) use work::{merged, report_failed};
@@ -67,6 +69,9 @@ pub(crate) struct Plan {
     pub code_dir: Option<NewCodeDir>,
     /// A process to start or stop in the agent's sandbox before the events are appended.
     pub process: Option<ProcessPlan>,
+    /// Notes, skills or the log to read or write before the events are appended; their events
+    /// follow this plan's own.
+    pub memory: Option<MemoryPlan>,
     /// What the driver reads, when it is not made from the events.
     pub reply: Option<String>,
     /// A deploy, which the daemon does after the call returns, since it takes minutes; its result
@@ -205,11 +210,19 @@ pub(crate) fn plan(state: &ProjectState, ctx: &Ctx, call: &ToolCall) -> Result<P
             environment,
         } => integrate::link(&at, homebox_project, environment.as_deref()),
         ToolCall::Deploy { environment } => integrate::deploy(&at, environment.clone()),
-        ToolCall::LoadSkill { .. }
-        | ToolCall::Remember { .. }
-        | ToolCall::ReadLog { .. }
-        | ToolCall::ReadMemories { .. }
-        | ToolCall::ProposeChange(_) => unreachable!("answered by later::arrives_with"),
+        ToolCall::Remember {
+            note,
+            body,
+            sources,
+        } => memory::remember(&at, note, body, sources),
+        ToolCall::ReadNote { note } => memory::read_note(&at, note),
+        ToolCall::SearchNotes { query } => memory::search_notes(&at, query),
+        ToolCall::SearchLog { query, limit } => memory::search_log(&at, query, *limit),
+        ToolCall::LoadSkill { skill } => memory::load_skill(&at, skill),
+        ToolCall::ReadMemories { agent } => memory::read_memories(&at, *agent),
+        ToolCall::ReadLog { .. } | ToolCall::ProposeChange(_) => {
+            unreachable!("answered by later::arrives_with")
+        }
     }
 }
 
@@ -363,6 +376,15 @@ pub(crate) fn reply(call: &ToolCall, events: &[ProjectEvent]) -> String {
             })
         }),
         ToolCall::SetPreview { url } => json!({ "preview": url }),
+        ToolCall::Remember { .. } => events
+            .iter()
+            .find_map(|e| match e {
+                ProjectEvent::MemoryWritten { note, commit, .. } => {
+                    Some(json!({ "note": note, "commit": commit.0 }))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| json!({})),
         ToolCall::StartProcess { name, .. } => json!({ "process": name, "running": true }),
         ToolCall::StopProcess { name } => json!({ "process": name, "running": false }),
         ToolCall::SetUpProject { .. } => {

@@ -271,6 +271,21 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Not verified:** the macOS and Windows reduced-motion reads, a release build, the toggle mid-slide.
     `x100-app/tests/integrations.rs` timed out once under load in the subagent's run and passed after.
     `team/mod.rs` and `settings/mod.rs` are a little over 600 lines.
+- **M13, memory and skills.** The orchestrator's run: 587 tests pass, 0 fail, 13 ignored, clippy and fmt
+  clean, nothing left running. `x100d/tests/memory.rs`, daemon as a child process on the fake harness: an
+  agent's `remember`, `read_note` and `load_skill` round-trip through the files, and each change is a git
+  commit and an event carrying that commit; a note cannot cite an event that is not in the log; a replaced
+  driver's start pack carries the index and not the note; with 1,000 notes the pack's memory section is at
+  most 4 KiB; `search_log` finds a past message; a driver started while a skill change is only on a trial
+  branch gets main's skill, and one started after the write to main gets the new one. The app's agent page
+  shows notes and skills from the daemon.
+  - **Closed:** what an agent read in handled messages and accepted reports is no longer lost when a driver
+    is retired, provided the agent remembered it. Nothing captures it automatically; the guide tells the
+    agent to. Core no longer says skill changes are always committed by trials.
+  - **Limits:** transcripts are not searched. The 1,000-note case writes notes through the crate, not through
+    a thousand tool calls. Trials stay hidden in the app until M14, which also adds "trial before commit".
+  - `x100-app/tests/integrations.rs` has timed out three times under full-workspace load, at this commit and
+    the one before, and passed each time after. Not yet traced.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 

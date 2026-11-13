@@ -289,8 +289,8 @@ fn the_ceos_view_shows_its_terminal_drivers_screen_as_recorded() {
     assert_eq!(shown[1].terminal_of, Some(driver));
     assert!(want.iter().any(|line| !line.trim().is_empty()), "{want:#?}");
     assert!(
-        vcx.read(|cx| team.read(cx).reflection().is_none()),
-        "memories, skills and trials are not shown before their milestones"
+        vcx.read(|cx| team.read(cx).reflection().is_some()),
+        "an agent's page shows its memories and skills"
     );
 
     let attempts = provider.proxy_attempts();

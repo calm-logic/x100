@@ -446,6 +446,22 @@ fn execute(
             Err(e) => return fail(head, e),
         }
     }
+    let mut memory_events = Vec::new();
+    if let Some(memory) = &plan.memory {
+        let Some(code_dir) = w.read(|s| s.project().and_then(|p| p.code_dir.clone())) else {
+            return fail(
+                head,
+                "the project has no code directory to keep memory in".into(),
+            );
+        };
+        match crate::recall::run(&ctx.store, &code_dir, agent, memory, clock.now()) {
+            Ok(done) => {
+                reply_override = Some(done.reply);
+                memory_events = done.events;
+            }
+            Err(e) => return fail(head, e),
+        }
+    }
     if let Some(job) = plan.deploy {
         let Some(integrations) = using.integrations.clone() else {
             return fail(head, "this daemon has no integrations".into());
@@ -467,6 +483,11 @@ fn execute(
         reply_override = Some(reply);
     }
     let mut events = plan.events;
+    events.extend(
+        memory_events
+            .into_iter()
+            .map(|e| (x100_core::party::Actor::Agent(agent), e)),
+    );
     if let Some(new) = &plan.code_dir {
         match make_code_dir(new) {
             Ok(dir) => events.insert(0, (x100_core::party::Actor::Agent(agent), dir)),

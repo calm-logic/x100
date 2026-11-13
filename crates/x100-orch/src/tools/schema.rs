@@ -155,7 +155,25 @@ pub(crate) fn schema(tool: Tool) -> Value {
                 ("note", text("The note's name.")),
                 ("body", text("The note, in Markdown.")),
             ],
+            &[(
+                "sources",
+                array(
+                    count("An event's number in the log, as `search_log` shows it."),
+                    "The log events the note was drawn from.",
+                ),
+            )],
+        ),
+        Tool::ReadNote => object(
+            &[("note", text("The note's name, as the index lists it."))],
             &[],
+        ),
+        Tool::SearchNotes => object(&[("query", text("Words to find in your notes."))], &[]),
+        Tool::SearchLog => object(
+            &[("query", text("Words that must all appear in an event."))],
+            &[(
+                "limit",
+                count("How many matches, at most. Ten if left out."),
+            )],
         ),
         Tool::FormTeam => object(
             &[(

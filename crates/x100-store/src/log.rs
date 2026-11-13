@@ -196,6 +196,64 @@ impl<S: Folded> EventLog<S> {
         read::<S::Event>(&self.shared().conn, Dir::Before(before), limit)
     }
 
+    /// Up to `limit` events before `before` (from the end for `None`), newest first, whose stored
+    /// text holds every one of `terms`, ignoring ASCII case. The text is the event as JSON, so a
+    /// term matches inside any string the event carries and a quote or newline in it is looked for
+    /// in its escaped form. This is the plain scan the log search starts from; the caller drops
+    /// the kinds of event it does not want and asks again from the last `seq` it saw.
+    pub fn matching(
+        &self,
+        terms: &[&str],
+        before: Option<Seq>,
+        limit: usize,
+    ) -> Result<Vec<Envelope<S::Event>>> {
+        let mut sql = String::from("SELECT seq, at, by, event FROM events WHERE seq < ?1");
+        let mut args: Vec<String> = Vec::new();
+        for (i, term) in terms.iter().enumerate() {
+            // Escaped for JSON first, then for LIKE, whose wildcards would otherwise match text.
+            let json = serde_json::to_string(term).expect("a string serialises");
+            let json = &json[1..json.len() - 1];
+            let like = json
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            sql.push_str(&format!(" AND event LIKE ?{} ESCAPE '\\'", i + 3));
+            args.push(format!("%{like}%"));
+        }
+        sql.push_str(" ORDER BY seq DESC LIMIT ?2");
+        let sh = self.shared();
+        let mut stmt = sh.conn.prepare(&sql)?;
+        let mut params: Vec<rusqlite::types::Value> = vec![
+            before.map_or(i64::MAX, |s| s.0 as i64).into(),
+            (limit as i64).into(),
+        ];
+        params.extend(args.into_iter().map(Into::into));
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, at, by, event) = row?;
+            let bad = |source| Error::Undecodable {
+                table: "events",
+                row: seq as u64,
+                source,
+            };
+            out.push(Envelope {
+                seq: Seq(seq as u64),
+                at: x100_core::time::Timestamp::from_millis(at as u64),
+                by: serde_json::from_str(&by).map_err(bad)?,
+                event: serde_json::from_str(&event).map_err(bad)?,
+            });
+        }
+        Ok(out)
+    }
+
     /// The state now, and a receiver of every event appended after it.
     pub fn snapshot_and_follow(&self) -> (S, Follow<S::Event>) {
         let mut sh = self.shared();

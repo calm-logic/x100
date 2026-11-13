@@ -11,7 +11,7 @@ use x100_core::action::{AskMeAbout, Decision};
 use x100_core::appearance::{Appearance, Hue, Outline};
 use x100_core::credential::{CredentialScope, Projects};
 use x100_core::effort::{Effort, EffortRange};
-use x100_core::event::Envelope;
+use x100_core::event::{Envelope, Seq};
 use x100_core::file::{ContentHash, FileRef};
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::git::CommitId;
@@ -597,6 +597,8 @@ pub fn samples() -> Vec<Sample> {
                 notes: vec![MemoryNote {
                     name: NoteName("deploys.md".into()),
                     commit: CommitId("4b825dc642cb6eb9a060e54bf8d69288fbee4904".into()),
+                    written: Timestamp::from_millis(1_794_387_601_000),
+                    sources: vec![Seq(12), Seq(40)],
                     body: "Deploys go through `make ship`.".into(),
                 }],
             },
@@ -613,8 +615,24 @@ pub fn samples() -> Vec<Sample> {
                         name: SkillName("deploy".into()),
                     },
                     version: SkillVersion(3),
-                    body: "---\nname: deploy\nversion: 3\n---\n".into(),
+                    description: "How to deploy.".into(),
+                    body: "---\nname: deploy\ndescription: How to deploy.\nversion: 3\n---\n"
+                        .into(),
                 }],
+            },
+        ),
+        s(
+            WriteSkill {
+                project: prj,
+                skill: SkillRef {
+                    scope: SkillScope::Shared,
+                    name: SkillName("deploy".into()),
+                },
+                text: "---\nname: deploy\ndescription: How to deploy.\n---\n".into(),
+            },
+            SkillWritten {
+                version: SkillVersion(4),
+                commit: CommitId("4b825dc642cb6eb9a060e54bf8d69288fbee4904".into()),
             },
         ),
         s(ListTrials { project: prj }, Trials { trials: vec![] }),

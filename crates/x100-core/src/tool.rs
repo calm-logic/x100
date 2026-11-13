@@ -98,9 +98,28 @@ pub enum ToolCall {
     StopProcess {
         name: ProcessName,
     },
+    /// Write a note to the agent's own memory. `sources` are the events it was drawn from, so
+    /// reflection can check the note against what happened.
     Remember {
         note: NoteName,
         body: String,
+        #[serde(default)]
+        sources: Vec<Seq>,
+    },
+    /// Read one of the agent's own notes. Each read is an event, so reflection knows what is used.
+    ReadNote {
+        note: NoteName,
+    },
+    /// Find the agent's own notes by what they say, for the ones its index has no room to list.
+    SearchNotes {
+        query: String,
+    },
+    /// Search the project's event log, where messages, tasks and reports are the ground truth that
+    /// notes sit on. Any agent may.
+    SearchLog {
+        query: String,
+        #[serde(default)]
+        limit: Option<u32>,
     },
     /// The CEO only. The first team needs no approval.
     FormTeam {

@@ -7917,6 +7917,11 @@ version = "0.0.0"
 [[package]]
 name = "x100-memory"
 version = "0.0.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.21",
+ "x100-core",
+]
 
 [[package]]
 name = "x100-orch"
@@ -7943,6 +7948,7 @@ dependencies = [
  "x100-gate",
  "x100-integrations",
  "x100-jobs",
+ "x100-memory",
  "x100-router",
  "x100-sandbox",
  "x100-store",
@@ -8055,6 +8061,7 @@ dependencies = [
  "x100-drivers",
  "x100-integrations",
  "x100-jobs",
+ "x100-memory",
  "x100-orch",
  "x100-proto",
  "x100-router",

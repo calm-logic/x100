@@ -101,6 +101,13 @@ table! {
         Low,
         "Changes the project's own records and nothing outside it.",
     );
+    RECALL = row(
+        "tool.recall",
+        "read_note, search_notes, search_log",
+        Other,
+        Low,
+        "Reads the agent's own notes or the project's log, which the agent may already see, and changes nothing.",
+    );
     DELEGATE = row(
         "tool.delegate",
         "delegate, at any effort below Max",

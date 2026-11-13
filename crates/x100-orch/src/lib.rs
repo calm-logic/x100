@@ -41,11 +41,13 @@ mod mcp;
 pub mod pack;
 mod processes;
 mod project;
+mod recall;
 mod recover;
 mod redact;
 mod route;
 mod sandbox;
 mod settle;
+mod shelf;
 mod spec;
 mod store;
 mod tools;
@@ -307,6 +309,38 @@ impl Orchestrator {
     ) -> Result<TaskId, Refused> {
         let ctx = self.ctx(project)?;
         blocking(move || builder::raise_task(&ctx, title, ask, part, attachments)).await
+    }
+
+    /// An agent's notes as they stand on its main branch, newest first.
+    pub async fn memories(
+        &self,
+        project: ProjectId,
+        agent: AgentId,
+    ) -> Result<Vec<x100_memory::Note>, Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || shelf::memories(&ctx, agent)).await
+    }
+
+    /// The skills of one scope on main, or all of them for `None`.
+    pub async fn skills(
+        &self,
+        project: ProjectId,
+        scope: Option<x100_core::memory::SkillScope>,
+    ) -> Result<Vec<x100_memory::Skill>, Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || shelf::skills(&ctx, scope)).await
+    }
+
+    /// The builder writes a skill, new or changed, to the main branch. It is a commit and an
+    /// event, and agents started afterwards load it.
+    pub async fn write_skill(
+        &self,
+        project: ProjectId,
+        skill: x100_core::memory::SkillRef,
+        text: String,
+    ) -> Result<(x100_core::memory::SkillVersion, x100_core::git::CommitId), Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || shelf::write_skill(&ctx, skill, text)).await
     }
 
     /// The builder cancels a job. Any wait on it ends.

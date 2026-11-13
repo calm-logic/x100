@@ -191,7 +191,7 @@ fn an_agents_view_shows_its_skills_and_the_trials_about_them() {
     let discarded = s.trial(f.discarded_trial).unwrap();
     assert_eq!(discarded.state, TrialState::Discarded);
     assert_eq!(s.skills().len(), 1);
-    assert_eq!(s.skills()[0].trial, f.committed_trial);
+    assert_eq!(s.skills()[0].trial, Some(f.committed_trial));
 }
 
 #[test]

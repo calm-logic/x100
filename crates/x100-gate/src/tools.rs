@@ -68,6 +68,7 @@ pub fn rule(
             }
         }
         T::SetBudget { lead, budget } => return budget_rule(state, *lead, *budget),
+        T::ReadNote { .. } | T::SearchNotes { .. } | T::SearchLog { .. } => &rule::RECALL,
         T::ListIntegrations {} => &rule::LIST_INTEGRATIONS,
         T::LinkProject { .. } => &rule::LINK_PROJECT,
         // Pushing to a repository x100 has not made yet means making it first.

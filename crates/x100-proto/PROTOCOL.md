@@ -1737,7 +1737,12 @@ Errors: not_found
     {
       "body": "Deploys go through `make ship`.",
       "commit": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-      "name": "deploys.md"
+      "name": "deploys.md",
+      "sources": [
+        12,
+        40
+      ],
+      "written": 1794387601000
     }
   ]
 }
@@ -1762,7 +1767,8 @@ Errors: not_found
 {
   "skills": [
     {
-      "body": "---\nname: deploy\nversion: 3\n---\n",
+      "body": "---\nname: deploy\ndescription: How to deploy.\nversion: 3\n---\n",
+      "description": "How to deploy.",
       "skill": {
         "name": "deploy",
         "scope": "shared"
@@ -1770,6 +1776,32 @@ Errors: not_found
       "version": 3
     }
   ]
+}
+```
+
+### `skills.write`
+
+Writes a skill, new or changed, to the main branch as the builder. It is a git commit and an event, and agents started after it load the new text.
+
+Params type `WriteSkill`, result type `SkillWritten`.
+
+Errors: not_found, rejected, wrong_state
+
+```json params
+{
+  "project": "prj_01M74XBRM00000000000000001",
+  "skill": {
+    "name": "deploy",
+    "scope": "shared"
+  },
+  "text": "---\nname: deploy\ndescription: How to deploy.\n---\n"
+}
+```
+
+```json result
+{
+  "commit": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  "version": 4
 }
 ```
 

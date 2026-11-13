@@ -62,14 +62,9 @@ fn endpoint(w: &World, driver: DriverId) -> ToolEndpoint {
 }
 
 /// The tools a later milestone builds, which do nothing yet.
-const LATER: [&str; 5] = [
-    "load_skill",
-    "remember",
+const LATER: [&str; 2] = ["read_log", "propose_change"];
+const CEO_ONLY: [&str; 8] = [
     "read_memories",
-    "read_log",
-    "propose_change",
-];
-const CEO_ONLY: [&str; 7] = [
     "form_team",
     "set_effort",
     "set_budget",
@@ -201,7 +196,7 @@ async fn two_drivers_reach_their_own_tools_over_http_at_once() {
     expected.sort();
     got.sort();
     assert_eq!(got, expected, "a lead gets every other tool the CEO gets");
-    assert_eq!(ceo_names.len(), 21);
+    assert_eq!(ceo_names.len(), 27);
 
     assert_eq!(parsed(&spec)["revision"], 1);
     assert_eq!(parsed(&update)["task"], json!(tech_task));

@@ -154,6 +154,7 @@ pub fn fernleaf() -> Fernleaf {
             ToolCall::Remember {
                 note: NoteName("auth".into()),
                 body: "Sessions in KV.".into(),
+                sources: vec![],
             },
             |b| {
                 let event = ProjectEvent::MemoryWritten {

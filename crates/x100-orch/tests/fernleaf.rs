@@ -178,7 +178,7 @@ async fn fernleaf_runs_as_an_organisation() {
     let ceo_pack = first_pack(ceo);
     assert!(
         ceo_pack.contains(
-            "\nSKILL (follow it where it says it applies):\n---\nname: executive-summary\n"
+            "\nSKILL executive-summary (follow it where it says it applies):\n---\nname: executive-summary\n"
         ),
         "{ceo_pack}"
     );

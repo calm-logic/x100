@@ -293,7 +293,24 @@ fn samples(tool: Tool) -> Vec<ToolCall> {
         Tool::Remember => vec![ToolCall::Remember {
             note: NoteName("stack".into()),
             body: "We use Vite.".into(),
+            sources: vec![Seq(3), Seq(9)],
         }],
+        Tool::ReadNote => vec![ToolCall::ReadNote {
+            note: NoteName("stack".into()),
+        }],
+        Tool::SearchNotes => vec![ToolCall::SearchNotes {
+            query: "vite".into(),
+        }],
+        Tool::SearchLog => vec![
+            ToolCall::SearchLog {
+                query: "vite".into(),
+                limit: Some(5),
+            },
+            ToolCall::SearchLog {
+                query: "vite".into(),
+                limit: None,
+            },
+        ],
         Tool::FormTeam => vec![ToolCall::FormTeam {
             leads: vec![lead(), lead()],
         }],

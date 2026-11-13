@@ -124,6 +124,12 @@ pub enum ProjectEvent {
         note: NoteName,
         commit: CommitId,
     },
+    /// An agent opened one of its notes, as the commit stood on its main branch then.
+    NoteRead {
+        agent: AgentId,
+        note: NoteName,
+        commit: CommitId,
+    },
     SkillLoaded {
         agent: AgentId,
         skill: SkillRef,
@@ -134,18 +140,21 @@ pub enum ProjectEvent {
         trial: TrialId,
         event: TrialEvent,
     },
-    /// A skill change reached the main branch. Only a committed trial does that.
+    /// A skill change reached the main branch. `trial` is the committed trial that put it there,
+    /// or `None` for a change committed directly: the builder's, or reflection's with the
+    /// project's "trial before commit" setting off.
     SkillCommitted {
         skill: SkillRef,
         version: SkillVersion,
         commit: CommitId,
-        trial: TrialId,
+        trial: Option<TrialId>,
     },
-    /// A memory compaction reached the main branch. Only a committed trial does that.
+    /// A memory compaction reached the main branch, by a committed trial or, as for a skill,
+    /// directly.
     MemoryCompacted {
         agent: AgentId,
         commit: CommitId,
-        trial: TrialId,
+        trial: Option<TrialId>,
     },
 
     CredentialUsed(CredentialUse),

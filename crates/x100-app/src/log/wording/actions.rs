@@ -63,6 +63,9 @@ fn tool(n: &Names, call: &ToolCall) -> String {
         ToolCall::StartProcess { command, .. } => format!("start {command}"),
         ToolCall::StopProcess { name } => format!("stop {}", name.0),
         ToolCall::Remember { note, .. } => format!("write the memory note {}", note.0),
+        ToolCall::ReadNote { note } => format!("read the memory note {}", note.0),
+        ToolCall::SearchNotes { query } => format!("search its notes for {}", quote(query)),
+        ToolCall::SearchLog { query, .. } => format!("search the log for {}", quote(query)),
         ToolCall::FormTeam { leads } => format!("form a team of {} leads", leads.len()),
         ToolCall::SetEffort { agent, .. } => format!("change {}'s effort range", n.agent(*agent)),
         ToolCall::SetBudget { lead, budget } => {

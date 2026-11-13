@@ -33,9 +33,6 @@ pub use row::{AgentHeader, AgentModel, AgentRow, RowEvent};
 
 use crate::reflection::Reflection;
 
-/// Whether the daemon serves an agent's memories, skills and trials. It does not until M13 and
-/// M14 build them, and until then the agent view leaves them out rather than say so three times.
-const REFLECTION_SERVED: bool = false;
 use crate::session::{Session, SessionEvent};
 use crate::{face, theme, widgets, words};
 
@@ -273,9 +270,7 @@ impl TeamView {
         {
             let reflection = session.clone();
             self.output = Some(cx.new(|cx| AgentOutput::new(session, project, agent, cx)));
-            // Memories, skills and trials are mounted once their milestones build them.
-            self.reflection = REFLECTION_SERVED
-                .then(|| cx.new(|cx| Reflection::new(reflection, project, agent, cx)));
+            self.reflection = Some(cx.new(|cx| Reflection::new(reflection, project, agent, cx)));
         } else if !wants_output {
             self.output = None;
             self.reflection = None;

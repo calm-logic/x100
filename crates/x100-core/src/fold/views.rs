@@ -145,7 +145,7 @@ impl ProjectState {
         self.trials.get(&id)
     }
 
-    /// Skill changes committed by trials, the latest per skill.
+    /// Skill changes that reached a main branch, by a trial or directly, the latest per skill.
     pub fn skills(&self) -> &[SkillRecord] {
         &self.skills
     }

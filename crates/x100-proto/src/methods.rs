@@ -313,6 +313,10 @@ methods! {
     /// Skills with their text: shared ones, or one scope's.
     ListSkills, "skills.list", ListSkills => Skills, [NotFound];
 
+    /// Writes a skill, new or changed, to the main branch as the builder. It is a git commit and
+    /// an event, and agents started after it load the new text.
+    WriteSkill, "skills.write", WriteSkill => SkillWritten, [NotFound, Rejected, WrongState];
+
     /// Reflection's trials with both arms' runs and scores.
     ListTrials, "trials.list", ListTrials => Trials, [NotFound];
 }

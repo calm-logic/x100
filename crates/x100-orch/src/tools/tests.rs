@@ -11,7 +11,6 @@ use x100_core::file::ContentHash;
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, JobId, TaskId};
 use x100_core::job::{Interval, Schedule};
-use x100_core::memory::NoteName;
 use x100_core::money::{Money, Percent};
 use x100_core::process::ProcessName;
 use x100_core::settings::DaemonSettings;
@@ -604,14 +603,6 @@ fn tools_of_later_milestones_say_which_one() {
     let s = scene();
     let cases = [
         (
-            ToolCall::Remember {
-                note: NoteName("auth".into()),
-                body: "KV.".into(),
-            },
-            "M13",
-        ),
-        (ToolCall::ReadMemories { agent: s.f.tech }, "M13"),
-        (
             ToolCall::ReadLog {
                 from: Seq(1),
                 to: None,
@@ -635,3 +626,5 @@ fn tools_of_later_milestones_say_which_one() {
         );
     }
 }
+
+mod memory;

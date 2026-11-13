@@ -326,7 +326,11 @@ impl Actor_ {
             window_tokens: window,
             share_percent: share,
         };
-        blocking(move || pack::build(&ctx.store, ctx.git().as_ref(), agent, &pack)).await
+        blocking(move || {
+            crate::recall::ensure_shared(&ctx);
+            pack::build(&ctx.store, ctx.git().as_ref(), agent, &pack)
+        })
+        .await
     }
 
     async fn event(&self, event: DriverEvent) -> Result<(), String> {

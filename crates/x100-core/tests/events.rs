@@ -333,6 +333,11 @@ fn project_events() -> Vec<ProjectEvent> {
             note: NoteName("stack".into()),
             commit: commit(),
         },
+        P::NoteRead {
+            agent: agent(1),
+            note: NoteName("stack".into()),
+            commit: commit(),
+        },
         P::SkillLoaded {
             agent: agent(1),
             skill: skill(),
@@ -380,12 +385,12 @@ fn project_events() -> Vec<ProjectEvent> {
             skill: skill(),
             version: SkillVersion(3),
             commit: commit(),
-            trial: TrialId::from_u128(1),
+            trial: Some(TrialId::from_u128(1)),
         },
         P::MemoryCompacted {
             agent: agent(1),
             commit: commit(),
-            trial: TrialId::from_u128(2),
+            trial: Some(TrialId::from_u128(2)),
         },
         P::CredentialUsed(CredentialUse {
             credential: CredentialRef::from_u128(1),
@@ -544,6 +549,7 @@ fn project_variant(e: &ProjectEvent) -> &'static str {
         P::FileAdded(_) => "FileAdded",
         P::FileRemoved { .. } => "FileRemoved",
         P::MemoryWritten { .. } => "MemoryWritten",
+        P::NoteRead { .. } => "NoteRead",
         P::SkillLoaded { .. } => "SkillLoaded",
         P::TrialProposed(_) => "TrialProposed",
         P::Trial { .. } => "Trial",
@@ -595,7 +601,7 @@ where
 
 #[test]
 fn every_project_event_round_trips() {
-    round_trip(&project_events(), project_variant, 34);
+    round_trip(&project_events(), project_variant, 35);
 }
 
 #[test]

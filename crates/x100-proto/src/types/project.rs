@@ -239,8 +239,13 @@ pub struct ListMemories {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryNote {
     pub name: NoteName,
-    /// The commit that last wrote it.
+    /// The commit the agent's main branch was at when the note was read.
     pub commit: CommitId,
+    /// When the note was last written.
+    pub written: x100_core::time::Timestamp,
+    /// The log events the note was drawn from.
+    pub sources: Vec<x100_core::event::Seq>,
+    /// The note's text, without its front matter.
     pub body: String,
 }
 
@@ -260,8 +265,26 @@ pub struct ListSkills {
 pub struct SkillInfo {
     pub skill: SkillRef,
     pub version: SkillVersion,
+    /// When to use it, from its front matter.
+    pub description: String,
     /// The skill's `SKILL.md`.
     pub body: String,
+}
+
+/// A skill, new or changed, written to the main branch as the builder. Its front matter must
+/// name the skill and say when to use it; `version` is set by the daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteSkill {
+    pub project: ProjectId,
+    pub skill: SkillRef,
+    /// The whole `SKILL.md`.
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillWritten {
+    pub version: SkillVersion,
+    pub commit: CommitId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

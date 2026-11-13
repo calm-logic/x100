@@ -16,7 +16,9 @@ pub(super) fn guide(position: Position) -> String {
         Position::Ceo => format!("{SET_UP}\n\n"),
         _ => String::new(),
     };
-    format!("{who}\n\n{TURNS}\n\n{talk}\n\n{set_up}{work}\n\n{task} {TASK} {report}\n\n{IDS}\n")
+    format!(
+        "{who}\n\n{TURNS}\n\n{talk}\n\n{set_up}{work}\n\n{task} {TASK} {report}\n\n{MEMORY}\n\n{IDS}\n"
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +92,17 @@ const CEO_REPORT: &str = "When you report the builder's task, your work is merge
 
 const MEMBER_REPORT: &str = "When you report, your work goes to your delegator, who accepts it \
      into its own branch or sends it back.";
+
+const MEMORY: &str = "Memory. YOUR MEMORY below indexes the notes you wrote in earlier turns, \
+     for drivers that came before this one and tasks that are over. Read the ones that bear on \
+     your work with `read_note` before you act on it; `search_notes` finds the notes the index \
+     has no room for, and `search_log` searches everything said and done in the project, which \
+     is the ground truth. `remember` what you will need again and cannot get back from the \
+     files or the log: what was decided and why, how this project works, what the builder wants. \
+     Quote decisions and terms word for word, and give the log events a note comes from. Your \
+     context is replaced when your driver is: what a message or a report told you that your task's \
+     progress note does not hold survives only as a note. Skills are listed below; \
+     `load_skill` reads one when the work is what it describes.";
 
 const IDS: &str = "Ids. Use only ids you were given: here, in a turn's input or in a tool's \
      result. Never make one up.";

@@ -251,7 +251,7 @@ fn a_skill_change_without_a_committed_trial_is_an_error() {
         skill: x100_core::testing::deploy_skill(),
         version: SkillVersion(4),
         commit: CommitId("c".into()),
-        trial: f.discarded_trial,
+        trial: Some(f.discarded_trial),
     };
     let (mut state, e) = appended(&f, Actor::Daemon, event);
     assert_eq!(
@@ -262,9 +262,48 @@ fn a_skill_change_without_a_committed_trial_is_an_error() {
     let event = ProjectEvent::MemoryCompacted {
         agent: f.tech,
         commit: CommitId("c".into()),
-        trial: TrialId::from_u128(404),
+        trial: Some(TrialId::from_u128(404)),
     };
     let (mut state, e) = appended(&f, Actor::Daemon, event);
+    assert_eq!(state.apply(&e).unwrap_err().cause, Corrupt::Unknown);
+}
+
+#[test]
+fn a_direct_skill_change_needs_no_trial_and_a_trial_it_names_must_be_committed() {
+    let f = fernleaf();
+    let direct = ProjectEvent::SkillCommitted {
+        skill: x100_core::testing::deploy_skill(),
+        version: SkillVersion(9),
+        commit: CommitId("c".into()),
+        trial: None,
+    };
+    let (mut state, e) = appended(&f, Actor::Daemon, direct);
+    state.apply(&e).expect("a direct commit is accepted");
+    assert_eq!(state.skills().last().unwrap().trial, None);
+    let compaction = ProjectEvent::MemoryCompacted {
+        agent: f.tech,
+        commit: CommitId("c".into()),
+        trial: None,
+    };
+    let (mut state, e) = appended(&f, Actor::Daemon, compaction);
+    state.apply(&e).expect("so is a direct compaction");
+}
+
+#[test]
+fn a_note_read_by_an_agent_that_is_not_on_the_team_is_an_error() {
+    let f = fernleaf();
+    let read = |agent| ProjectEvent::NoteRead {
+        agent,
+        note: x100_core::memory::NoteName("auth".into()),
+        commit: CommitId("c".into()),
+    };
+    let (mut state, e) = appended(&f, Actor::Daemon, read(f.tech));
+    state.apply(&e).expect("a read by a member");
+    let (mut state, e) = appended(
+        &f,
+        Actor::Daemon,
+        read(x100_core::id::AgentId::from_u128(404)),
+    );
     assert_eq!(state.apply(&e).unwrap_err().cause, Corrupt::Unknown);
 }
 

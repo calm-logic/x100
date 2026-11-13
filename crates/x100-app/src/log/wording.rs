@@ -280,6 +280,9 @@ fn text(event: &ProjectEvent, n: &Names) -> String {
         P::MemoryWritten { agent, note, .. } => {
             format!("Wrote the memory note {} for {}", note.0, n.agent(*agent))
         }
+        P::NoteRead { agent, note, .. } => {
+            format!("{} read the memory note {}", n.agent(*agent), note.0)
+        }
         P::SkillLoaded {
             agent,
             skill,
@@ -292,11 +295,22 @@ fn text(event: &ProjectEvent, n: &Names) -> String {
         ),
         P::TrialProposed(t) => format!("Proposed a trial: {}", trial_change(n, &t.change)),
         P::Trial { trial, event } => trial_event(n, *trial, event),
-        P::SkillCommitted { skill, version, .. } => format!(
-            "Committed version {} of the skill {}",
-            version.0, skill.name.0
+        P::SkillCommitted {
+            skill,
+            version,
+            trial,
+            ..
+        } => format!(
+            "Committed version {} of the skill {}{}",
+            version.0,
+            skill.name.0,
+            if trial.is_some() { "" } else { " directly" }
         ),
-        P::MemoryCompacted { agent, .. } => format!("Compacted {}'s memory", n.agent(*agent)),
+        P::MemoryCompacted { agent, trial, .. } => format!(
+            "Compacted {}'s memory{}",
+            n.agent(*agent),
+            if trial.is_some() { "" } else { " directly" }
+        ),
         P::CredentialUsed(u) => {
             let name = n
                 .daemon
