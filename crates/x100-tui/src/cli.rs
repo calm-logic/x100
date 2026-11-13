@@ -207,6 +207,26 @@ pub async fn run(client: Client, command: Command, remember: &Remember) -> Resul
             });
             rows.iter().try_for_each(|r| out(r))
         }
+        // A line for each, connected or not, so a script can wait on one with grep.
+        Command::Integrations => {
+            let rows = client.with_state(|s| {
+                let settings = s.daemon.settings();
+                let homebox = match &settings.homebox {
+                    Some(c) => format!(
+                        "homebox\tconnected\t{}\t{}",
+                        field(&c.address),
+                        field(c.primary_domain.as_deref().unwrap_or("-"))
+                    ),
+                    None => "homebox\tnot connected\t-\t-".to_owned(),
+                };
+                let github = match &settings.github {
+                    Some(g) => format!("github\tconnected\t{}", field(&g.account)),
+                    None => "github\tnot connected\t-".to_owned(),
+                };
+                [homebox, github]
+            });
+            rows.iter().try_for_each(|r| out(r))
+        }
         Command::Decide {
             project,
             action,

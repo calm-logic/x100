@@ -18,7 +18,7 @@ use x100_proto::{
 
 use crate::common::{DaemonProc, Env, WAIT, create_project};
 use crate::standin;
-use crate::standin::homebox::{ACCOUNT, HomeboxStandIn};
+use crate::standin::homebox::{self, ACCOUNT, HomeboxStandIn};
 
 /// Invented for these tests; none opens anything anywhere.
 pub const LOCAL_KEY: &str = "hbk_minted_by_the_standin_8c2f4a9d1e7b";
@@ -40,6 +40,21 @@ price = { input = 1.0, output = 5.0 }
 when = { input_contains = "LINK" }
 repeat = true
 steps = [{ call = { link_project = { homebox_project = "{{input:Homebox}}" } } }]
+
+# A change and its deploy, asked together as the project's brief: the deploy is tried before the
+# report, as a model might, and again after it.
+[[turn]]
+when = { start_pack_contains = "PROJECT: not set up yet", input_contains = "CHANGE AND DEPLOY" }
+steps = [{ call = { set_up_project = { name = "changed", intent = "A page.", brief = "CHANGE AND DEPLOY" } } }]
+
+[[turn]]
+when = { input_contains = "CHANGE AND DEPLOY" }
+steps = [
+  { write = "index.html", content = "<h1>changed</h1>" },
+  { call = { deploy = {} } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Changed." } } },
+  { call = { deploy = {} } },
+]
 
 [[turn]]
 when = { input_contains = "DEPLOY" }
@@ -106,8 +121,12 @@ impl Rig {
                 });
             }
         });
-        script(&bin, "docker", &docker(has.local, hb.port, &bin));
-        script(&bin, "gh", &gh(has.gh, &remotes, &bin));
+        script(
+            &bin,
+            "docker",
+            &homebox::docker_program(has.local, hb.port, &bin, LOCAL_KEY),
+        );
+        script(&bin, "gh", &homebox::gh_program(has.gh, &remotes, &bin));
         let resolve = [REMOTE_HOST, "github.com", "api.github.com"]
             .map(|h| format!("{h}=127.0.0.1:{tls_port}"))
             .join(",");
@@ -166,42 +185,6 @@ pub fn script(dir: &Path, name: &str, body: &str) {
     let path = dir.join(name);
     std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-}
-
-/// `docker port` names the stand-in's port when the container is "running"; `docker exec` logs
-/// its first six arguments, the command without the script, and prints a key.
-pub fn docker(running: bool, port: u16, bin: &Path) -> String {
-    let log = bin.join("docker.log");
-    let port_line = if running {
-        format!("echo 127.0.0.1:{port}; exit 0")
-    } else {
-        "echo 'Error: No such container: homebox-admin' >&2; exit 1".into()
-    };
-    format!(
-        "case \"$1\" in\n\
-         port) [ \"$2 $3\" = 'homebox-admin 8000/tcp' ] || exit 1; {port_line};;\n\
-         exec) echo \"$1 $2 $3 $4 $5 $6\" >> '{log}'; echo '{LOCAL_KEY}'; exit 0;;\n\
-         esac\nexit 1\n",
-        log = log.display()
-    )
-}
-
-/// `gh`, logged in as the stand-in's account, or not logged in at all.
-pub fn gh(logged_in: bool, remotes: &Path, bin: &Path) -> String {
-    if !logged_in {
-        return "echo 'You are not logged into any GitHub hosts.' >&2\nexit 1\n".into();
-    }
-    format!(
-        "echo \"$*\" >> '{log}'\n\
-         case \"$1 $2\" in\n\
-         'auth status') exit 0;;\n\
-         'api user') echo {ACCOUNT}; exit 0;;\n\
-         'repo create') mkdir -p '{remotes}/'\"$(dirname \"$3\")\" && git init -q --bare -b main '{remotes}/'\"$3\".git; exit $?;;\n\
-         'auth git-credential') exit 0;;\n\
-         esac\nexit 1\n",
-        log = bin.join("gh.log").display(),
-        remotes = remotes.display()
-    )
 }
 
 pub struct Project {

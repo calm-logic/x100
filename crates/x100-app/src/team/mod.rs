@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 use gpui::{
     AnyElement, Context, Entity, Focusable, FontWeight, StyleRefinement, Subscription, Window, div,
-    prelude::*, px,
+    prelude::*, px, relative,
 };
 use x100_client::Change;
 use x100_core::fold::{ProjectPart, ProjectState};
@@ -524,12 +524,29 @@ impl TeamView {
                 .flex()
                 .flex_col()
                 .debug_selector(|| "drill-output".into())
-                .child(div().flex_1().min_h_0().w_full().child(output.clone()))
-                .children(
-                    self.reflection
-                        .clone()
-                        .map(|r| div().flex_none().w_full().child(r)),
+                .child(
+                    div()
+                        .debug_selector(|| "drill-own-output".into())
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .overflow_hidden()
+                        .child(output.clone()),
                 )
+                // A skill can run to pages, so its share is bounded and scrolls; the output above
+                // keeps the rest.
+                .children(self.reflection.clone().map(|r| {
+                    div()
+                        .id("drill-reflection")
+                        .debug_selector(|| "drill-reflection".into())
+                        .flex_none()
+                        .w_full()
+                        .max_h(relative(0.4))
+                        .px(px(16.))
+                        .py(px(8.))
+                        .overflow_y_scroll()
+                        .child(r)
+                }))
                 .into_any_element(),
             None => div()
                 .id("drill-agents")

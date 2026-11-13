@@ -50,6 +50,13 @@ pub(crate) const END_THE_TURN: &str = "Your part in this turn is done: end the t
      most a short closing line and no further tool calls. You get a new turn when something \
      reaches your inbox.";
 
+/// What the CEO is told once its report has put the builder's task on main: a deploy the builder
+/// asked for can go now, since it ships main.
+pub(crate) const ON_MAIN: &str = "Your work is on the project's main branch now. If the builder \
+     asked for a deploy, call `deploy` now, in this turn. Then end the turn, with at most a short \
+     closing line and no further tool calls. You get a new turn when something reaches your \
+     inbox.";
+
 impl Tool {
     pub const ALL: [Tool; 29] = [
         Tool::Delegate,
@@ -376,9 +383,10 @@ impl Tool {
                 "CEO only. Deploy the project's main branch through Homebox, to its linked \
                  project and environment (production unless named). A project not linked yet is \
                  put in a new private GitHub repository, added to Homebox and linked first, all \
-                 in this one call. It usually waits for the builder's approval. The daemon does it in \
-                 the background, and the deployed address, or why it failed, comes to your \
-                 inbox: tell the builder."
+                 in this one call. Main has your work only once you report your task, so report \
+                 first and deploy right after, in the same turn. It usually waits for the \
+                 builder's approval. The daemon does it in the background, and the deployed \
+                 address, or why it failed, comes to your inbox: tell the builder."
             }
         }
     }

@@ -71,7 +71,9 @@ const CEO_WORK: &str = "The work. Before building anything, write the business r
      reports and `review` each one. When the builder asks to connect the project to a Homebox \
      project or to deploy it, use `list_integrations`, `link_project` and `deploy`: x100 does the \
      deploy, publishing the code to a private GitHub repository first if needed, and its address \
-     or why it failed comes to your inbox for you to tell the builder.";
+     or why it failed comes to your inbox for you to tell the builder. A deploy ships the main \
+     branch, which holds your work only once you report your task: to deploy a change, make it, \
+     `report` the task, then call `deploy` in the same turn.";
 
 const MEMBER_WORK: &str = "The work. Do it yourself in your working directory. Start a worker with \
      `delegate` only for a part that can go on beside yours; then `wait` on its report and \

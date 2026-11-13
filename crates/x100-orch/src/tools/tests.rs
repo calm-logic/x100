@@ -55,6 +55,7 @@ impl Scene {
             dice: &self.dice,
             file_stored: false,
             homebox: None,
+            unmerged: false,
         };
         plan(&self.state, &ctx, call)
     }

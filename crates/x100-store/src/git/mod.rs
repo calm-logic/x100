@@ -112,6 +112,13 @@ impl Git {
         let spec = format!("{rev}^{{commit}}");
         out(&self.project, ["rev-parse", "--verify", &spec], &[]).map(CommitId)
     }
+
+    /// The newest commit both revisions have, as the project's checkout sees them.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<CommitId> {
+        name_ok(a)?;
+        name_ok(b)?;
+        out(&self.project, ["merge-base", a, b], &[]).map(CommitId)
+    }
 }
 
 /// Refuses a name that git could read as an option.

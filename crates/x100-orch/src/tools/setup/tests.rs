@@ -97,6 +97,7 @@ fn call(
         dice: &x100_core::dice::SeededDice::new(1),
         file_stored: false,
         homebox: None,
+        unmerged: false,
     };
     plan(state, &ctx, c)
 }

@@ -673,6 +673,10 @@ state. `x100-integrations` holds the clients. The daemon makes every call, so no
 - **Environment.** `X100_DOCKER` and `X100_GH` name the programs, `X100_GITHUB_GIT_BASE` the push address.
   Tests point them at stand-ins, so no test touches the real Docker, gh or GitHub.
 
+**Deploy ships main.** `deploy` is refused while the caller's worktree holds work that is not on main, and
+the refusal says to report first. The reply to a report that merged into main says to call `deploy` now. The
+deploy's result carries an `Address:` line. `x100 integrations` prints what is connected, for scripts.
+
 ## Memory, skills and reflection
 
 **proposed** One git repository per agent under the project, plus one shared skills repository per project.

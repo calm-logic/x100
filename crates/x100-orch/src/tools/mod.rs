@@ -34,7 +34,7 @@ use x100_core::tool::ToolCall;
 use crate::branches::Target;
 use crate::ctx::Events;
 
-pub(crate) use catalogue::{END_THE_TURN, SET_UP, Tool};
+pub(crate) use catalogue::{END_THE_TURN, ON_MAIN, SET_UP, Tool};
 pub(crate) use memory::{MemoryPlan, QUERY_WORDS};
 pub(crate) use process::ProcessPlan;
 pub(crate) use reflect::{READ_LOG_MAX, TrialPlan};
@@ -54,6 +54,8 @@ pub(crate) struct Ctx<'a> {
     /// For `list_integrations` and `link_project`: the connected Homebox's projects, asked
     /// before the call is decided, or why they could not be.
     pub homebox: Option<&'a Result<Vec<HomeboxProject>, String>>,
+    /// For `deploy`: the caller's worktree holds work the project's main branch does not have yet.
+    pub unmerged: bool,
 }
 
 pub(crate) use x100_integrations::homebox::Project as HomeboxProject;

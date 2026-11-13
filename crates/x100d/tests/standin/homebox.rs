@@ -227,6 +227,33 @@ impl HomeboxStandIn {
         self.remotes.join(format!("{repo}.git"))
     }
 
+    /// What the public address `host` serves, as a static site would: `index.html` of the commit
+    /// the project's production deployment runs, once it runs.
+    pub fn site(&self, host: &str) -> Option<String> {
+        let name = host
+            .split(':')
+            .next()?
+            .strip_suffix(&format!(".{DOMAIN}"))?;
+        let s = self.state.lock().unwrap();
+        let p = s.projects.iter().find(|p| p.name == name)?;
+        let production = p.envs.first()?.0;
+        let running = s
+            .deployments
+            .iter()
+            .rev()
+            .find(|d| d.project == p.id && d.env == production && status(&s, d) == "running")?;
+        let spec = format!("{}:index.html", running.commit.as_deref()?);
+        let out = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(self.bare(&p.repo))
+            .args(["show", &spec])
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     /// Answers one connection's requests, plain or over TLS.
     pub async fn serve<S: AsyncRead + AsyncWrite + Unpin>(&self, mut s: S) {
         let Some(req) = read(&mut s).await else {
@@ -553,6 +580,47 @@ fn github(s: &mut State, host: &str, req: &Received) -> (u16, Value) {
         }
         _ => (404, json!({"message": "Not Found"})),
     }
+}
+
+/// A stand-in `docker` program: `docker port` names the stand-in's `port` when the container is
+/// `running`; `docker exec` logs its first six arguments, the command without its script, to
+/// `docker.log` in `bin`, and prints `key` when the script mints an edit key, as "Use local"'s
+/// does.
+pub fn docker_program(running: bool, port: u16, bin: &Path, key: &str) -> String {
+    let log = bin.join("docker.log");
+    let port_line = if running {
+        format!("echo 127.0.0.1:{port}; exit 0")
+    } else {
+        "echo 'Error: No such container: homebox-admin' >&2; exit 1".into()
+    };
+    format!(
+        "case \"$1\" in\n\
+         port) [ \"$2 $3\" = 'homebox-admin 8000/tcp' ] || exit 1; {port_line};;\n\
+         exec) echo \"$1 $2 $3 $4 $5 $6\" >> '{log}'\n\
+         case \"$7\" in *'role=\"edit\"'*) echo '{key}';; *) echo 'the stand-in ran a script';; esac\n\
+         exit 0;;\n\
+         esac\nexit 1\n",
+        log = log.display()
+    )
+}
+
+/// A stand-in `gh` program, logged in as [`ACCOUNT`] or not at all. It logs each command to
+/// `gh.log` in `bin` and makes a created repository a bare one under `remotes`.
+pub fn gh_program(logged_in: bool, remotes: &Path, bin: &Path) -> String {
+    if !logged_in {
+        return "echo 'You are not logged into any GitHub hosts.' >&2\nexit 1\n".into();
+    }
+    format!(
+        "echo \"$*\" >> '{log}'\n\
+         case \"$1 $2\" in\n\
+         'auth status') exit 0;;\n\
+         'api user') echo {ACCOUNT}; exit 0;;\n\
+         'repo create') mkdir -p '{remotes}/'\"$(dirname \"$3\")\" && git init -q --bare -b main '{remotes}/'\"$3\".git; exit $?;;\n\
+         'auth git-credential') exit 0;;\n\
+         esac\nexit 1\n",
+        log = bin.join("gh.log").display(),
+        remotes = remotes.display()
+    )
 }
 
 /// The commit main points at in a bare repository, if it has one.

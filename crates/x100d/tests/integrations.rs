@@ -15,7 +15,8 @@
 //! - A deploy asked for in the chat is held at "High risk only", runs on Approve, and the CEO is
 //!   told the address; a failing one and a crash-looping one say why. Without GitHub a deploy is
 //!   refused with the reason. A project with no repository is created, pushed, added, linked and
-//!   deployed. With `auto_deploy` on x100 waits for the pushed commit's deployment; off, it asks
+//!   deployed. A change asked for with its deploy is deployed once the CEO's report has put it on
+//!   main, not before. With `auto_deploy` on x100 waits for the pushed commit's deployment; off, it asks
 //!   for one; neither deploys twice. A deploy cut off by the daemon stopping fails when it starts
 //!   again, and the CEO is told.
 
@@ -443,6 +444,51 @@ async fn a_project_with_no_repository_is_published_added_linked_and_deployed() {
         project.homebox.as_ref().map(|l| l.repo_full_name.as_str()),
         Some("builder/fresh")
     );
+    r.daemon.terminate();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_change_asked_with_its_deploy_is_deployed_only_once_it_is_on_main() {
+    let mut r = Rig::start(Has {
+        local: true,
+        gh: true,
+        client_id: false,
+    })
+    .await;
+    r.connect_local().await;
+    r.client
+        .connect_github(GitHubMethod::LocalGh)
+        .await
+        .unwrap();
+    let p = project(&r, "changed").await;
+    commit(&p, "<h1>before</h1>");
+
+    say(&r, &p, "CHANGE AND DEPLOY").await;
+    let refused = ceo_saw(&r, &p, "not on the project's main branch yet").await;
+    assert!(refused.contains("`report` your task first"), "{refused}");
+    let told = ceo_saw(&r, &p, "If the builder asked for a deploy").await;
+    assert!(told.contains("call `deploy` now"), "{told}");
+    let held = deploy_action(&r, &p, ActionState::Held, &[]).await;
+    approve(&r, &p, held.action.id).await;
+    deploy_action(&r, &p, ActionState::CarriedOut, &[]).await;
+    let live = ceo_saw(&r, &p, "Address: https://changed.box.x100.test").await;
+    assert!(
+        live.contains("live at https://changed.box.x100.test"),
+        "{live}"
+    );
+    let pushed = head(&r.remotes, "builder/changed").expect("main was pushed");
+    let shipped = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(r.remotes.join("builder/changed.git"))
+        .args(["show", &format!("{pushed}:index.html")])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&shipped.stdout),
+        "<h1>changed</h1>",
+        "the change itself was deployed"
+    );
+    assert_eq!(r.hb.deployments_of("changed", &pushed).len(), 1);
     r.daemon.terminate();
 }
 

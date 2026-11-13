@@ -366,6 +366,14 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - Tasks are ordered by the order the log opened them, in both clients, the start pack and reflection.
   - **Not changed:** a daemon starved for over a second could stop reading a dead harness's last line. An
     interrupted older item is listed after a newer one in the next turn's input.
+- **The two-part end-to-end capture, prepared.** The orchestrator's run: 673 tests pass, 0 fail, 15
+  ignored, clippy and fmt clean. `capture-e2e.sh` now goes on to connect Homebox and GitHub, ask for an edit
+  and its deploy, approve the held deploy and wait for the live page, and records the window as video. Its
+  `--dry-run` runs the whole of it on the fake harness and stand-ins. `cleanup-e2e.sh` undoes what a real
+  run made in Homebox and prints the command for the repository.
+  - **Fixed on the way:** a deploy ships main, but the CEO's edit reached main only on its report, after
+    which it was told to make no more calls. Deploy now refuses unmerged work and the report's reply says to
+    deploy. The Team tab drew the CEO's output over its skills.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 

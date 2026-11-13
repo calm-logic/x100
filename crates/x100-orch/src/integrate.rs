@@ -128,8 +128,10 @@ async fn run(
 fn told(done: &Deployed) -> String {
     let short: String = done.commit.chars().take(12).collect();
     match &done.address {
+        // The address on a line of its own as well, where a model or a script reads it as a value.
         Some(address) => format!(
-            "The deploy is live at {address} (commit {short}). Tell the builder the address."
+            "The deploy is live at {address} (commit {short}). Tell the builder the address.\n\
+             Address: {address}"
         ),
         None => format!(
             "The deploy is live (commit {short}), but Homebox gives it no public address: it \

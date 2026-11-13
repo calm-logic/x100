@@ -8,6 +8,7 @@ use x100_core::driver::Purpose;
 use x100_core::event::ProjectEvent;
 use x100_core::id::{ActionId, DriverId};
 use x100_core::settings::DaemonSettings;
+use x100_core::task::TaskEvent;
 use x100_core::tool::ToolCall;
 use x100_gate::Ruling;
 use x100_integrations::Integrations;
@@ -19,7 +20,7 @@ use crate::gate;
 use crate::ids::new_id;
 use crate::sandbox::Sandboxes;
 use crate::settle::deliver;
-use crate::tools::{self, Ctx, END_THE_TURN, SET_UP, Tool};
+use crate::tools::{self, Ctx, END_THE_TURN, ON_MAIN, SET_UP, Tool};
 use crate::{Shared, branches};
 
 /// Why a call came to nothing: its caller may not act, or the call itself was refused, which the
@@ -100,6 +101,15 @@ pub(super) fn plan(
         ToolCall::AddFile { hash, .. } => ctx.store.files.contains(hash).unwrap_or(false),
         _ => true,
     };
+    // A deploy ships main, so work of the caller's that is not on main yet would not go out.
+    let unmerged = match call {
+        ToolCall::Deploy { .. } => w
+            .read(git_of)
+            .map(|git| branches::unmerged(&git, action.agent))
+            .transpose()?
+            .unwrap_or(false),
+        _ => false,
+    };
     let (clock, dice) = (w.clock(), w.dice());
     w.read(|s| {
         let ctx = Ctx {
@@ -110,6 +120,7 @@ pub(super) fn plan(
             dice,
             file_stored,
             homebox: using.homebox.as_ref(),
+            unmerged,
         };
         tools::plan(s, &ctx, call)
     })
@@ -296,8 +307,20 @@ pub(super) fn execute(
 /// of the call leaves out.
 fn answer(call: &ToolCall, events: &[ProjectEvent]) -> String {
     let reply = tools::reply(call, events);
+    let on_main = matches!(call, ToolCall::Report { .. })
+        && events.iter().any(|e| {
+            matches!(
+                e,
+                ProjectEvent::Task {
+                    event: TaskEvent::Merged { .. },
+                    ..
+                }
+            )
+        });
     let next = if events.iter().any(|e| matches!(e, ProjectEvent::SetUp(_))) {
         SET_UP
+    } else if on_main {
+        ON_MAIN
     } else if Tool::of(call).ends_turn() {
         END_THE_TURN
     } else {

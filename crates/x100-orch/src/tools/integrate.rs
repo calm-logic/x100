@@ -95,6 +95,9 @@ pub(super) fn deploy(at: &At, environment: Option<String>) -> Result<Plan, Refus
     if at.project.code_dir.is_none() {
         return Err("the project has no code yet: set it up first".into());
     }
+    if at.ctx.unmerged {
+        return Err(UNMERGED.into());
+    }
     if under_way(at) {
         return Err(
             "a deploy of this project is already under way: its result comes to your \
@@ -107,6 +110,12 @@ pub(super) fn deploy(at: &At, environment: Option<String>) -> Result<Plan, Refus
         ..Plan::default()
     })
 }
+
+/// Why a deploy waits for the caller's report: it ships main, which the caller's work reaches only
+/// when its task is reported.
+const UNMERGED: &str = "your work is not on the project's main branch yet, and a deploy ships \
+     main as it is. `report` your task first, which puts your work on main, then call `deploy` \
+     again in the same turn.";
 
 /// Whether a deploy was let through and has not finished: two at once would push and deploy
 /// twice.

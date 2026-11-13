@@ -592,6 +592,32 @@ fn a_new_project_is_named_when_its_ceo_sets_it_up_and_another_waits_for_its_mess
         listed(window, vcx) == (vec!["Fernleaf".into()], "x100 \u{b7} Fernleaf".into())
     });
 
+    // The CEO's own output beside its leads: its skills, which run to pages, stay under the
+    // output in a part of their own and never draw over it.
+    pump_until(&mut vcx, "the CEO's output can be shown", |vcx| {
+        bounds(vcx, "shown-Output").is_some()
+    });
+    click(&mut vcx, "shown-Output");
+    pump_until(&mut vcx, "the CEO's skills are listed", |vcx| {
+        vcx.read(|cx| {
+            team.read(cx).reflection().is_some_and(|r| {
+                r.read(cx)
+                    .listed(cx)
+                    .skills
+                    .iter()
+                    .any(|s| s.body.is_some())
+            })
+        })
+    });
+    let own = bounds(&mut vcx, "drill-own-output").expect("the output");
+    let skills = bounds(&mut vcx, "drill-reflection").expect("the skills");
+    let column = bounds(&mut vcx, "drill-output").expect("the column");
+    assert!(own.bottom() <= skills.top(), "{own:?} {skills:?}");
+    assert!(
+        own.size.height * 2. >= column.size.height,
+        "the output keeps most of the room: {own:?} in {column:?}"
+    );
+
     // "+ New project" opens the start of another, which exists only once its message is sent.
     click(&mut vcx, "new-project");
     pump_until(&mut vcx, "the start of a new project", |vcx| {

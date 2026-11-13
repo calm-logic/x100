@@ -19,6 +19,7 @@ commands:
   log [--project ID] [-n N | --all] [-f] [--until TEXT] [--timeout SECS]
                                    print the log, oldest first: seq, time, who, text
   actions [--project ID]           list the actions waiting for you
+  integrations                     what is connected: homebox, address, primary domain; github, account
   approve ID [--project ID]        approve a held action
   deny ID [--project ID]           deny a held action
 
@@ -61,6 +62,7 @@ pub enum Command {
     Actions {
         project: Option<ProjectId>,
     },
+    Integrations,
     Decide {
         project: Option<ProjectId>,
         action: ActionId,
@@ -230,6 +232,10 @@ fn command(name: &str, rest: Vec<String>) -> Result<Command, String> {
         "actions" => {
             no_more(&f)?;
             Command::Actions { project: f.project }
+        }
+        "integrations" => {
+            no_more(&f)?;
+            Command::Integrations
         }
         "approve" | "deny" => {
             if f.positional.len() != 1 {

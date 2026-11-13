@@ -5,7 +5,8 @@
 //!
 //! - Homebox offers "Use local" first, since one is found; it asks before anything is made, and
 //!   No makes nothing. Yes, the daemon mints a key with its one command and connects.
-//! - GitHub offers the local `gh` and connects with it.
+//! - GitHub offers the local `gh` and connects with it, and `x100 integrations` says both are
+//!   connected.
 //! - The project's Homebox project lists the instance's managed projects; Enter on one links the
 //!   project, Deploy now pushes its main branch there and deploys it, and Unlink removes the link.
 //! - Disconnected, the other way is an address and a key, typed masked; the key is drawn nowhere
@@ -210,6 +211,22 @@ fn homebox_and_github_connect_from_settings_and_a_project_is_linked_and_deployed
         ))
     });
     assert!(!text.contains("Use local gh"), "{text}");
+    // The single command a script waits on says the same.
+    let said = std::process::Command::new(env!("CARGO_BIN_EXE_x100"))
+        .arg("--socket")
+        .arg(run.daemon.socket())
+        .arg("integrations")
+        .output()
+        .expect("x100 runs");
+    assert!(said.status.success(), "{said:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&said.stdout),
+        format!(
+            "homebox\tconnected\t{}\t{}\ngithub\tconnected\t{ACCOUNT}\n",
+            connected.address,
+            connected.primary_domain.as_deref().unwrap_or("-")
+        )
+    );
 
     // The project's Homebox project: the instance's managed projects, Enter to link.
     let listed = run.rt.block_on(client.homebox_projects()).unwrap();

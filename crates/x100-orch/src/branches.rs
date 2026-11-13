@@ -161,6 +161,23 @@ fn head_of(git: &Git, rev: &str) -> Result<CommitId, String> {
         .map_err(|e| format!("could not read {rev}: {e}"))
 }
 
+/// Whether the agent's worktree holds work the project's checkout does not have yet: committed to
+/// its branch or still only in its files. Only reads.
+pub(crate) fn unmerged(git: &Git, agent: AgentId) -> Result<bool, String> {
+    let dir = git.worktree_path(agent);
+    if !dir.exists() {
+        return Ok(false);
+    }
+    // From where the two last met, so work that reached the checkout another way since does not
+    // count as the agent's.
+    let base = git
+        .merge_base("HEAD", &branch(agent))
+        .map_err(|e| format!("could not compare {agent}'s branch with the project's: {e}"))?;
+    git.diff_since(&dir, &base)
+        .map(|d| !d.files.is_empty())
+        .map_err(|e| format!("could not read {agent}'s worktree: {e}"))
+}
+
 /// What the agent's worktree has changed since `base`, for its start pack.
 pub(crate) fn diff_since(git: &Git, agent: AgentId, base: &CommitId) -> Option<String> {
     let dir = git.worktree_path(agent);

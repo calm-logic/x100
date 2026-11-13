@@ -1,0 +1,143 @@
+# The CEO of capture-e2e.sh's dry run, played by the fake harness: what a model told what the
+# start pack says would do with the run's three messages, at no cost. It greets "hi", sets the
+# project up from the brief, builds the todo page and reports it; then, on the follow-up, adds the
+# button, reports so the change is on main, and asks for the deploy; once the deploy's result
+# arrives it tells the builder the address.
+
+[harness]
+name = "fake-e2e"
+
+[[model]]
+model = "fake-ceo"
+context_window = 200000
+efforts = ["low", "medium", "high"]
+price = { input = 1.0, output = 5.0, cache_read = 0.1 }
+
+[[turn]]
+when = { start_pack_contains = "PROJECT: not set up yet", input_contains = "todo app" }
+steps = [
+  { call = { message = { to = "builder", body = "A todo app in one page. Setting it up now.", attachments = [], in_reply_to = "{{input:Message}}" } } },
+  { call = { set_up_project = { name = "Todo app", intent = "A todo list in one page.", brief = "Create a todo app as a proof of concept: one index.html with inline CSS and JavaScript, no build step and no dependencies. I can add a todo, tick it done, and delete it, and the list survives a reload." } } },
+  { usage = { input = 900, output = 120, cost_micros = 1200 } },
+]
+
+[[turn]]
+when = { start_pack_contains = "PROJECT: not set up yet" }
+repeat = true
+steps = [
+  { call = { message = { to = "builder", body = "Hello! What would you like to build?", attachments = [], in_reply_to = "{{input:Message}}" } } },
+  { usage = { input = 600, output = 40, cost_micros = 700 } },
+]
+
+[[turn]]
+when = { input_contains = "Create a todo app" }
+steps = [
+  { call = { message = { to = "builder", body = "A one-page todo app. Building it now.", attachments = [] } } },
+  { call = { write_spec = { spec = "brd", status = "draft", body = "# Todo\n\nAdd, tick and delete todos; they survive a reload.\n" } } },
+  { write = "index.html", content = '''
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Todo</title>
+<style>body { font-family: sans-serif; max-width: 30em; margin: 2em auto; } .done span { text-decoration: line-through; }</style>
+</head><body>
+<form id="add"><input id="text" placeholder="What needs doing?"><button>Add</button></form>
+<ul id="list"></ul>
+<script>
+const key = 'todos';
+let todos = JSON.parse(localStorage.getItem(key) || '[]');
+const list = document.getElementById('list');
+function save() { localStorage.setItem(key, JSON.stringify(todos)); draw(); }
+function draw() {
+  list.innerHTML = '';
+  todos.forEach((t, i) => {
+    const li = document.createElement('li');
+    li.className = t.done ? 'done' : '';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = t.done;
+    box.onchange = () => { todos[i].done = box.checked; save(); };
+    const span = document.createElement('span');
+    span.textContent = t.text;
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.onclick = () => { todos.splice(i, 1); save(); };
+    li.append(box, span, del);
+    list.append(li);
+  });
+}
+document.getElementById('add').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('text');
+  if (input.value.trim()) { todos.push({ text: input.value.trim(), done: false }); input.value = ''; save(); }
+};
+draw();
+</script>
+</body></html>
+''' },
+  { call = { update_task = { task = "{{input:Current task}}", progress = { note = "index.html written.", done = 90 } } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "index.html is a todo app: add, tick and delete todos, kept across a reload." } } },
+  { usage = { input = 4200, output = 1900, cost_micros = 14000 } },
+]
+
+[[turn]]
+when = { input_contains = "Clear completed" }
+steps = [
+  { call = { message = { to = "builder", body = "Adding a Clear completed button, then deploying it with Homebox.", attachments = [] } } },
+  { write = "index.html", content = '''
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Todo</title>
+<style>body { font-family: sans-serif; max-width: 30em; margin: 2em auto; } .done span { text-decoration: line-through; }</style>
+</head><body>
+<form id="add"><input id="text" placeholder="What needs doing?"><button>Add</button></form>
+<ul id="list"></ul>
+<button id="clear">Clear completed</button>
+<script>
+const key = 'todos';
+let todos = JSON.parse(localStorage.getItem(key) || '[]');
+const list = document.getElementById('list');
+function save() { localStorage.setItem(key, JSON.stringify(todos)); draw(); }
+function draw() {
+  list.innerHTML = '';
+  todos.forEach((t, i) => {
+    const li = document.createElement('li');
+    li.className = t.done ? 'done' : '';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = t.done;
+    box.onchange = () => { todos[i].done = box.checked; save(); };
+    const span = document.createElement('span');
+    span.textContent = t.text;
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.onclick = () => { todos.splice(i, 1); save(); };
+    li.append(box, span, del);
+    list.append(li);
+  });
+}
+document.getElementById('add').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('text');
+  if (input.value.trim()) { todos.push({ text: input.value.trim(), done: false }); input.value = ''; save(); }
+};
+document.getElementById('clear').onclick = () => { todos = todos.filter(t => !t.done); save(); };
+draw();
+</script>
+</body></html>
+''' },
+  { call = { update_task = { task = "{{input:Current task}}", progress = { note = "Clear completed added.", done = 90 } } } },
+  { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Added a Clear completed button. Deploying it now." } } },
+  { call = { deploy = {} } },
+  { usage = { input = 5100, output = 2100, cost_micros = 16000 } },
+]
+
+[[turn]]
+when = { input_contains = "Address: " }
+steps = [
+  { call = { message = { to = "builder", body = "It is live at {{input:Address}} with the Clear completed button.", attachments = [] } } },
+  { usage = { input = 1800, output = 60, cost_micros = 2000 } },
+]
+
+# A deploy that failed: the builder is told what x100 said, word for word.
+[[turn]]
+when = { input_contains = "The deploy failed" }
+repeat = true
+steps = [{ call = { message = { to = "builder", body = "{{input}}", attachments = [] } } }]
