@@ -154,7 +154,7 @@ steps = [
         .start_pack(w.project, drivers[1])
         .expect("a start pack");
     assert!(pack.contains("Waiting for the morning check."), "{pack}");
-    assert!(pack.contains("was stopped (ReplacedByBuilder)"), "{pack}");
+    assert!(pack.contains("which the builder replaced"), "{pack}");
     assert!(pack.contains("DAEMON TOOL CALLS IN THIS TASK"), "{pack}");
     assert!(matches!(s.task(brief).unwrap().state, TaskState::Done(..)));
     w.finish().await;
@@ -166,7 +166,7 @@ async fn an_item_given_to_a_driver_stopped_before_its_turn_completes_reaches_the
     let script = script(
         r#"
 [[turn]]
-when = { start_pack_contains = "was stopped (ReplacedByBuilder)" }
+when = { start_pack_contains = "which the builder replaced" }
 steps = [
   { call = { report = { task = "{{input:Current task}}", outcome = "completed", summary = "Done on the next driver." } } },
 ]

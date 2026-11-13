@@ -10,6 +10,7 @@
 //! - [`choose`]: the agent's warm driver if it is compatible, else the cheapest compatible new
 //!   one, else every reason nothing is. Compatible is the table of five rules in [`rules`].
 //! - [`upkeep`]: what becomes of a warm driver between turns: kept, compacted or ended.
+//! - [`hand_off`]: why a healthy driver mid-task should hand its task to another.
 //! - [`bill`]: who pays for a turn and which budgets the charge reaches.
 //! - [`cool_off`] and [`cool_off_over`]: a harness and model cooling off for every project.
 
@@ -24,5 +25,5 @@ pub use choose::{Choice, Decision, Ending, Need, Warm, choose};
 pub use cool::{cool_off, cool_off_over};
 pub use ledger::{Billed, bill};
 pub use rules::{blended, needs};
-pub use upkeep::{DEFAULT_WARM, Upkeep, upkeep, warm_until};
+pub use upkeep::{DEFAULT_WARM, Upkeep, hand_off, upkeep, warm_until};
 pub use world::{Installed, Occupancy, Slot, World, slot};

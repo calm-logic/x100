@@ -307,16 +307,36 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - **Limits:** a lab driver on an API-key harness cannot reach its model, since the vault refuses lab
     drivers every credential. `team.toml` is not written when a team change is approved. `desk.rs`,
     `pack/mod.rs` and `settings/mod.rs` are a little over 600 lines.
+- **M9, handoff.** The orchestrator's run: 633 tests pass, 0 fail, 15 ignored, clippy and fmt clean.
+  `x100d/tests/handoff*.rs`, daemon as a child process, the fake harness posing as two providers, fake clock:
+  - A driver killed mid-task is taken over by the other provider's, which finishes the task. The worktree
+    keeps the first driver's file, the start pack lists its daemon tool calls, each delegation, message and
+    job is in the log once, and the transcript is one record with the change marked.
+  - A daemon call in flight when its driver dies takes effect once and its result is in the start pack.
+  - A real MCP call from a replaced driver is refused. A stalled driver is replaced one second past the
+    stall timeout and not before.
+  - Each planned reason (context full, effort changed, disallowed, range narrowed) hands off after the old
+    driver updates its progress note.
+  - Three failures in a row report the task failed to its delegator, and no fourth driver starts.
+  - The daemon killed mid-task: after the restart both working agents carry on.
+  - **Not run:** the kill test with Claude Code and Codex, in both directions. It exists, ignored, and needs
+    the owner's go since it spends on real turns.
+  - **Limits:** removing the desk's wait for calls in flight does not fail the in-flight test, because the
+    call usually finishes first, so no test shows that wait is needed. The Stateright model is unchanged:
+    fencing is covered by tests, not the model. `driver/mod.rs` is 613 lines.
+  - `x100-app/tests/integrations.rs` is still flaky: "timed out waiting until GitHub is connected", 1 of 2
+    isolated runs in the subagent's hands, 0 of 6 in the orchestrator's. The scroll fix in M14 was not the
+    whole cause. Not traced.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
 ## In progress
 
-M9, handoff. Opus subagent.
+M7, the terminal interface. Sonnet subagent.
 
 Queued, in this order:
 
-1. M7, the terminal interface. `x100-tui` is still an empty binary.
+1. The flaky app integrations test.
 2. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
 3. M17, hardening and release. Needs real providers.
 

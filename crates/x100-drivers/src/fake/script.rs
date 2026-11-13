@@ -26,6 +26,8 @@
 //!   { text = "Forming the team." },
 //!   # A daemon tool call: a core ToolCall in its serde form. The reply is saved as {{task}}.
 //!   { call = { delegate = { to = { new_worker = { role = "dev", charter = "c" } }, task = { new = { title = "t", ask = "a", attachments = [] } }, effort = "low" } }, save = "task" },
+//!   # A call made as the process exits with this code, so it is in flight when the driver dies.
+//!   { call = { set_preview = { url = "http://localhost:1" } }, crash = 9 },
 //!   { text = "Delegated {{task}}; its id is {{task.id}} when the reply is JSON." },
 //!   { write = "notes/plan.md", content = "plan" },     # a file in the driver's directory
 //!   { run = "cargo test" },                            # a shell command in the directory
@@ -50,6 +52,8 @@
 //! - `{{name}}` is a value saved earlier in the same driver, and `{{name.field}}` a field of a
 //!   saved JSON object. One that names nothing is left as written.
 //! - `{{input}}` is the current turn's input.
+//! - `{{tools:url}}` and `{{tools:token}}` are where the driver was told it reaches the daemon's
+//!   tools over MCP, and its token, as a real harness is told them.
 //! - `{{input:<label>}}` reads a labelled line of the turn's input, and `{{pack:<label>}}` one of
 //!   the start pack: the first line that reads `<label>: <value>`, leading spaces aside, gives the
 //!   first word of its value. `{{input:Task}}` on the line `Task: tsk_01 (Build the site)` gives
@@ -204,16 +208,30 @@ pub enum FailKind {
 #[serde(try_from = "RawStep")]
 pub enum Step {
     Text(String),
-    Call { call: Value, save: Option<String> },
-    Write { path: String, content: String },
+    /// With `crash`, the process exits with that code once the call is made, before its reply.
+    Call {
+        call: Value,
+        save: Option<String>,
+        crash: Option<i32>,
+    },
+    Write {
+        path: String,
+        content: String,
+    },
     Run(String),
-    Ask { tool: String, input: Value },
+    Ask {
+        tool: String,
+        input: Value,
+    },
     Usage(UsageSpec),
     Context(u64),
     Sleep(Duration),
     Crash(i32),
     Stall,
-    Fail { kind: FailKind, detail: String },
+    Fail {
+        kind: FailKind,
+        detail: String,
+    },
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -244,10 +262,12 @@ impl TryFrom<RawStep> for Step {
         if let Some(text) = raw.text {
             steps.push(Step::Text(text));
         }
+        let calls = raw.call.is_some();
         if let Some(call) = raw.call {
             steps.push(Step::Call {
                 call,
                 save: raw.save.clone(),
+                crash: raw.crash,
             });
         } else if raw.save.is_some() {
             return Err("`save` belongs with `call`".into());
@@ -280,7 +300,7 @@ impl TryFrom<RawStep> for Step {
         if let Some(ms) = raw.sleep_ms {
             steps.push(Step::Sleep(Duration::from_millis(ms)));
         }
-        if let Some(code) = raw.crash {
+        if let Some(code) = raw.crash.filter(|_| !calls) {
             steps.push(Step::Crash(code));
         }
         if raw.stall == Some(true) {
@@ -444,6 +464,18 @@ mod tests {
         assert!(Script::parse(&none).is_err());
         let stray = format!("{MINIMAL}\n[[turn]]\nsteps = [{{ text = \"a\", save = \"x\" }}]");
         assert!(Script::parse(&stray).is_err());
+    }
+
+    #[test]
+    fn a_call_may_end_the_process_before_its_reply() {
+        let both = format!(
+            "{MINIMAL}\n[[turn]]\nsteps = [{{ call = {{ set_preview = {{ url = \"http://x\" }} }}, crash = 9 }}]"
+        );
+        let script = Script::parse(&both).unwrap();
+        assert!(matches!(
+            script.turns[0].steps[..],
+            [Step::Call { crash: Some(9), .. }]
+        ));
     }
 
     #[test]

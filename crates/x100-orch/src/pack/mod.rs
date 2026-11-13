@@ -15,11 +15,12 @@
 mod guide;
 mod history;
 mod items;
+mod why;
 
 use std::fmt::Write as _;
 
 use x100_core::agent::Position;
-use x100_core::driver::{DriverState, EndReason, StartReason};
+use x100_core::driver::StartReason;
 use x100_core::fold::ProjectState;
 use x100_core::id::{AgentId, DriverId};
 use x100_core::job::{JobState, ProjectJob};
@@ -31,6 +32,7 @@ use x100_core::wait::WaitOn;
 use x100_store::{Git, ProjectStore};
 
 pub use items::{describe, turn_input};
+pub(crate) use why::last_turn;
 
 use items::party;
 
@@ -76,7 +78,7 @@ pub(crate) fn build(
         .as_ref()
         .zip(git)
         .and_then(|(base, git)| branches::diff_since(git, agent, base));
-    let mut pack = head(&state, agent, for_, git);
+    let mut pack = head(&state, agent, for_, git, &history);
     let running = state.agent(agent).map(|a| &a.processes);
     if let Some(running) = running.filter(|r| !r.is_empty()) {
         pack.push_str(
@@ -175,7 +177,13 @@ pub(crate) fn skill_rules(
 }
 
 /// Everything but the calls, the diff and the transcript.
-fn head(state: &ProjectState, agent: AgentId, for_: &Pack, git: Option<&Git>) -> String {
+fn head(
+    state: &ProjectState,
+    agent: AgentId,
+    for_: &Pack,
+    git: Option<&Git>,
+    history: &history::History,
+) -> String {
     let Some(a) = state.agent(agent) else {
         return String::new();
     };
@@ -319,7 +327,7 @@ fn head(state: &ProjectState, agent: AgentId, for_: &Pack, git: Option<&Git>) ->
     let _ = write!(
         p,
         "\nWHY THIS DRIVER IS STARTING:\n{}\n",
-        reason(state, agent, &for_.why)
+        why::reason(state, agent, &for_.why, history)
     );
     p
 }
@@ -478,38 +486,6 @@ fn open_business(state: &ProjectState, agent: AgentId) -> String {
         );
     }
     b
-}
-
-fn reason(state: &ProjectState, agent: AgentId, why: &StartReason) -> String {
-    let mut text = match why {
-        StartReason::NewTask { task } => format!("A new task, {task}, reached you."),
-        StartReason::Wake => "Something reached your inbox.".to_owned(),
-        StartReason::Handoff(h) => format!("You take over from {}: {:?}.", h.replaces, h.cause),
-    };
-    // The driver being started is in the record already, and live.
-    let previous = state.agent(agent).and_then(|a| {
-        a.drivers
-            .iter()
-            .rev()
-            .filter_map(|d| state.driver(*d))
-            .find(|d| !d.state.is_live())
-    });
-    if let Some(d) = previous {
-        let ended = match &d.state {
-            DriverState::Failed(f) => format!("failed ({f:?}); what it was doing is lost"),
-            DriverState::Ended(EndReason::Retired(r)) => format!("retired ({r:?})"),
-            DriverState::Ended(EndReason::Stopped(s)) => format!("was stopped ({s:?})"),
-            DriverState::Ended(other) => format!("ended ({other:?})"),
-            _ => "ended".to_owned(),
-        };
-        let _ = write!(
-            text,
-            " Your previous driver, {}, {ended}. Carry on from the progress note and the records \
-             above.",
-            d.driver.id
-        );
-    }
-    text
 }
 
 /// The start pack `driver` was given: the first entry it wrote in its agent's transcript.

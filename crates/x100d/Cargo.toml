@@ -56,6 +56,12 @@ x100-store = { path = "../x100-store" }
 x100-core = { path = "../x100-core", features = ["testing"] }
 nix = { version = "0.29", features = ["signal"] }
 tempfile = "3"
+# The MCP client `x100-orch`'s tests speak, for a call to the daemon's tools as a driver makes it.
+bytes = "1"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 # The decision models' stand-in server speaks HTTPS with a test authority, as the vault's own tests
 # do; the same versions and features as `x100-vault`, so nothing new is built.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }

@@ -54,6 +54,9 @@ pub(crate) enum ToFake {
         start_pack: String,
         model: String,
         effort: Effort,
+        /// Where and with what token the driver reaches the daemon's tools over MCP, as a real
+        /// harness is told. The fake calls them through its driver; a script can read these.
+        tools: Option<(String, String)>,
     },
     Turn {
         input: String,

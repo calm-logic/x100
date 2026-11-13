@@ -2,8 +2,10 @@
 //! driver, its deadline and who is told, the charge for a turn and the notices it causes, and
 //! cool-offs. The rules themselves are all in `x100-router`.
 
+use std::collections::BTreeSet;
+
 use x100_core::agent::{AgentEvent, AgentState, Waiting};
-use x100_core::driver::{Driver, Incompatible, Purpose};
+use x100_core::driver::{Driver, Incompatible, PlannedReason, Purpose};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::harness::{HarnessModel, ProviderFailure};
@@ -36,17 +38,25 @@ pub(crate) enum Planned {
     },
 }
 
-/// What the agent's next turn runs on, and the task it will be on. Blocks.
+/// What the agent's next turn runs on, and the task it will be on. `failed_on` is the task the
+/// agent's drivers last failed on and their harnesses and models, which a new driver for that
+/// task avoids. Blocks.
 pub(crate) fn decide(
     shared: &Shared,
     ctx: &ProjectCtx,
     agent: AgentId,
     warm: Option<Warm>,
+    failed_on: Option<(TaskId, BTreeSet<HarnessModel>)>,
 ) -> (Result<Planned, Vec<Incompatible>>, Option<TaskId>) {
     let installed = shared.installed();
     let now = shared.clock.now();
     shared.fleet.allocate(|occupancy| {
         let (decision, task) = ctx.store.log.with_state(|p| {
+            let task = p.current_task(agent).map(|t| t.task.id);
+            let avoid = match &failed_on {
+                Some((on, avoid)) if Some(*on) == task => avoid.clone(),
+                _ => BTreeSet::new(),
+            };
             let decision = shared.daemon.with_state(|d| {
                 let world = World {
                     daemon: d,
@@ -59,6 +69,7 @@ pub(crate) fn decide(
                     agent,
                     purpose: Purpose::Work,
                     warm,
+                    avoid,
                 };
                 x100_router::choose(&world, &need).map(|decision| {
                     let slot = match &decision {
@@ -70,7 +81,7 @@ pub(crate) fn decide(
                     (decision, slot)
                 })
             });
-            (decision, p.current_task(agent).map(|t| t.task.id))
+            (decision, task)
         });
         match decision {
             Ok((Decision::Reuse { compact, .. }, _)) => {
@@ -116,6 +127,28 @@ pub(crate) fn upkeep_in(
             now,
         };
         x100_router::upkeep(&world, warm)
+    })
+}
+
+/// Why `driver`, whose agent carries on with its task, should hand the task to another driver,
+/// over a state the caller holds.
+pub(crate) fn hand_off_in(
+    shared: &Shared,
+    project: &ProjectState,
+    driver: DriverId,
+    now: x100_core::time::Timestamp,
+) -> Option<PlannedReason> {
+    let installed = shared.installed();
+    let occupancy = Default::default();
+    shared.daemon.with_state(|d| {
+        let world = World {
+            daemon: d,
+            project,
+            installed: &installed,
+            occupancy: &occupancy,
+            now,
+        };
+        x100_router::hand_off(&world, driver)
     })
 }
 

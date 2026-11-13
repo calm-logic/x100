@@ -56,6 +56,8 @@ struct Player {
     vars: HashMap<String, String>,
     start_pack: String,
     input: String,
+    /// The daemon's tools' address and the token, as the driver was given them.
+    tools: Option<(String, String)>,
     next_id: u64,
     inbox: mpsc::UnboundedReceiver<ToFake>,
 }
@@ -83,6 +85,7 @@ impl Player {
             vars: HashMap::new(),
             start_pack: String::new(),
             input: String::new(),
+            tools: None,
             next_id: 0,
             inbox,
         }
@@ -93,6 +96,7 @@ impl Player {
             start_pack,
             model,
             effort,
+            tools,
         }) = self.inbox.recv().await
         else {
             return 0;
@@ -110,6 +114,7 @@ impl Player {
             return self.park().await;
         }
         self.start_pack = start_pack;
+        self.tools = tools;
         out(&FromFake::Ready {
             version: self.script.harness.version.clone(),
         });
@@ -192,7 +197,7 @@ impl Player {
                 Ok(text) => out(&FromFake::Text { text }),
                 Err(e) => return lookup_failed(e),
             },
-            Step::Call { call, save } => {
+            Step::Call { call, save, crash } => {
                 let input = match self.fill_json(call) {
                     Ok(input) => input,
                     Err(e) => return lookup_failed(e),
@@ -208,6 +213,10 @@ impl Player {
                     input,
                     daemon: true,
                 });
+                // Gone before the reply, so the call is in flight as the driver dies.
+                if let Some(code) = crash {
+                    std::process::exit(*code);
+                }
                 let reply = self
                     .reply(|m| matches!(m, ToFake::DaemonResult { id: got, .. } if *got == id))
                     .await;
@@ -406,6 +415,17 @@ impl Player {
                     .map(|v| Some(v.to_owned()))
                     .ok_or_else(|| format!("{{{{{name}}}}}: {what} has no line \"{label}: ...\""));
             }
+        }
+        if let Some(part) = name.strip_prefix("tools:") {
+            let (url, token) = self
+                .tools
+                .as_ref()
+                .ok_or_else(|| format!("{{{{{name}}}}}: this driver was given no tools"))?;
+            return match part {
+                "url" => Ok(Some(url.clone())),
+                "token" => Ok(Some(token.clone())),
+                _ => Err(format!("{{{{{name}}}}}: the tools have a url and a token")),
+            };
         }
         if let Some(value) = self.vars.get(name) {
             return Ok(Some(value.clone()));

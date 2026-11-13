@@ -2,8 +2,8 @@ use x100_drivers::terminal::Size;
 use x100_orch::DriverError;
 use x100_proto::{
     CancelJob, DecideAction, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack,
-    ReadWaits, ResizeTerminal, RpcError, SetAppearance, SetEffortRange, SetLeadBudget, StartPack,
-    StopDriver, Waits,
+    ReadWaits, ReplaceDriver, ResizeTerminal, RpcError, SetAppearance, SetEffortRange,
+    SetLeadBudget, StartPack, StopDriver, Waits,
 };
 
 use super::{project, refused, terminal_of};
@@ -87,6 +87,23 @@ pub async fn stop_driver(hub: &Hub, p: StopDriver) -> Result<Done, RpcError> {
         .stop_driver(p.project, p.driver)
         .await
         .map_err(driver_error)?;
+    Ok(Done {})
+}
+
+/// Replaces the driver acting for an agent. Its work is taken over by the agent's next driver.
+pub async fn replace_driver(hub: &Hub, p: ReplaceDriver) -> Result<Done, RpcError> {
+    hub.orch
+        .replace_driver(p.project, p.agent)
+        .await
+        .map_err(|e| match e {
+            DriverError::NotFound => {
+                RpcError::new(ErrorCode::NotFound, format!("no agent {}", p.agent))
+            }
+            DriverError::NotLive => RpcError::new(
+                ErrorCode::WrongState,
+                format!("{} has no driver to replace", p.agent),
+            ),
+        })?;
     Ok(Done {})
 }
 

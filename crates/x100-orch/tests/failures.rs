@@ -41,7 +41,7 @@ steps = [
 
 # A worker's second driver, after the first crashed.
 [[turn]]
-when = { start_pack_contains = "failed (ProcessExited { code: Some(3) })" }
+when = { start_pack_contains = "which failed: its process exited with code 3" }
 steps = [
   { call = { report = { task = "{{input:Task}}", outcome = "completed", summary = "Done on the second driver." } } },
 ]

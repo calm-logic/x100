@@ -9,7 +9,9 @@ mod child;
 pub mod script;
 mod wire;
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,18 +33,21 @@ use crate::output::{Decision, DriverOutput, PermissionId, PermissionRequest, Spe
 use crate::protocol::{Effects, Input, Protocol, Ready};
 use crate::supervisor::{DaemonCall, Launch};
 
+/// A daemon tool call's result to come: `Ok` is what the driver sees, `Err` an error it sees.
+pub type Pending = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+
 /// The daemon's tools as the fake harness reaches them. The real harnesses reach the same tools
 /// over MCP at [`DriverSpec::tools`].
-#[async_trait]
 pub trait DaemonTools: Send + Sync {
-    /// Carries out one call for `driver`, which reached the tools at `endpoint`. `Ok` is the
-    /// result the driver sees; `Err` is an error it sees.
-    async fn call(
-        &self,
+    /// Takes one call from `driver`, which reached the tools at `endpoint`, the moment the driver
+    /// makes it. Not async, so whatever the tools must note of the call at once, such as that it
+    /// is in flight, is noted before the driver's next move, its death included.
+    fn call(
+        self: Arc<Self>,
         driver: DriverId,
         endpoint: Option<ToolEndpoint>,
         call: ToolCall,
-    ) -> Result<String, String>;
+    ) -> Pending;
 }
 
 pub struct FakeHarness {
@@ -112,11 +117,8 @@ impl Harness for FakeHarness {
         let daemon_call = self.tools.clone().map(|tools| {
             let driver = spec.driver;
             let endpoint = spec.tools.clone();
-            let call: DaemonCall = Arc::new(move |call| {
-                let tools = Arc::clone(&tools);
-                let endpoint = endpoint.clone();
-                Box::pin(async move { tools.call(driver, endpoint, call).await })
-            });
+            let call: DaemonCall =
+                Arc::new(move |call| Arc::clone(&tools).call(driver, endpoint.clone(), call));
             call
         });
         let protocol = FakeProtocol {
@@ -124,6 +126,7 @@ impl Harness for FakeHarness {
                 start_pack: spec.start_pack.clone(),
                 model: spec.model.0.clone(),
                 effort: spec.effort,
+                tools: spec.tools.clone().map(|t| (t.url, t.token)),
             },
             window: offer.context_window,
             price,

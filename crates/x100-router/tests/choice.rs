@@ -28,6 +28,8 @@ struct Setup {
     project_spent: u64,
     lab_spent: u64,
     cooling: Vec<HarnessModel>,
+    /// Models whose drivers already failed on the task.
+    avoid: Vec<HarnessModel>,
     cap: u32,
     occupied: u32,
     /// The cheap harness runs in a terminal on a login with this many drivers live.
@@ -54,6 +56,7 @@ fn base() -> Setup {
         project_spent: 0,
         lab_spent: 0,
         cooling: vec![],
+        avoid: vec![],
         cap: 8,
         occupied: 0,
         cheap_login: None,
@@ -132,6 +135,7 @@ fn run(s: &Setup) -> Expect {
             Purpose::Work
         },
         warm,
+        avoid: s.avoid.iter().cloned().collect(),
     };
     let w = world(&daemon, p.state(), &installed, &occupancy, START);
     let model = |c: &x100_router::Choice| HarnessModel {
@@ -211,6 +215,36 @@ fn the_choice_follows_the_table() {
                 ..base()
             },
             Expect::Start(mid(), Medium),
+        ),
+        (
+            "a model whose driver failed on the task is skipped for the next cheapest",
+            Setup {
+                avoid: vec![small()],
+                ..base()
+            },
+            Expect::Start(mid(), Medium),
+        ),
+        (
+            "a skip that leaves nothing compatible is dropped",
+            Setup {
+                allowed: vec![small(), mid()],
+                avoid: vec![small(), mid()],
+                ..base()
+            },
+            Expect::Start(small(), Low),
+        ),
+        (
+            "a skip never makes a driver that fails a rule compatible",
+            Setup {
+                allowed: vec![small()],
+                cooling: vec![small()],
+                avoid: vec![small()],
+                ..base()
+            },
+            Expect::Waits(vec![
+                Incompatible::NothingAllowed,
+                Incompatible::CoolingOff(small()),
+            ]),
         ),
         (
             "a login at its cap of terminal drivers is skipped",

@@ -11,8 +11,9 @@
 
 use std::time::Duration;
 
-use x100_core::driver::{Driver, RetireReason};
+use x100_core::driver::{Driver, PlannedReason, RetireReason};
 use x100_core::fold::{DaemonState, DriverRecord};
+use x100_core::id::DriverId;
 use x100_core::time::Timestamp;
 
 use crate::choose::{Warm, unfit};
@@ -80,14 +81,52 @@ pub fn upkeep(world: &World, warm: &Warm) -> Upkeep {
     }
 }
 
+/// Why a healthy driver whose agent is mid-task should hand the task to another driver before
+/// the agent's next turn, or `None` if it may go on: its task's effort or its agent's range no
+/// longer holds it, the builder disallowed it, or its context passed the daemon's share of the
+/// window. One whose harness and model cool off is not handed off, since its provider is what
+/// fails; [`upkeep`] retires it.
+pub fn hand_off(world: &World, driver: DriverId) -> Option<PlannedReason> {
+    let rec = world.project.driver(driver)?;
+    let d = &rec.driver;
+    let project = world.project.project()?;
+    let range = project.team.effort(d.agent)?;
+    let payer = project.team.payer(d.agent)?;
+    let needs = crate::rules::needs(world.project, d.agent, range);
+    let ask = Ask::new(*world, project, range, needs, payer);
+    let c = Candidate {
+        harness: d.harness,
+        model: &d.model,
+        effort: d.effort,
+        price: None,
+        machine: d.machine,
+        login: None,
+        holds_slot: true,
+    };
+    if crate::rules::effort(&ask, &c).is_err() {
+        return Some(if range.contains(d.effort) {
+            PlannedReason::EffortChanged
+        } else {
+            PlannedReason::RangeNarrowed
+        });
+    }
+    if crate::rules::allowed(&ask, &c).is_err() {
+        return Some(PlannedReason::Disallowed);
+    }
+    context_full(world, rec).then_some(PlannedReason::ContextFull)
+}
+
+fn context_full(world: &World, rec: &DriverRecord) -> bool {
+    let share = world.daemon.settings().retire_at_context.value();
+    rec.context.is_some_and(|fill| {
+        u128::from(fill.used) * 100 > u128::from(fill.window) * u128::from(share)
+    })
+}
+
 /// The daemon's thresholds for retiring a driver, the first one it has passed.
 pub(crate) fn worn(world: &World, rec: &DriverRecord, warm: &Warm) -> Option<RetireReason> {
     let settings = world.daemon.settings();
-    let full = rec.context.is_some_and(|fill| {
-        u128::from(fill.used) * 100
-            > u128::from(fill.window) * u128::from(settings.retire_at_context.value())
-    });
-    if full {
+    if context_full(world, rec) {
         return Some(RetireReason::ContextFull);
     }
     if warm.carried.len() as u64 >= u64::from(settings.retire_after_tasks) {

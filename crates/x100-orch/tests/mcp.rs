@@ -251,7 +251,7 @@ async fn a_replaced_driver_is_fenced_off_and_its_successor_acts() {
     let stale = Client::new(&old);
     let refused = stale.call("write_spec", brd.clone()).await;
     assert!(refused.is_error, "{refused:?}");
-    assert!(refused.text.contains("has ended"), "{refused:?}");
+    assert!(refused.text.contains("stopped acting"), "{refused:?}");
     assert!(
         stale.tools().await.is_err(),
         "a fenced driver is offered nothing"
@@ -262,8 +262,14 @@ async fn a_replaced_driver_is_fenced_off_and_its_successor_acts() {
         status: SpecStatus::Draft,
         body: "# BRD".into(),
     };
-    let in_process = DaemonTools::call(&*w.desk, first, Some(old.clone()), call).await;
-    assert!(in_process.is_err_and(|e| e.contains("has ended")));
+    let in_process = DaemonTools::call(
+        std::sync::Arc::clone(&w.desk),
+        first,
+        Some(old.clone()),
+        call,
+    )
+    .await;
+    assert!(in_process.is_err_and(|e| e.contains("stopped acting")));
 
     let made_up = Client::at(&new.url, "not-a-token");
     let forged = made_up.call("write_spec", brd.clone()).await;
@@ -282,7 +288,7 @@ async fn a_replaced_driver_is_fenced_off_and_its_successor_acts() {
     assert!(w.state().spec(SpecKind::Brd).is_none());
     let refusals = w.desk.refusals();
     for (driver, why) in [
-        (first, "has ended"),
+        (first, "stopped acting"),
         (second, "not given to"),
         (DriverId::from_u128(99), "not given to"),
     ] {

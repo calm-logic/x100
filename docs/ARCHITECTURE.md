@@ -409,6 +409,21 @@ trying and the task is reported failed to its delegator, with each failure.
 driver the log shows as Starting, Running, Compacting or Handing off is marked Failed, warm ones are Ended,
 and every Working agent is taken over as above.
 
+**As built (M9).**
+
+- **Exactly once.** A daemon tool call is admitted before the daemon closes its desk on a driver. A call
+  admitted before the close is carried out, and the driver's end is recorded only after its calls are
+  answered. A call after the close is refused. So a call in flight when a driver dies takes effect once, and
+  its result is in the next driver's start pack.
+- **Order at a driver's end.** Close the desk, record the end, stop the process, checkpoint the worktree.
+- **Mid-task**, for a planned handoff, means a turn that ended with the task neither reported nor waited on.
+  A driver that is unfit between tasks is retired, not handed off.
+- **The builder replacing a warm driver** whose agent has an open task makes the agent's next driver a
+  takeover, not a wake.
+- **The skip** of failed harnesses and models is kept in memory per task and does not survive a restart.
+- `agents.replace_driver` is the builder's replacement. Every method in the protocol is now served.
+- **Limit.** An agent whose task was given up after three failures stays Working and starts no more drivers.
+
 ## Delegation, the inbox and waiting
 
 **decided (owner, 2026-11-11)** Agents act through delegation as well as on a schedule. Work delegated to an

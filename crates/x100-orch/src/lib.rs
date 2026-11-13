@@ -394,6 +394,25 @@ impl Orchestrator {
         pack::recorded(&ctx.store, driver)
     }
 
+    /// Replaces the driver acting for `agent`, as the builder asks from the agent's view: it is
+    /// stopped as [`Orchestrator::stop_driver`] stops one, and the agent's next driver takes its
+    /// work over. Returns the driver it replaced, once that driver's process is gone.
+    pub async fn replace_driver(
+        &self,
+        project: ProjectId,
+        agent: AgentId,
+    ) -> Result<DriverId, DriverError> {
+        let ctx = self.ctx(project).map_err(|_| DriverError::NotFound)?;
+        let acting = ctx.store.log.with_state(|s| {
+            s.agent(agent)
+                .map(|_| s.acting_driver(agent))
+                .ok_or(DriverError::NotFound)
+        })?;
+        let driver = acting.ok_or(DriverError::NotLive)?;
+        self.stop_driver(project, driver).await?;
+        Ok(driver)
+    }
+
     /// Stops a driver the builder chose, and records it. Whatever turn it was in is lost and its
     /// inbox items go to the next driver. Returns once the driver's process is gone.
     pub async fn stop_driver(

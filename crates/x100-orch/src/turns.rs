@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use x100_core::agent::{AgentEvent, AgentState};
-use x100_core::driver::{Driver, DriverEvent};
+use x100_core::driver::{Driver, DriverEvent, PlannedReason};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
 use x100_core::git::CommitId;
@@ -81,34 +81,53 @@ pub(crate) struct Close {
     pub scratch: bool,
 }
 
-/// The end of a turn, and whether the router ends its driver with it. Decided in the same append
-/// as the turn's end, so the log never shows warm a driver the router had already ended.
+/// What becomes of a driver whose turn completed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum After {
+    /// It is warm, for its agent's next turn.
+    Warm,
+    /// The router ended it with the turn.
+    Retired,
+    /// Its agent is mid-task and it should not go on: it is handing off, and its last turn
+    /// follows at once.
+    HandOff(PlannedReason),
+}
+
+/// The end of a turn, and what becomes of its driver. Decided in the same append as the turn's
+/// end, so the log never shows warm a driver the router had already ended. A driver whose agent
+/// carries on with its task, and that should not go on, hands off instead of retiring: its turn
+/// may have left the progress note behind the work, and a last turn brings it up to date.
 pub(crate) fn close(
     shared: &Shared,
     state: &ProjectState,
     clock: &dyn Clock,
     c: Close,
-) -> (Events, bool) {
+) -> (Events, After) {
     let warm = Warm {
         driver: c.driver,
         carried: c.carried,
         accepted: false,
     };
     let set_up = state.project().is_some_and(|p| p.code_dir.is_some());
+    let carries_on = carries_on(state, c.agent, &c.given, c.limit);
+    let hand_off = carries_on
+        .then(|| route::hand_off_in(shared, state, c.driver, clock.now()))
+        .flatten();
     let end: Option<RetireReason> = match route::upkeep_in(shared, state, &warm, clock.now()) {
         // It cannot move into the code directory, so the agent's next turn is on a new driver.
         _ if c.scratch && set_up => Some(RetireReason::ProjectSetUp),
+        _ if hand_off.is_some() => None,
         Upkeep::End(why) => Some(why),
         Upkeep::Keep => None,
     };
-    let warm_until = match (&end, &c.record) {
-        (Some(_), _) => None,
-        (None, Some(r)) => Some(
+    let warm_until = match (end.is_some() || hand_off.is_some(), &c.record) {
+        (true, _) => None,
+        (false, Some(r)) => Some(
             shared
                 .daemon
                 .with_state(|d| x100_router::warm_until(d, r, clock.now())),
         ),
-        (None, None) => Some(clock.now() + x100_router::DEFAULT_WARM),
+        (false, None) => Some(clock.now() + x100_router::DEFAULT_WARM),
     };
     let ending = Ending {
         agent: c.agent,
@@ -119,12 +138,67 @@ pub(crate) fn close(
         limit: c.limit,
     };
     let mut events = ended(state, clock, ending);
-    if let Some(why) = end {
-        let event = DriverEvent::Retired(why);
-        let driver = c.driver;
-        events.push((Actor::Daemon, ProjectEvent::Driver { driver, event }));
+    let driver = c.driver;
+    let after = match (end, hand_off) {
+        (Some(why), _) => {
+            let event = DriverEvent::Retired(why);
+            events.push((Actor::Daemon, ProjectEvent::Driver { driver, event }));
+            After::Retired
+        }
+        (None, Some(reason)) => {
+            let event = DriverEvent::HandoffStarted(reason);
+            events.push((Actor::Daemon, ProjectEvent::Driver { driver, event }));
+            After::HandOff(reason)
+        }
+        (None, None) => After::Warm,
+    };
+    (events, after)
+}
+
+/// The end of a planned handoff's last turn: the work checkpointed and the driver ended. Its
+/// agent's items wait for the next driver, and the turn is not counted as one without progress,
+/// since all it was asked to do was write its note.
+pub(crate) fn last_turn_ended(
+    state: &ProjectState,
+    agent: AgentId,
+    driver: DriverId,
+    checkpoint: Option<CommitId>,
+) -> Events {
+    let mut out: Events = checkpoint
+        .map(|commit| (Actor::Daemon, ProjectEvent::Checkpointed { agent, commit }))
+        .into_iter()
+        .collect();
+    out.push((
+        Actor::Daemon,
+        ProjectEvent::Driver {
+            driver,
+            event: DriverEvent::TurnEnded,
+        },
+    ));
+    if let Some(job) = warm_period_job(state, driver) {
+        let event = JobEvent::Cancelled { by: Actor::Daemon };
+        out.push((Actor::Daemon, ProjectEvent::Job { job, event }));
     }
-    (events, end.is_some())
+    out
+}
+
+/// Whether the agent carries on with its task after a turn given `given`: it has the task open,
+/// neither reported nor waited on, and is not yet past the limit of such turns.
+fn carries_on(state: &ProjectState, agent: AgentId, given: &[InboxItemId], limit: u32) -> bool {
+    unfinished(state, agent).is_some_and(|task| nudged(state, agent, given, task) + 1 < limit)
+}
+
+/// The agent's current task if a turn that just ended left it neither reported nor waited on. A
+/// task that has not reached the agent yet, such as the one setting the project up just opened,
+/// brings its own turn, so it is not one of these.
+fn unfinished(state: &ProjectState, agent: AgentId) -> Option<TaskId> {
+    let a = state.agent(agent)?;
+    let task = state.current_task(agent)?.task.id;
+    let to_come = a
+        .inbox
+        .waiting()
+        .any(|i| a.items.get(&i) == Some(&InboxItem::Task { task }));
+    (a.waits.is_empty() && !to_come).then_some(task)
 }
 
 /// A turn that completed.
@@ -160,15 +234,7 @@ pub(crate) fn ended(state: &ProjectState, clock: &dyn Clock, e: Ending) -> Event
     ));
     if let Some(a) = state.agent(e.agent) {
         let mut closed: Option<TaskId> = None;
-        let task = state.current_task(e.agent).map(|t| t.task.id);
-        // A task that has not reached the agent yet, such as the one setting the project up just
-        // opened, brings its own turn, so it needs no nudge.
-        let to_come = |task: TaskId| {
-            a.inbox
-                .waiting()
-                .any(|i| a.items.get(&i) == Some(&InboxItem::Task { task }))
-        };
-        if let Some(task) = task.filter(|t| a.waits.is_empty() && !to_come(*t)) {
+        if let Some(task) = unfinished(state, e.agent) {
             let turns = nudged(state, e.agent, &e.given, task) + 1;
             if turns >= e.limit {
                 let summary = format!(

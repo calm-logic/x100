@@ -228,6 +228,7 @@ impl Run {
             agent,
             purpose: x100_core::driver::Purpose::Work,
             warm: warm.clone(),
+            avoid: Default::default(),
         };
         let decision = choose(
             &world(&daemon, self.state(), &installed, &occupancy, START),

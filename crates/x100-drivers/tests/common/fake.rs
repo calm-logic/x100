@@ -3,13 +3,12 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use x100_core::effort::Effort;
 use x100_core::id::DriverId;
 use x100_core::time::{FakeClock, Timestamp};
 use x100_core::tool::ToolCall;
 use x100_drivers::ToolEndpoint;
-use x100_drivers::fake::{DaemonTools, FakeHarness};
+use x100_drivers::fake::{DaemonTools, FakeHarness, Pending};
 
 use super::spec;
 
@@ -32,14 +31,13 @@ pub struct Recorder {
     pub calls: Mutex<Vec<(DriverId, Option<ToolEndpoint>, ToolCall)>>,
 }
 
-#[async_trait]
 impl DaemonTools for Recorder {
-    async fn call(
-        &self,
+    fn call(
+        self: Arc<Self>,
         driver: DriverId,
         endpoint: Option<ToolEndpoint>,
         call: ToolCall,
-    ) -> Result<String, String> {
+    ) -> Pending {
         let reply = match &call {
             ToolCall::SetPreview { .. } => Ok("previewing".to_owned()),
             // Written out, not built with `json!`: its key order depends on a serde_json feature another
@@ -48,7 +46,7 @@ impl DaemonTools for Recorder {
             _ => Err("not in this test".to_owned()),
         };
         self.calls.lock().unwrap().push((driver, endpoint, call));
-        reply
+        Box::pin(async move { reply })
     }
 }
 

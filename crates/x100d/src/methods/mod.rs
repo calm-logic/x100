@@ -21,7 +21,6 @@ use x100_proto::{Call, ErrorCode, RpcError};
 use x100_store::ProjectStore;
 
 use crate::hub::Hub;
-use crate::unavailable;
 
 pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(f)
@@ -56,9 +55,6 @@ fn out<T: Serialize>(result: Result<T, RpcError>) -> Result<Value, RpcError> {
 
 /// Answers a request that is not about the connection (hello and the subscriptions are).
 pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
-    if let Some(error) = unavailable::not_yet(&call) {
-        return Err(error);
-    }
     match call {
         Call::ReadLog(p) => out(daemon::read_log(hub, p).await),
         Call::ReadTranscript(p) => out(daemon::read_transcript(hub, p).await),
@@ -82,6 +78,7 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ReadWaits(p) => out(agents::waits(hub, p)),
         Call::ReadStartPack(p) => out(agents::start_pack(hub, p)),
         Call::StopDriver(p) => out(agents::stop_driver(hub, p).await),
+        Call::ReplaceDriver(p) => out(agents::replace_driver(hub, p).await),
         Call::ResizeTerminal(p) => out(agents::resize_terminal(hub, p).await),
         Call::SetLeadBudget(p) => out(agents::set_budget(hub, p).await),
         Call::SetEffortRange(p) => out(agents::set_effort(hub, p).await),
@@ -114,10 +111,5 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         | Call::SubscribeTerminal(_) => {
             unreachable!("the connection answers these")
         }
-        // Every other method is in the table of what arrives later, which answered above.
-        other => Err(RpcError::new(
-            ErrorCode::Internal,
-            format!("{} has no handler", other.method()),
-        )),
     }
 }

@@ -90,6 +90,7 @@ fn choose(
                     agent,
                     purpose,
                     warm: None,
+                    avoid: Default::default(),
                 };
                 x100_router::choose(&world, &need).map(|decision| match decision {
                     x100_router::Decision::Start { choice, .. } => {

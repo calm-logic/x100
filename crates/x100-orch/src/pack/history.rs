@@ -15,6 +15,7 @@ const PAGE: usize = 500;
 
 /// One daemon tool call and how it ended.
 pub(crate) struct Call {
+    pub action: ActionId,
     pub call: ToolCall,
     /// The result the driver read, or why it was refused. `None` while it is still in flight.
     pub result: Option<Result<String, String>>,
@@ -78,6 +79,7 @@ pub(crate) fn history(store: &ProjectStore, agent: AgentId, task: TaskId) -> His
                     && !Tool::of(call).reads_only()
                 {
                     history.calls.push(Call {
+                        action: a.id,
                         call: call.clone(),
                         result: None,
                     });

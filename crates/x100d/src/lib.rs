@@ -18,7 +18,6 @@ mod discover;
 mod error;
 mod hub;
 mod methods;
-mod unavailable;
 mod vault;
 
 use std::path::{Path, PathBuf};
@@ -40,7 +39,6 @@ pub use config::{
     SandboxKind, default_data_dir,
 };
 pub use error::Error;
-pub use unavailable::arrives_with;
 
 use hub::Hub;
 

@@ -327,39 +327,9 @@ async fn a_project_created_later_is_followed_from_its_first_event() {
     d.finish().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn methods_that_later_milestones_make_real_say_which() {
-    let d = Local::start(|_| {}).await;
-    let client = d.client().await;
-    let (p, a) = (
-        ProjectId::from_u128(1),
-        x100_core::id::AgentId::from_u128(1),
-    );
-    let later: Vec<(Call, &str)> = vec![(
-        ReplaceDriver {
-            project: p,
-            agent: a,
-        }
-        .into(),
-        "M9",
-    )];
-    let mut raw = Raw::connect(&d.env).await;
-    raw.hello().await;
-    let mut later_names = Vec::new();
-    for (call, milestone) in later {
-        let name = call.method();
-        later_names.push(name);
-        let id = raw.send(call).await;
-        let (r, _) = raw.answer(&id).await;
-        let e = r.outcome.unwrap_err();
-        assert_eq!(e.code, ErrorCode::Unavailable, "{name}");
-        assert!(
-            e.message.contains(milestone) && e.message.contains(name),
-            "{}",
-            e.message
-        );
-    }
-    // Every method is real or in the list above, so a milestone that adds one has to say so here.
+#[test]
+fn every_method_is_real_and_listed_here() {
+    // A method added to the protocol has to be added here, so nothing ships that answers nothing.
     let real = [
         "hello",
         "events.subscribe",
@@ -388,6 +358,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "agents.waits",
         "drivers.start_pack",
         "drivers.stop",
+        "agents.replace_driver",
         "daemon.set_clock",
         "machines.set_cap",
         "harnesses.rescan",
@@ -415,13 +386,10 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "trials.list",
     ];
     let mut named: Vec<&str> = real.to_vec();
-    named.extend(later_names);
     named.sort_unstable();
     let mut all: Vec<&str> = METHODS.iter().map(|m| m.name).collect();
     all.sort_unstable();
     assert_eq!(named, all);
-    let _ = client;
-    d.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

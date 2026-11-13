@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use x100_core::driver::{Incompatible, Purpose, RetireReason, Unfit};
 use x100_core::effort::Effort;
-use x100_core::harness::ModelName;
+use x100_core::harness::{HarnessModel, ModelName};
 use x100_core::id::{AgentId, DriverId, HarnessId, MachineId, TaskId};
 use x100_core::ledger::Payer;
 
@@ -39,6 +39,10 @@ pub struct Need {
     pub agent: AgentId,
     pub purpose: Purpose,
     pub warm: Option<Warm>,
+    /// Harnesses and models whose drivers already failed on the agent's current task. A new
+    /// driver avoids them while anything else is compatible, and falls back on them when nothing
+    /// is, so the limit of three failures is what ends the attempts.
+    pub avoid: BTreeSet<HarnessModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +107,7 @@ pub fn choose(world: &World, need: &Need) -> Result<Decision, Vec<Incompatible>>
             }
         }
     }
-    allocate(ask, ending)
+    allocate(ask, ending, &need.avoid)
 }
 
 /// Whether the warm driver may take the next turn: rules 1 to 3 (it holds its room, and the
@@ -167,7 +171,11 @@ pub(crate) fn unfit(ask: &Ask, c: &Candidate) -> Result<(), RetireReason> {
     rules::cool_off(ask, c).map_err(|_| RetireReason::Unfit(Unfit::CoolingOff))
 }
 
-fn allocate(mut ask: Ask, ending: Option<Ending>) -> Result<Decision, Vec<Incompatible>> {
+fn allocate(
+    mut ask: Ask,
+    ending: Option<Ending>,
+    avoid: &BTreeSet<HarnessModel>,
+) -> Result<Decision, Vec<Incompatible>> {
     let world = ask.world;
     // The warm driver's room is freed by ending it.
     if let Some(d) = ending.and_then(|e| world.project.driver(e.driver)) {
@@ -175,15 +183,40 @@ fn allocate(mut ask: Ask, ending: Option<Ending>) -> Result<Decision, Vec<Incomp
             .free(&slot(world.daemon, d.driver.harness, d.driver.machine));
     }
     let (candidates, no_level) = rules::candidates(&ask);
+    let fresh: Vec<_> = candidates
+        .iter()
+        .filter(|c| {
+            !avoid.contains(&HarnessModel {
+                harness: c.harness,
+                model: c.model.clone(),
+            })
+        })
+        .cloned()
+        .collect();
+    if fresh.len() < candidates.len()
+        && let Ok(decision) = first_compatible(&ask, &fresh, ending, no_level)
+    {
+        return Ok(decision);
+    }
+    first_compatible(&ask, &candidates, ending, no_level)
+}
+
+/// The first of `candidates`, cheapest first, that every rule passes, or every reason none does.
+fn first_compatible(
+    ask: &Ask,
+    candidates: &[Candidate],
+    ending: Option<Ending>,
+    no_level: bool,
+) -> Result<Decision, Vec<Incompatible>> {
     let mut why: [Vec<Incompatible>; RULES.len()] = Default::default();
     if no_level {
         why[0].push(Incompatible::NoEffortInRange);
     }
-    for c in &candidates {
+    for c in candidates {
         let Some((i, reason)) = RULES
             .iter()
             .enumerate()
-            .find_map(|(i, rule)| rule(&ask, c).err().map(|r| (i, r)))
+            .find_map(|(i, rule)| rule(ask, c).err().map(|r| (i, r)))
         else {
             return Ok(Decision::Start {
                 choice: Choice {

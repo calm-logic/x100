@@ -10,6 +10,12 @@
 //!
 //! It also takes what the job clock fires, ends a warm driver when its warm period is over, and
 //! gives a task up for its agent when its drivers fail three times in a row.
+//!
+//! When a driver ends while its agent is mid-task, it is told how: failed, replaced by the
+//! builder, or handed off. The agent's next driver is started as that handoff, with the old
+//! driver's id, the cause and what was in flight, and for a failure it avoids the harness and
+//! model that failed on the task. After a restart, the log says which agents were working when the
+//! daemon stopped, and each is taken over the same way.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -17,22 +23,25 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use x100_core::agent::{AgentEvent, AgentState};
-use x100_core::driver::{FAILURES_BEFORE_GIVING_UP, Failure, RetireReason};
+use x100_core::driver::{Failure, Handoff, RetireReason};
 use x100_core::event::ProjectEvent;
+use x100_core::harness::HarnessModel;
 use x100_core::id::{AgentId, DriverId, InboxItemId, TaskId};
 use x100_core::job::{Job, ProjectJob, ProjectRoutine};
 use x100_core::party::Actor;
-use x100_core::task::{TaskEvent, TaskFailure, Verdict};
+use x100_core::task::{TaskEvent, Verdict};
 use x100_core::time::Timestamp;
 use x100_drivers::terminal::Size;
 use x100_router::{Upkeep, Warm};
 
 use crate::Shared;
 use crate::ctx::ProjectCtx;
-use crate::driver::{self, Cmd, How, Start};
+use crate::driver::{self, Cmd, Exit, How, Start};
 use crate::route::{self, Planned};
 use crate::store::blocking;
-use crate::{jobs, settle, tools};
+use crate::{jobs, settle};
+
+mod takeover;
 
 pub(crate) enum Ctl {
     Stop {
@@ -58,15 +67,14 @@ pub(crate) enum Msg {
     TurnEnded {
         agent: AgentId,
         driver: DriverId,
-        /// The router ended the driver with this turn.
-        last: bool,
+        after: crate::turns::After,
     },
     /// A compaction finished and the driver is warm again.
     Compacted { agent: AgentId, driver: DriverId },
     Exited {
         agent: AgentId,
         driver: DriverId,
-        failure: Option<Failure>,
+        exit: Exit,
     },
 }
 
@@ -104,6 +112,10 @@ struct Loop {
     gave_up: HashSet<AgentId>,
     /// Each agent's driver failures since its last completed turn.
     failures: HashMap<AgentId, Vec<Failure>>,
+    /// The handoff each agent's next driver starts in, from the driver that ended mid-task.
+    handoffs: HashMap<AgentId, Handoff>,
+    /// The task each agent's drivers last failed on, and the harnesses and models that failed.
+    failed_on: HashMap<AgentId, (TaskId, BTreeSet<HarnessModel>)>,
     /// Where in the log each inbox item arrived, so items go out in the order they came.
     arrived: HashMap<InboxItemId, u64>,
     /// A change to the project's settings or team since warm drivers were last put to the router.
@@ -136,6 +148,8 @@ pub(crate) fn spawn(
         no_driver: HashSet::new(),
         gave_up: HashSet::new(),
         failures: HashMap::new(),
+        handoffs: HashMap::new(),
+        failed_on: HashMap::new(),
         arrived: HashMap::new(),
         reviewed: HashSet::new(),
         tidy: false,
@@ -181,6 +195,7 @@ impl Loop {
             events
         })
         .await;
+        self.after_restart().await;
         self.evaluate().await;
         loop {
             tokio::select! {
@@ -211,12 +226,18 @@ impl Loop {
                 }
                 Ok(()) = self.changes.changed() => self.no_driver.clear(),
                 Some(msg) = msgs.recv() => match msg {
-                    Msg::TurnEnded { agent, driver, last } => {
+                    Msg::TurnEnded { agent, driver, after } => {
                         self.failures.remove(&agent);
-                        if last && self.live.get(&agent).is_some_and(|l| l.driver == driver) {
-                            self.live.remove(&agent);
+                        match after {
+                            crate::turns::After::Warm => self.idle(agent, driver),
+                            crate::turns::After::Retired => {
+                                if self.live.get(&agent).is_some_and(|l| l.driver == driver) {
+                                    self.live.remove(&agent);
+                                }
+                            }
+                            // Its last turn runs now, and it is busy until it exits.
+                            crate::turns::After::HandOff(_) => {}
                         }
-                        self.idle(agent, driver);
                     }
                     Msg::Compacted { agent, driver } => {
                         if let Some(l) = self.live.get_mut(&agent).filter(|l| l.driver == driver) {
@@ -224,13 +245,11 @@ impl Loop {
                         }
                         self.idle(agent, driver);
                     }
-                    Msg::Exited { agent, driver, failure } => {
+                    Msg::Exited { agent, driver, exit } => {
                         if self.live.get(&agent).is_some_and(|l| l.driver == driver) {
                             self.live.remove(&agent);
                         }
-                        if let Some(f) = failure {
-                            self.failed(agent, f).await;
-                        }
+                        self.exited(agent, driver, exit).await;
                     }
                 },
                 Some(_) = self.drivers.join_next(), if !self.drivers.is_empty() => {}
@@ -285,32 +304,6 @@ impl Loop {
                 self.ctx.id
             );
         }
-    }
-
-    /// Three failures in a row with no turn completed between: the agent stops trying, and its
-    /// task is reported failed to its delegator, with each failure.
-    async fn failed(&mut self, agent: AgentId, failure: Failure) {
-        let failures = self.failures.entry(agent).or_default();
-        failures.push(failure);
-        if (failures.len() as u32) < FAILURES_BEFORE_GIVING_UP {
-            return;
-        }
-        let failures = self.failures.remove(&agent).unwrap_or_default();
-        self.gave_up.insert(agent);
-        self.commit(move |s, clock| {
-            let Some(task) = s.current_task(agent).map(|t| t.task.id) else {
-                return Vec::new();
-            };
-            let summary = format!("Its drivers failed {} times in a row.", failures.len());
-            tools::report_failed(
-                s,
-                clock,
-                task,
-                TaskFailure::DriverFailures(failures),
-                summary,
-            )
-        })
-        .await;
     }
 
     async fn fired(&mut self, job: Job<ProjectJob>, at: Timestamp) {
@@ -464,7 +457,9 @@ impl Loop {
     async fn turn(&mut self, agent: AgentId, items: Vec<InboxItemId>) {
         let warm = self.live.get(&agent).map(Live::warm);
         let (shared, ctx) = (Arc::clone(&self.shared), Arc::clone(&self.ctx));
-        let (planned, task) = blocking(move || route::decide(&shared, &ctx, agent, warm)).await;
+        let failed_on = self.failed_on.get(&agent).cloned();
+        let (planned, task) =
+            blocking(move || route::decide(&shared, &ctx, agent, warm, failed_on)).await;
         match planned {
             // The turn is decided again once the driver has compacted.
             Ok(Planned::Reuse { compact: true }) => {
@@ -528,6 +523,7 @@ impl Loop {
             choice,
             first: items,
             carried,
+            handoff: self.handoffs.remove(&agent),
         };
         self.drivers.spawn(driver::run(
             Arc::clone(&self.shared),
