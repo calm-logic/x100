@@ -54,7 +54,7 @@ fn retired(r: RetireReason) -> &'static str {
         RetireReason::TooOld => "it had run too long",
         RetireReason::CannotCompact => "it could not compact",
         RetireReason::AgentRetired => "its agent retired",
-        RetireReason::Unfit(why) => crate::log::unfit(why),
+        RetireReason::Unfit(why) => crate::wording::unfit(why),
         RetireReason::ProjectSetUp => "the project was set up",
     }
 }

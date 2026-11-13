@@ -414,7 +414,7 @@ fn agent_event(n: &Names, agent: AgentId, event: &AgentEvent) -> String {
     }
 }
 
-fn inbox(n: &Names, item: &InboxItem) -> String {
+pub fn inbox(n: &Names, item: &InboxItem) -> String {
     match item {
         InboxItem::Task { task } => format!("the task {}", n.task(*task)),
         InboxItem::Message { .. } => "a message".into(),
@@ -440,7 +440,7 @@ fn inbox(n: &Names, item: &InboxItem) -> String {
     }
 }
 
-fn wait_on(n: &Names, on: &WaitOn) -> String {
+pub fn wait_on(n: &Names, on: &WaitOn) -> String {
     match on {
         WaitOn::Job(job) => n.job(*job),
         WaitOn::Report(task) => format!("the report on {}", n.task(*task)),
@@ -481,7 +481,7 @@ fn task_event(n: &Names, task: TaskId, event: &TaskEvent) -> String {
     }
 }
 
-fn job(n: &Names, does: &ProjectJob) -> String {
+pub fn job(n: &Names, does: &ProjectJob) -> String {
     match does {
         ProjectJob::Wake { agent, note, .. } => {
             format!("a wake-up for {}: {}", n.agent(*agent), snippet(note))

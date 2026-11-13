@@ -7,12 +7,20 @@
 //! of each log it had reached, so no event is lost or repeated. What changed is announced on a
 //! [`Change`] stream, in core's [`Changes`] terms, so an interface redraws only that.
 //!
-//! The client holds no logic beyond that. Requests are the protocol's own typed params.
+//! The client holds no logic beyond that. Requests are the protocol's own typed params. The wording
+//! modules are here, not in an interface, so the desktop app and the terminal say the same words.
 
 mod calls;
 mod integrations;
 mod manager;
 mod stream;
+
+/// An agent's transcript as log text, and the words for its drivers.
+pub mod output_log;
+/// How each event reads in the Log.
+pub mod wording;
+/// Plain words for the state's values, shared so both interfaces say the same thing.
+pub mod words;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -57,6 +65,40 @@ impl Options {
             launch: None,
             startup_timeout: Duration::from_secs(10),
         }
+    }
+}
+
+impl Options {
+    /// Options for an interface started with an optional `--socket` and `--daemon`. Without a
+    /// socket the default one is used, and an `x100d` beside the running program is started if
+    /// nothing answers there. With one, a daemon is started only if `daemon` names one, with the
+    /// socket's directory as its data directory.
+    pub fn from_flags(
+        name: impl Into<String>,
+        socket: Option<PathBuf>,
+        daemon: Option<PathBuf>,
+    ) -> Result<Options, String> {
+        let launch = match socket {
+            None => daemon
+                .or_else(|| {
+                    let exe = std::env::current_exe().ok()?;
+                    Some(exe.parent()?.join("x100d")).filter(|p| p.exists())
+                })
+                .map(|program| Launch {
+                    program,
+                    args: Vec::new(),
+                }),
+            Some(ref socket) => daemon.zip(socket.parent()).map(|(program, dir)| Launch {
+                program,
+                args: vec!["--data-dir".into(), dir.into()],
+            }),
+        };
+        let socket = socket
+            .or_else(default_socket)
+            .ok_or("no socket: pass --socket, or set X100_DATA_DIR or HOME")?;
+        let mut options = Options::new(socket, name);
+        options.launch = launch;
+        Ok(options)
     }
 }
 

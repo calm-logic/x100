@@ -8,6 +8,26 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[lib]
+name = "x100_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "x100"
 path = "src/main.rs"
+
+[dependencies]
+x100-client = { path = "../x100-client" }
+x100-core = { path = "../x100-core" }
+x100-proto = { path = "../x100-proto" }
+# The full-screen interface, and the terminal backend it draws through (macOS and Linux terminals).
+ratatui = "0.29"
+# An agent's terminal driver is a screen of its own: its bytes are parsed into cells.
+vt100 = "0.15"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "io-util", "io-std", "fs"] }
+
+[dev-dependencies]
+# The binary is run in a pseudo-terminal and its screen read back.
+portable-pty = "0.9"
+tempfile = "3"
+x100-core = { path = "../x100-core", features = ["testing"] }

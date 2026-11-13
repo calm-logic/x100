@@ -1,0 +1,40 @@
+x100 · Fernleaf · 8 agents
+ 1 Chat  2 Held  3 Team  4 Specs  5 Tasks  6 Files•  7 Budget•  8 Log•  9 Preview  0 Settings•
+n raises a task as a new idea.
+#   TITLE                                 STATUS       PART          RAISED BY
+1     Check the mobile layout             Done         -             Frontend
+2     Build the site                      Done         -             CEO
+3     Write the PRD                       In progress  -             CEO
+4     Write the schema migrations         Done         -             Backend
+5     Build the landing page              Done         -             Tech
+6     Research competitors                In progress  -             Product
+7     Build the API                       Done         -             Tech
+8     Launch Fernleaf                     In progress  -             You
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+n raise a task  ·  Tab next · p projects · q quits

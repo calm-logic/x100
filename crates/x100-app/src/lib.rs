@@ -44,7 +44,7 @@ pub mod team;
 pub mod term;
 pub mod theme;
 pub mod widgets;
-pub mod words;
+pub use x100_client::words;
 
 use gpui::{
     App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowHandle, WindowOptions, px, size,

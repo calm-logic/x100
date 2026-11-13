@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use gpui::App;
-use x100_client::{Client, Launch, Options};
+use x100_client::{Client, Options};
 
 struct Args {
     socket: Option<PathBuf>,
@@ -42,33 +42,7 @@ fn args() -> Result<Args, String> {
 }
 
 fn options(args: Args) -> Result<Options, String> {
-    let launch = match args.socket {
-        // A daemon started with no arguments listens on the default socket.
-        None => args
-            .daemon
-            .or_else(|| {
-                let exe = std::env::current_exe().ok()?;
-                Some(exe.parent()?.join("x100d")).filter(|p| p.exists())
-            })
-            .map(|program| Launch {
-                program,
-                args: Vec::new(),
-            }),
-        Some(ref socket) => args
-            .daemon
-            .zip(socket.parent())
-            .map(|(program, dir)| Launch {
-                program,
-                args: vec!["--data-dir".into(), dir.into()],
-            }),
-    };
-    let socket = args
-        .socket
-        .or_else(x100_client::default_socket)
-        .ok_or("no socket: pass --socket, or set X100_DATA_DIR or HOME")?;
-    let mut options = Options::new(socket, "x100-app");
-    options.launch = launch;
-    Ok(options)
+    Options::from_flags("x100-app", args.socket, args.daemon)
 }
 
 fn main() -> ExitCode {

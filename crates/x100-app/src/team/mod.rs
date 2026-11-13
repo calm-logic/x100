@@ -11,7 +11,7 @@
 //! progress never redraws another's row.
 
 mod drivers;
-mod log;
+use x100_client::output_log as log;
 mod look;
 mod output;
 mod row;

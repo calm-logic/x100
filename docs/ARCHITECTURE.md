@@ -948,6 +948,20 @@ headless browser.
 **proposed** The terminal interface is built with ratatui, on the same `x100-client` crate as the desktop app.
 Neither interface holds logic of its own beyond drawing and input.
 
+**As built (M7).** `x100` depends on `x100-client`, `x100-core` and `x100-proto` only.
+
+- The words for log events and an agent's output log live in `x100-client`, so both clients say the same
+  thing. The mapping from state to rows is still written once per client.
+- Tabs: Chat, Held, Team, Specs, Tasks, Files, Budget, Log, Preview, Settings. An agent opens to any depth,
+  with its agents, output, waits and jobs, notes, skills and trials. A terminal driver's screen is drawn
+  through `vt100`. A secret is typed masked and never drawn.
+- The last project and tab are kept in `x100-tui.state` beside the daemon's socket.
+- Single commands print one tab-separated record per line: `projects`, `new`, `send`, `chat`, `log`,
+  `actions`, `approve`, `deny`. `chat` and `log` follow with `-f` and stop at `--until TEXT`. Exit codes:
+  0 done, 1 refused or failed, 2 usage, 3 no daemon, 4 timed out.
+- Not in the terminal interface: changing an agent's look, writing a skill, and the Integrations part of
+  Settings.
+
 ## Multi-device and remote machines (later)
 
 **proposed** Each machine runs `x100d`. One is the project's home and holds the log. Other machines are runners

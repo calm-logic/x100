@@ -1,0 +1,40 @@
+x100 · Fernleaf · 8 agents
+ 1 Chat  2 Held  3 Team  4 Specs  5 Tasks  6 Files•  7 Budget  8 Log  9 Preview  0 Settings•
+11 Nov 09:00:00  x100          Scheduled the end of CEO's warm period for 11 Nov 09:05:00
+11 Nov 09:00:00  x100          CEO is still waiting
+11 Nov 09:00:00  x100          CEO finished a turn
+11 Nov 09:00:00  x100          Saved a checkpoint of CEO's work
+11 Nov 09:00:00  x100          Charged $0.01 to the project's budget for a turn of CEO
+11 Nov 09:00:00  x100          Carried out: accept the work on “Build the site”
+11 Nov 09:00:00  x100          Carried out: merge the work on “Build the site”
+11 Nov 09:00:00  x100          Merged the work on “Build the site”
+11 Nov 09:00:00  x100          Let through: merge the work on “Build the site”
+11 Nov 09:00:00  x100          Rated as a merge (low risk), by rule: merge the work on “Build the site”. Moves work between ag…
+11 Nov 09:00:00  x100          CEO wants to merge the work on “Build the site”
+11 Nov 09:00:00  CEO           Accepted the work on “Build the site”
+11 Nov 09:00:00  x100          Let through: accept the work on “Build the site”
+11 Nov 09:00:00  x100          Rated as something else (low risk), by rule: accept the work on “Build the site”. Changes the p…
+11 Nov 09:00:00  CEO           CEO wants to accept the work on “Build the site”
+11 Nov 09:00:00  x100          CEO started a turn
+11 Nov 09:00:00  x100          Cancelled the end of CEO's warm period
+11 Nov 09:00:00  x100          Scheduled the end of Tech's warm period for 11 Nov 09:05:00
+11 Nov 09:00:00  x100          Tech went idle
+11 Nov 09:00:00  x100          Tech finished a turn
+11 Nov 09:00:00  x100          Saved a checkpoint of Tech's work
+11 Nov 09:00:00  x100          Charged $0.02 to Tech's budget for a turn of Tech
+11 Nov 09:00:00  x100          Carried out: report on “Build the site”
+11 Nov 09:00:00  x100          CEO was given the report on “Build the site”
+11 Nov 09:00:00  Tech          Reported on “Build the site”, done: The site is built.
+11 Nov 09:00:00  x100          Let through: report on “Build the site”
+11 Nov 09:00:00  x100          Rated as something else (low risk), by rule: report on “Build the site”. Changes the project's …
+11 Nov 09:00:00  Tech          Tech wants to report on “Build the site”
+11 Nov 09:00:00  x100          Carried out: accept the work on “Build the API”
+11 Nov 09:00:00  x100          Carried out: merge the work on “Build the API”
+11 Nov 09:00:00  x100          Merged the work on “Build the API”
+11 Nov 09:00:00  x100          Let through: merge the work on “Build the API”
+11 Nov 09:00:00  x100          Rated as a merge (low risk), by rule: merge the work on “Build the API”. Moves work between age…
+11 Nov 09:00:00  x100          Tech wants to merge the work on “Build the API”
+11 Nov 09:00:00  Tech          Accepted the work on “Build the API”
+11 Nov 09:00:00  x100          Let through: accept the work on “Build the API”
+11 Nov 09:00:00  x100          Rated as something else (low risk), by rule: accept the work on “Build the API”. Changes the pr…
+↑/↓ PgUp/PgDn scroll  ·  Tab next · p projects · q quits

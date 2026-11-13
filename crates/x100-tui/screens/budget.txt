@@ -1,0 +1,40 @@
+x100 · Fernleaf · 8 agents
+ 1 Chat  2 Held  3 Team  4 Specs  5 Tasks  6 Files•  7 Budget  8 Log•  9 Preview  0 Settings•
+$0.20 spent of this project's $50.00 budget
+[░░░░░░░░░░░░░░░░░░░░]
+b sets the project budget, e sets the selected lead's.
+26.6k tokens so far: 21.7k in, 4.9k out, 0 read from cache, 0 written to cache.
+
+LEADS
+  Marketing     [░░░░░░░░░░░░░░░░░░░░] $0.00 of $5.00
+  Product       [░░░░░░░░░░░░░░░░░░░░] $0.03 of $8.00
+  Tech          [░░░░░░░░░░░░░░░░░░░░] $0.12 of $15.00
+
+LAB
+  [░░░░░░░░░░░░░░░░░░░░] $0.00 of $5.00
+
+SPEND PER AGENT
+  CEO           $0.06
+  Backend       $0.02
+  Frontend      $0.03
+  Marketing     $0.00
+  Migrations    <$0.01
+  Product       $0.02
+  Research      <$0.01
+  Tech          $0.07
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+b project budget · e lead budget  ·  Tab next · p projects · q quits

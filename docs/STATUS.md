@@ -327,16 +327,25 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - `x100-app/tests/integrations.rs` is still flaky: "timed out waiting until GitHub is connected", 1 of 2
     isolated runs in the subagent's hands, 0 of 6 in the orchestrator's. The scroll fix in M14 was not the
     whole cause. Not traced.
+- **M7, the terminal interface.** The orchestrator's run: 661 tests pass, 0 fail, 15 ignored, clippy and fmt
+  clean. `x100-tui/tests`, against a real daemon on the Fernleaf script: every tab's text matches the client's
+  state; an agent three levels down shows its output as it arrives and across a change of driver; quitting and
+  reopening shows the same project, in process and with the real binary in a pseudo-terminal; the single
+  commands run in bash pipelines with pipefail. Screens are saved in `crates/x100-tui/screens/`.
+  - **Not built:** changing an agent's look, writing a skill, Settings' Integrations part.
+  - **Not verified:** a terminal driver followed live (only a recorded screen is replayed). Notes and skills
+    with content, against the daemon. macOS. `cargo deny` on the new dependencies (ratatui, vt100,
+    portable-pty for tests).
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
 ## In progress
 
-M7, the terminal interface. Sonnet subagent.
+The flaky app integrations test.
 
 Queued, in this order:
 
-1. The flaky app integrations test.
+1. The terminal interface's gaps: looks, writing a skill, integrations.
 2. The two-part end-to-end run on the owner's logins, and a new recording. Needs the owner's go.
 3. M17, hardening and release. Needs real providers.
 

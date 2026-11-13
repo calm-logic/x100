@@ -5,7 +5,7 @@
 //! says there is more. Lines are made once, as the events arrive, and only the rows in view are
 //! laid out, so a log of tens of thousands of events costs what a screenful does.
 
-mod wording;
+use x100_client::wording;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -20,7 +20,6 @@ use x100_core::fold::ProjectPart;
 use x100_core::id::{AgentId, FileId, ProjectId};
 use x100_core::party::Actor;
 
-pub(crate) use wording::unfit;
 pub use wording::{Line, Names, kind, line, request};
 
 use crate::face;
