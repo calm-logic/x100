@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use x100_core::action::Decision;
+use x100_core::appearance::Appearance;
 use x100_core::effort::EffortRange;
 use x100_core::file::FileRef;
 use x100_core::git::CommitId;
@@ -166,6 +167,13 @@ pub struct SetEffortRange {
     pub project: ProjectId,
     pub agent: AgentId,
     pub range: EffortRange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetAppearance {
+    pub project: ProjectId,
+    pub agent: AgentId,
+    pub appearance: Appearance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

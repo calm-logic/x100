@@ -12,6 +12,7 @@ use x100_core::id::{ProjectId, TaskId};
 use x100_core::party::Party;
 use x100_core::task::TaskState;
 
+use crate::glass;
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
@@ -424,8 +425,8 @@ impl TasksView {
                     .items_center()
                     .gap(px(10.))
                     .child(
-                        widgets::button("raise-send", "Raise")
-                            .debug_selector(|| "raise-send".into())
+                        glass::primary("raise-send", "Raise")
+                            .selector("raise-send")
                             .on_click(cx.listener(|this, _, _, cx| this.raise(cx))),
                     )
                     .child(

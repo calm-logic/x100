@@ -19,6 +19,8 @@ mod work;
 
 use serde_json::{Value, json};
 use x100_core::agent::{AgentEvent, AgentState};
+use x100_core::appearance::{Appearance, Outline};
+use x100_core::dice::Dice;
 use x100_core::event::ProjectEvent;
 use x100_core::fold::{AgentRecord, Project, ProjectState};
 use x100_core::id::{AgentId, FileId, TaskId};
@@ -42,6 +44,8 @@ pub(crate) struct Ctx<'a> {
     pub now: Timestamp,
     pub settings: &'a DaemonSettings,
     pub clock: &'a dyn Clock,
+    /// What a new agent's look is rolled with.
+    pub dice: &'a dyn Dice,
     /// For `add_file`: whether the bytes it names are in the project's file store.
     pub file_stored: bool,
     /// For `list_integrations` and `link_project`: the connected Homebox's projects, asked
@@ -233,6 +237,18 @@ impl At<'_> {
             Some(_) => Err(format!("{agent} is retired")),
             None => Err(format!("{agent} is not on the team")),
         }
+    }
+
+    /// The look of an agent the caller adds now, given the outlines of those it adds with it.
+    pub fn child_look(&self, also_added: &[Outline]) -> Appearance {
+        let mut siblings: Vec<Outline> = self
+            .state
+            .children(self.id())
+            .into_iter()
+            .filter_map(|c| Some(self.state.agent(c)?.appearance.outline))
+            .collect();
+        siblings.extend_from_slice(also_added);
+        Appearance::child(self.me.appearance, &siblings, self.ctx.dice.roll())
     }
 
     pub fn is_my_child(&self, agent: AgentId) -> bool {

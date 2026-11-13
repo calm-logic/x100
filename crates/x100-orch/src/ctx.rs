@@ -9,6 +9,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use x100_core::dice::Dice;
 use x100_core::event::{Envelope, ProjectEvent};
 use x100_core::fold::ProjectState;
 use x100_core::id::ProjectId;
@@ -25,6 +26,7 @@ pub(crate) struct ProjectCtx {
     pub id: ProjectId,
     pub store: ProjectStore,
     pub clock: Arc<dyn Clock>,
+    pub dice: Arc<dyn Dice>,
     /// The project's job clock, which learns of a job only from `schedule` or a wake.
     jobs: Scheduler<ProjectState>,
     lock: Mutex<()>,
@@ -35,12 +37,14 @@ impl ProjectCtx {
         id: ProjectId,
         store: ProjectStore,
         clock: Arc<dyn Clock>,
+        dice: Arc<dyn Dice>,
         jobs: Scheduler<ProjectState>,
     ) -> Arc<Self> {
         Arc::new(Self {
             id,
             store,
             clock,
+            dice,
             jobs,
             lock: Mutex::new(()),
         })
@@ -85,6 +89,10 @@ impl Writer<'_> {
 
     pub fn clock(&self) -> &dyn Clock {
         &*self.ctx.clock
+    }
+
+    pub fn dice(&self) -> &dyn Dice {
+        &*self.ctx.dice
     }
 
     /// Appends `events` as one unit, with the end of every wait they end, and wakes the job clock

@@ -14,6 +14,7 @@ use super::records::{
 };
 use super::{Changes, Corrupt, Fail, FoldError, Record, expected_after, on, unknown};
 use crate::agent::AgentState;
+use crate::appearance::Appearance;
 use crate::effort::EffortRange;
 use crate::event::{Envelope, ProjectEvent, Seq};
 use crate::id::{ActionId, AgentId, DriverId, FileId, JobId, MessageId, TaskId, TrialId};
@@ -41,6 +42,8 @@ pub enum ProjectPart {
     Chat,
     HeldActions,
     Sidebar,
+    /// An agent's look changed: everything that draws its face, in any tab.
+    Looks,
 }
 
 /// The project itself, once its log has created it.
@@ -105,12 +108,19 @@ pub(super) struct Stamp {
 }
 
 impl AgentRecord {
-    fn new(id: AgentId, role: &str, charter: &str, joined: Timestamp) -> Self {
+    fn new(
+        id: AgentId,
+        role: &str,
+        charter: &str,
+        joined: Timestamp,
+        appearance: Appearance,
+    ) -> Self {
         Self {
             id,
             role: role.to_owned(),
             charter: charter.to_owned(),
             joined,
+            appearance,
             state: AgentState::INITIAL,
             inbox: Default::default(),
             items: BTreeMap::new(),
@@ -255,8 +265,10 @@ impl ProjectState {
             homebox: None,
             repository: None,
         });
-        self.agents
-            .insert(ceo, AgentRecord::new(ceo, "CEO", charter, at));
+        self.agents.insert(
+            ceo,
+            AgentRecord::new(ceo, "CEO", charter, at, Appearance::default()),
+        );
         for part in [
             ProjectPart::Team,
             ProjectPart::Budget,

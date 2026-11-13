@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::appearance::Appearance;
 use crate::driver::Incompatible;
 use crate::effort::EffortRange;
 use crate::id::{AgentId, InboxItemId, WaitId};
@@ -19,6 +20,8 @@ pub struct Agent {
     pub role: String,
     pub charter: String,
     pub position: Position,
+    /// Chosen when it is added, from its creator's: see [`Appearance::child`].
+    pub appearance: Appearance,
 }
 
 /// Where an agent sits in the tree. The CEO has no parent, a lead's parent is the CEO, and a worker
@@ -112,6 +115,8 @@ pub enum AgentEvent {
         effort: EffortRange,
         budget: Money,
     },
+    /// The builder changed how it looks.
+    AppearanceSet(Appearance),
 }
 
 impl AgentEvent {
@@ -129,6 +134,7 @@ impl AgentEvent {
             AgentEvent::BudgetSet(_) => "BudgetSet",
             AgentEvent::Moved { .. } => "Moved",
             AgentEvent::Promoted { .. } => "Promoted",
+            AgentEvent::AppearanceSet(_) => "AppearanceSet",
         }
     }
 }
@@ -142,8 +148,9 @@ impl AgentEvent {
 /// reported failed. Idle → Retired, and Planned → Retired for a lead a team change removes before
 /// any work reached it. There is no Failed state: drivers fail, agents do not.
 ///
-/// Changes to the agent's place in the team leave its state as it is, and are refused once it is
-/// retired. Whether they are allowed by the team's shape is [`crate::team::Team`]'s question.
+/// Changes to the agent's place in the team, and to how it looks, leave its state as it is, and
+/// are refused once it is retired. Whether they are allowed by the team's shape is
+/// [`crate::team::Team`]'s question.
 pub fn next(state: &AgentState, event: &AgentEvent) -> Result<AgentState, Rejected> {
     use AgentEvent as E;
     use AgentState as S;
@@ -157,9 +164,14 @@ pub fn next(state: &AgentState, event: &AgentEvent) -> Result<AgentState, Reject
         (S::Waiting(Waiting::ForDriver(_)), E::DriverFound) => Some(S::Working),
         (S::Working | S::Waiting(Waiting::ForDriver(_)), E::WentIdle) => Some(S::Idle),
         (S::Planned | S::Idle, E::Retired) => Some(S::Retired),
-        (_, E::EffortSet(_) | E::BudgetSet(_) | E::Moved { .. } | E::Promoted { .. }) => {
-            Some(state.clone())
-        }
+        (
+            _,
+            E::EffortSet(_)
+            | E::BudgetSet(_)
+            | E::Moved { .. }
+            | E::Promoted { .. }
+            | E::AppearanceSet(_),
+        ) => Some(state.clone()),
         _ => None,
     };
     next.ok_or(Rejected {

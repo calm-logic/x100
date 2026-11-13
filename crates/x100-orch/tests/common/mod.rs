@@ -315,6 +315,8 @@ impl World {
             ProcessRegistry::open_and_reap(dir.path().join("drivers.json")).expect("registry");
         let orch = Orchestrator::new(Config {
             clock: Arc::clone(&shared),
+            // Every run rolls the same looks, as a daemon started with `--seed` does.
+            dice: Arc::new(x100_core::dice::SeededDice::new(7)),
             harnesses,
             machine: MACHINE,
             daemon: daemon.clone(),

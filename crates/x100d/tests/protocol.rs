@@ -413,6 +413,7 @@ async fn methods_that_later_milestones_make_real_say_which() {
         "harnesses.rescan",
         "agents.set_budget",
         "agents.set_effort",
+        "agents.set_appearance",
         "credentials.add",
         "credentials.replace",
         "credentials.set_scope",

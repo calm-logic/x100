@@ -135,9 +135,14 @@ impl Render for Shell {
         let body = match views {
             None => {
                 let session = self.session.clone();
-                let start = self
-                    .start
-                    .get_or_insert_with(|| cx.new(|cx| StartView::new(session, window, cx)));
+                // The first run is a daemon with no project yet.
+                let first_run = session
+                    .read(cx)
+                    .client()
+                    .with_state(|s| s.projects.is_empty());
+                let start = self.start.get_or_insert_with(|| {
+                    cx.new(|cx| StartView::new(session, first_run, window, cx))
+                });
                 body.child(start.clone())
             }
             Some((chat, _)) if !self.started => {

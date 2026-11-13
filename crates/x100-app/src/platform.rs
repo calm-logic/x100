@@ -39,6 +39,40 @@ pub fn expand_home(path: &str) -> String {
     }
 }
 
+/// Whether the desktop asks apps to keep motion down. `X100_REDUCE_MOTION=1` or `0` overrides it.
+/// Each desktop keeps it in its own settings, read with its own command: a missing command or
+/// setting means no.
+pub fn reduces_motion() -> bool {
+    if let Ok(v) = std::env::var("X100_REDUCE_MOTION") {
+        return v == "1";
+    }
+    let said = |program: &str, args: &[&str]| {
+        std::process::Command::new(program)
+            .args(args)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    };
+    if cfg!(target_os = "macos") {
+        said(
+            "defaults",
+            &["read", "com.apple.universalaccess", "reduceMotion"],
+        )
+        .is_some_and(|v| v == "1")
+    } else if cfg!(windows) {
+        let key = r"HKCU\Control Panel\Desktop\WindowMetrics";
+        said("reg", &["query", key, "/v", "MinAnimate"]).is_some_and(|v| v.ends_with(" 0"))
+    } else {
+        said(
+            "gsettings",
+            &["get", "org.gnome.desktop.interface", "enable-animations"],
+        )
+        .is_some_and(|v| v == "false")
+    }
+}
+
 /// Set once the window is open. Until then a panic is GPUI failing to reach the display.
 static STARTED: AtomicBool = AtomicBool::new(false);
 

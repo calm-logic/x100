@@ -12,6 +12,7 @@ use x100_core::file::FileRef;
 use x100_core::id::{MessageId, ProjectId};
 
 use super::attach;
+use crate::glass;
 use crate::input::{InputEvent, TextInput};
 use crate::session::Session;
 use crate::{theme, widgets};
@@ -459,8 +460,9 @@ impl Render for Composer {
                         },
                     ))
                     .child(
-                        widgets::button("send", if self.sending { "Sending…" } else { "Send" })
-                            .debug_selector(|| "send".into())
+                        glass::primary("send", if self.sending { "Sending…" } else { "Send" })
+                            .rim_only()
+                            .selector("send")
                             .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
                     ),
             )

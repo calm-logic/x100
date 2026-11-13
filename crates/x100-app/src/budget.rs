@@ -8,14 +8,15 @@ use x100_core::id::{AgentId, ProjectId};
 use x100_core::money::Money;
 
 use crate::session::{Session, SessionEvent};
-use crate::widgets::{self, Orb};
+use crate::{face, widgets};
 use crate::{theme, words};
+use x100_core::appearance::Appearance;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BudgetModel {
     pub view: BudgetView,
-    /// Every agent by name, the CEO first and then in the order they joined.
-    pub agents: Vec<(AgentId, String)>,
+    /// Every agent by name and look, the CEO first and then in the order they joined.
+    pub agents: Vec<(AgentId, String, Appearance)>,
     pub ceo: AgentId,
 }
 
@@ -28,7 +29,10 @@ impl BudgetModel {
         Some(BudgetModel {
             ceo,
             view,
-            agents: agents.into_iter().map(|a| (a.id, a.role.clone())).collect(),
+            agents: agents
+                .into_iter()
+                .map(|a| (a.id, a.role.clone(), a.appearance))
+                .collect(),
         })
     }
 }
@@ -45,7 +49,9 @@ impl BudgetTab {
         let subscription = cx.subscribe(&session, |this, _, event, cx| {
             let ours = match event {
                 SessionEvent::Changed(Change::Project { project, changes }) => {
-                    *project == this.project && changes.parts.contains(&ProjectPart::Budget)
+                    *project == this.project
+                        && (changes.parts.contains(&ProjectPart::Budget)
+                            || changes.parts.contains(&ProjectPart::Looks))
                 }
                 SessionEvent::Changed(Change::Reset) => true,
                 _ => false,
@@ -98,14 +104,21 @@ fn section(title: &'static str) -> impl IntoElement {
 }
 
 /// A name, a meter, and what the line has spent, with a note when it is stopped.
-fn line(name: String, orb: Orb, meter: u8, amount: String, stopped: bool) -> impl IntoElement {
+/// A line's face is its agent's, and the lab, which is no agent, has none.
+fn line(
+    name: String,
+    look: Option<Appearance>,
+    meter: u8,
+    amount: String,
+    stopped: bool,
+) -> impl IntoElement {
     div()
         .flex()
         .items_center()
         .gap(px(12.))
         .py(px(6.))
         .text_size(px(theme::TEXT))
-        .child(widgets::orb(22., orb))
+        .child(look.map_or_else(|| face::blank(22.), |l| face::face(22., l)))
         .child(div().flex_none().w(px(120.)).child(name))
         .child(div().flex_1().child(widgets::meter(meter)))
         .when(stopped, |d| {
@@ -160,9 +173,10 @@ impl Render for BudgetTab {
         let name = |id: AgentId| {
             m.agents
                 .iter()
-                .find(|(a, _)| *a == id)
-                .map_or_else(|| "An agent".into(), |(_, n)| n.clone())
+                .find(|(a, ..)| *a == id)
+                .map_or_else(|| "An agent".into(), |(_, n, _)| n.clone())
         };
+        let look = |id: AgentId| m.agents.iter().find(|(a, ..)| *a == id).map(|(.., l)| *l);
         let u = &v.usage;
         page.child(
             div()
@@ -212,7 +226,7 @@ impl Render for BudgetTab {
         .children(v.leads.iter().map(|(id, l)| {
             line(
                 name(*id),
-                Orb::Agent,
+                look(*id),
                 share(l.spent, l.budget),
                 of(l),
                 l.stopped,
@@ -229,17 +243,17 @@ impl Render for BudgetTab {
         .child(section("Lab"))
         .child(line(
             "Lab".into(),
-            Orb::Agent,
+            None,
             share(v.lab.spent, v.lab.budget),
             of(&v.lab),
             v.lab.stopped,
         ))
         .child(section("Spend by agent"))
-        .children(m.agents.iter().map(|(id, role)| {
+        .children(m.agents.iter().map(|(id, role, look)| {
             let spent = v.agents.get(id).map_or(Money::ZERO, |s| s.cost);
             line(
                 role.clone(),
-                if *id == m.ceo { Orb::Ceo } else { Orb::Agent },
+                Some(*look),
                 (u128::from(spent.micros()) * 100 / u128::from(max)) as u8,
                 words::money(spent),
                 false,

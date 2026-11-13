@@ -84,6 +84,7 @@ pub async fn call(hub: &Hub, call: Call) -> Result<Value, RpcError> {
         Call::ResizeTerminal(p) => out(agents::resize_terminal(hub, p).await),
         Call::SetLeadBudget(p) => out(agents::set_budget(hub, p).await),
         Call::SetEffortRange(p) => out(agents::set_effort(hub, p).await),
+        Call::SetAppearance(p) => out(agents::set_appearance(hub, p).await),
         Call::SetMachineCap(p) => out(daemon::set_cap(hub, p).await),
         Call::RescanHarnesses(p) => out(daemon::rescan(hub, p).await),
         Call::AddCredential(p) => out(credentials::add(hub, p).await),

@@ -288,6 +288,10 @@ methods! {
     /// Sets an agent's effort range. A driver outside the new range is handed on.
     SetEffortRange, "agents.set_effort", SetEffortRange => Done, [NotFound, Rejected];
 
+    /// Sets how an agent looks: the outline of its face and its colour. A retired agent is
+    /// `wrong_state`.
+    SetAppearance, "agents.set_appearance", SetAppearance => Done, [NotFound, WrongState];
+
     /// Replaces the driver acting for an agent. The work hands off the way any handoff does.
     ReplaceDriver, "agents.replace_driver", ReplaceDriver => Done, [NotFound, WrongState];
 

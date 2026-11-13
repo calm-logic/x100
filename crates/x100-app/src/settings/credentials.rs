@@ -10,6 +10,7 @@ use x100_core::credential::{CredentialScope, Projects};
 use x100_core::fold::DaemonPart;
 use x100_core::id::{CredentialRef, ProjectId};
 
+use crate::glass;
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
@@ -499,8 +500,8 @@ impl Render for Credentials {
                                 .items_center()
                                 .gap(px(8.))
                                 .child(
-                                    widgets::button(("cred-save", i), "Confirm")
-                                        .debug_selector(|| "cred-save".into())
+                                    glass::primary(("cred-save", i), "Confirm")
+                                        .selector("cred-save")
                                         .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
                                 )
                                 .child(
@@ -541,8 +542,8 @@ impl Render for Credentials {
                             .items_center()
                             .gap(px(8.))
                             .child(
-                                widgets::button("cred-add-send", "Add")
-                                    .debug_selector(|| "cred-add-send".into())
+                                glass::primary("cred-add-send", "Add")
+                                    .selector("cred-add-send")
                                     .on_click(cx.listener(|this, _, _, cx| this.add(cx))),
                             )
                             .child(widgets::button("cred-add-cancel", "Cancel").on_click(

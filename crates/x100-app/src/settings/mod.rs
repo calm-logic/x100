@@ -31,6 +31,7 @@ pub use homebox::{HomeboxModel, HomeboxPart};
 pub use integrations::{IntegrationsModel, IntegrationsPart};
 pub use sandbox::{SandboxModel, SandboxPart};
 
+use crate::glass;
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
@@ -412,8 +413,8 @@ impl SettingsView {
                     .child(field),
             )
             .child(
-                widgets::button(set_id.clone(), "Set")
-                    .debug_selector(move || set_id.clone())
+                glass::primary(set_id.clone(), "Set")
+                    .selector(set_id.clone())
                     .on_click(cx.listener(move |this, _, _, cx| this.apply_budget(control, cx))),
             )
             .into_any_element()
@@ -475,14 +476,16 @@ impl Render for SettingsView {
                 .items_center()
                 .gap(px(10.))
                 .children(outcome(self, Control::Ask))
-                .child(widgets::segments(ASK.into_iter().enumerate().map(
-                    |(i, level)| {
+                .child(widgets::segments(
+                    "ask",
+                    ASK.iter().position(|l| *l == m.ask),
+                    ASK.into_iter().enumerate().map(|(i, level)| {
                         widgets::segment(("ask", i), words::ask_me_about(level), level == m.ask)
                             .debug_selector(move || format!("ask-{i}"))
                             .on_click(cx.listener(move |this, _, _, cx| this.set_ask(level, cx)))
                             .into_any_element()
-                    },
-                ))),
+                    }),
+                )),
         );
         let total = self.amount(Control::Budget, "budget".into(), cx);
         let budget = row(
@@ -509,29 +512,40 @@ impl Render for SettingsView {
             let name = lead.name.clone();
             let end = |high: bool, cx: &mut Context<Self>| {
                 let name = name.clone();
-                widgets::segments(Effort::ALL.into_iter().enumerate().map(|(i, e)| {
-                    let on = if high {
-                        lead.effort.max() == e
-                    } else {
-                        lead.effort.min() == e
-                    };
-                    let key = if high { "hi" } else { "lo" };
-                    let selector = format!("effort-{key}-{name}-{i}");
-                    widgets::segment(
-                        gpui::ElementId::NamedInteger(selector.clone().into(), i as u64),
-                        SHORT[i],
-                        on,
-                    )
-                    .debug_selector(move || selector.clone())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if high {
-                            this.set_effort(id, None, Some(e), cx)
+                let at = if high {
+                    lead.effort.max()
+                } else {
+                    lead.effort.min()
+                };
+                let key = if high { "hi" } else { "lo" };
+                let group = format!("effort-{key}-{name}");
+                widgets::segments(
+                    gpui::ElementId::Name(group.into()),
+                    Effort::ALL.iter().position(|e| *e == at),
+                    Effort::ALL.into_iter().enumerate().map(|(i, e)| {
+                        let on = if high {
+                            lead.effort.max() == e
                         } else {
-                            this.set_effort(id, Some(e), None, cx)
-                        }
-                    }))
-                    .into_any_element()
-                }))
+                            lead.effort.min() == e
+                        };
+                        let key = if high { "hi" } else { "lo" };
+                        let selector = format!("effort-{key}-{name}-{i}");
+                        widgets::segment(
+                            gpui::ElementId::NamedInteger(selector.clone().into(), i as u64),
+                            SHORT[i],
+                            on,
+                        )
+                        .debug_selector(move || selector.clone())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if high {
+                                this.set_effort(id, None, Some(e), cx)
+                            } else {
+                                this.set_effort(id, Some(e), None, cx)
+                            }
+                        }))
+                        .into_any_element()
+                    }),
+                )
             };
             leads.push(
                 row(
@@ -564,14 +578,16 @@ impl Render for SettingsView {
                     .items_center()
                     .gap(px(10.))
                     .children(outcome(self, Control::Model(i)))
-                    .child(widgets::segments([widgets::segment(
-                        ("model", i),
-                        if on { "Allowed" } else { "Off" },
-                        on,
-                    )
-                    .debug_selector(move || format!("model-{i}"))
-                    .on_click(cx.listener(move |this, _, _, cx| this.allow(i, !on, cx)))
-                    .into_any_element()])),
+                    .child(widgets::segments(
+                        ("model-switch", i),
+                        on.then_some(0),
+                        [
+                            widgets::segment(("model", i), if on { "Allowed" } else { "Off" }, on)
+                                .debug_selector(move || format!("model-{i}"))
+                                .on_click(cx.listener(move |this, _, _, cx| this.allow(i, !on, cx)))
+                                .into_any_element(),
+                        ],
+                    )),
             )
         });
         page.child(name)

@@ -5,6 +5,7 @@
 
 mod attach;
 mod composer;
+pub mod opening;
 mod start;
 
 use std::collections::HashMap;
@@ -23,13 +24,14 @@ use x100_core::message::Route;
 use x100_core::task::Outcome;
 
 pub use composer::{Composer, Target};
-pub use start::StartView;
+pub use start::{Opening, StartView};
 
+use crate::glass;
 use crate::held::HeldStrip;
 use crate::markdown::Markdown;
 use crate::session::{Session, SessionEvent};
 use crate::theme;
-use crate::widgets::{self, Orb};
+use crate::widgets;
 
 /// Whether the builder has sent the project's first message.
 pub fn started(p: &ProjectState) -> bool {
@@ -286,8 +288,8 @@ impl ChatView {
                                     .text_color(theme::ask())
                                     .child("Waiting for your answer")
                                     .child(
-                                        widgets::button(("answer", i), "Answer")
-                                            .debug_selector(|| "answer".into())
+                                        glass::primary(("answer", i), "Answer")
+                                            .selector("answer")
                                             .on_click(move |_, window, cx| {
                                                 composer.update(cx, |c, cx| {
                                                     c.answer(id, cx);
@@ -350,9 +352,13 @@ impl ChatView {
     }
 }
 
-/// Before a project's first message: the CEO, outlined, over the box to write in, and anything
-/// that goes under it.
-fn first_run(composer: AnyElement, below: Option<AnyElement>) -> AnyElement {
+/// Before a project's first message: the box to write in, and anything that goes under it. The work
+/// starts here, so there is no mascot over it.
+fn first_run(
+    composer: AnyElement,
+    below: Option<AnyElement>,
+    over: Option<AnyElement>,
+) -> AnyElement {
     div()
         .size_full()
         .flex()
@@ -360,8 +366,14 @@ fn first_run(composer: AnyElement, below: Option<AnyElement>) -> AnyElement {
         .items_center()
         .justify_center()
         .p(px(20.))
-        .child(widgets::orb(104., Orb::Outline).mb(px(26.)))
-        .child(div().w(px(600.)).max_w_full().child(composer))
+        .child(
+            div()
+                .relative()
+                .w(px(600.))
+                .max_w_full()
+                .child(composer)
+                .children(over),
+        )
         .children(below)
         .into_any_element()
 }
@@ -386,7 +398,7 @@ impl Render for ChatView {
             return div().into_any_element();
         };
         if !started {
-            return first_run(self.composer.clone().into_any_element(), None);
+            return first_run(self.composer.clone().into_any_element(), None, None);
         }
         if lines.len() != self.lines {
             self.lines = lines.len();

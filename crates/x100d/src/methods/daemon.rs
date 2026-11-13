@@ -150,6 +150,12 @@ fn invalid(setting: &DaemonSetting) -> Option<&'static str> {
         DaemonSetting::SandboxPrograms(paths) if paths.iter().any(|p| !p.is_absolute()) => {
             Some("a program's path must be absolute")
         }
+        // Under half, the model's answer is more likely wrong than right, so the threshold would
+        // not mean "sure". Above 95, nearly every answer is raised, which for a write is the same
+        // as having no decision model.
+        DaemonSetting::DecisionThreshold(p) if !(50..=95).contains(&p.value()) => {
+            Some("the confidence threshold must be from 50 to 95 percent")
+        }
         // Its key goes into the vault with it, scoped to its host, so it has methods of its own.
         DaemonSetting::DecisionModel(_) => Some(
             "connect or disconnect a decision model with decision_model.connect or .disconnect",

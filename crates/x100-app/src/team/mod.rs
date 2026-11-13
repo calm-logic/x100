@@ -12,13 +12,14 @@
 
 mod drivers;
 mod log;
+mod look;
 mod output;
 mod row;
 
 use std::collections::HashMap;
 
 use gpui::{
-    AnyElement, Context, Entity, FontWeight, StyleRefinement, Subscription, Window, div,
+    AnyElement, Context, Entity, Focusable, FontWeight, StyleRefinement, Subscription, Window, div,
     prelude::*, px,
 };
 use x100_client::Change;
@@ -26,6 +27,7 @@ use x100_core::fold::{ProjectPart, ProjectState};
 use x100_core::id::{AgentId, DriverId, ProjectId};
 
 pub use drivers::{DriverModel, DriverRow};
+pub use look::{LookPicker, LookTab};
 pub use output::{AgentOutput, SegmentShown};
 pub use row::{AgentHeader, AgentModel, AgentRow, RowEvent};
 
@@ -35,8 +37,7 @@ use crate::reflection::Reflection;
 /// M14 build them, and until then the agent view leaves them out rather than say so three times.
 const REFLECTION_SERVED: bool = false;
 use crate::session::{Session, SessionEvent};
-use crate::widgets::Orb;
-use crate::{theme, widgets, words};
+use crate::{face, theme, widgets, words};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Listing {
@@ -71,6 +72,8 @@ pub struct TeamView {
     output: Option<Entity<AgentOutput>>,
     /// The agent's memories, skills and trials, under its output.
     reflection: Option<Entity<Reflection>>,
+    /// The popover that changes the opened agent's look, while it is open.
+    picker: Option<(Entity<LookPicker>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -94,6 +97,7 @@ impl TeamView {
             listed_drivers: Vec::new(),
             output: None,
             reflection: None,
+            picker: None,
             _subscriptions: vec![subscription],
         };
         view.relist(cx);
@@ -144,8 +148,34 @@ impl TeamView {
         self.reflection.clone()
     }
 
+    pub fn picker(&self) -> Option<Entity<LookPicker>> {
+        self.picker.as_ref().map(|(p, _)| p.clone())
+    }
+
+    /// Opens the popover that changes the opened agent's look, anchored to its face, and gives it
+    /// the keyboard so Escape closes it. A retired agent's look no longer changes.
+    pub fn pick_look(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(header) = &self.header else { return };
+        let (agent, retired) = {
+            let h = header.read(cx);
+            (h.agent(), h.shown().is_none_or(|m| m.retired))
+        };
+        if retired {
+            return;
+        }
+        let picker = cx.new(|cx| LookPicker::new(self.session.clone(), self.project, agent, cx));
+        let closed = cx.subscribe(&picker, |this, _, _: &gpui::DismissEvent, cx| {
+            this.picker = None;
+            cx.notify();
+        });
+        window.focus(&picker.focus_handle(cx), cx);
+        self.picker = Some((picker, closed));
+        cx.notify();
+    }
+
     /// Opens an agent, or the CEO for `None`.
     pub fn open(&mut self, agent: Option<AgentId>, cx: &mut Context<Self>) {
+        self.picker = None;
         self.focus = agent;
         self.shown = Shown::Agents;
         self.header = None;
@@ -197,7 +227,14 @@ impl TeamView {
             .as_ref()
             .is_none_or(|h| h.read(cx).agent() != agent)
         {
-            self.header = Some(cx.new(|cx| AgentHeader::new(session.clone(), project, agent, cx)));
+            let header = cx.new(|cx| AgentHeader::new(session.clone(), project, agent, cx));
+            // At the top level, clicking the CEO opens its page, as clicking a lead's row does.
+            self._subscriptions.push(
+                cx.subscribe(&header, |this, _, RowEvent::Open(agent), cx| {
+                    this.open(Some(*agent), cx)
+                }),
+            );
+            self.header = Some(header);
         }
         for child in &children {
             if let Some(row) = self.rows.get(child) {
@@ -278,6 +315,7 @@ impl TeamView {
     /// The drilldown's corner: the agent's head, small, its name beside it, and the agents above
     /// it back to the CEO, each of which opens it.
     fn corner(&self, cx: &mut Context<Self>) -> AnyElement {
+        let ceo = self.state(cx, |p| p.project().map(|pr| pr.ceo)).flatten();
         let Some(m) = self
             .header
             .as_ref()
@@ -293,20 +331,46 @@ impl TeamView {
                     trail.pop();
                     trail
                         .into_iter()
-                        .filter_map(|a| Some((a, p.agent(a)?.role.clone())))
+                        .filter_map(|a| {
+                            let r = p.agent(a)?;
+                            Some((Some(a), r.role.clone(), Some(r.appearance)))
+                        })
                         .collect::<Vec<_>>()
                 })
             })
             .unwrap_or_default();
+        // The CEO's own page has nobody above it; its way back is to the team.
+        let above = if self.focus.is_some() && self.focus == ceo {
+            vec![(None, "Team".to_owned(), None)]
+        } else {
+            above
+        };
+        let picker = self.picker.as_ref().map(|(p, _)| p.clone());
+        let head = div()
+            .id("drill-head")
+            .relative()
+            .rounded_full()
+            .when(!m.retired, |d| {
+                d.cursor_pointer()
+                    .on_click(cx.listener(|this, _, window, cx| this.pick_look(window, cx)))
+            })
+            .debug_selector(|| "drill-head".into())
+            .child(face::face(22., m.look))
+            .children(picker.map(|p| {
+                div()
+                    .absolute()
+                    .top(px(28.))
+                    .left(px(-4.))
+                    .child(gpui::deferred(
+                        gpui::anchored().snap_to_window_with_margin(px(8.)).child(p),
+                    ))
+            }));
         let mut corner = div()
             .flex()
             .items_center()
             .gap(px(8.))
             .min_w_0()
-            .child(
-                widgets::orb(22., if m.ceo { Orb::Ceo } else { Orb::Agent })
-                    .debug_selector(|| "drill-head".into()),
-            )
+            .child(head)
             .child(
                 div()
                     .debug_selector(|| "drill-name".into())
@@ -327,12 +391,12 @@ impl TeamView {
                 .gap(px(2.))
                 .text_size(px(theme::SMALL))
                 .text_color(theme::dim());
-            for (i, (agent, role)) in above.into_iter().enumerate() {
+            for (i, (agent, role, look)) in above.into_iter().enumerate() {
                 if i > 0 {
                     crumbs = crumbs.child("›");
                 }
                 // Opening the CEO is opening the view's start.
-                let target = (i > 0).then_some(agent);
+                let target = agent.filter(|_| i > 0);
                 crumbs = crumbs.child(
                     div()
                         .id(("crumb", i))
@@ -344,6 +408,10 @@ impl TeamView {
                         .text_color(theme::muted())
                         .hover(|s| s.bg(theme::hover()).text_color(theme::text()))
                         .on_click(cx.listener(move |this, _, _, cx| this.open(target, cx)))
+                        .flex()
+                        .items_center()
+                        .gap(px(5.))
+                        .children(look.map(|l| face::face(14., l)))
                         .child(role),
                 );
             }
@@ -354,16 +422,22 @@ impl TeamView {
 
     fn switch(&self, cx: &mut Context<Self>) -> AnyElement {
         let on = self.listing;
-        widgets::segments([Listing::Agents, Listing::Drivers].map(|listing| {
-            let label = match listing {
-                Listing::Agents => "Agents",
-                Listing::Drivers => "Drivers",
-            };
-            widgets::segment(label, label, on == listing)
-                .debug_selector(move || format!("listing-{label}"))
-                .on_click(cx.listener(move |this, _, _, cx| this.set_listing(listing, cx)))
-                .into_any_element()
-        }))
+        let listings = [Listing::Agents, Listing::Drivers];
+        let at = listings.iter().position(|l| *l == on);
+        widgets::segments(
+            "listing",
+            at,
+            listings.map(|listing| {
+                let label = match listing {
+                    Listing::Agents => "Agents",
+                    Listing::Drivers => "Drivers",
+                };
+                widgets::segment(label, label, on == listing)
+                    .debug_selector(move || format!("listing-{label}"))
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_listing(listing, cx)))
+                    .into_any_element()
+            }),
+        )
         .into_any_element()
     }
 
@@ -372,6 +446,8 @@ impl TeamView {
         let on = self.shown;
         let agents = words::agents(self.listed.len());
         widgets::segments(
+            "shown",
+            Some(on as usize),
             [
                 (Shown::Agents, agents),
                 (Shown::Output, "Its output".into()),

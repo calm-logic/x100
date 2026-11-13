@@ -25,6 +25,7 @@ use x100_core::time::Timestamp;
 use x100_proto::{CreateProject, GetProject, SetDaemonSetting};
 
 pub const START: Timestamp = Timestamp::from_millis(1_794_387_600_000);
+pub const SEED: u64 = 7;
 /// Bounds a hang; a whole run takes seconds.
 pub const WAIT: Duration = Duration::from_secs(60);
 const SCRIPTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../x100-orch/tests/scripts");
@@ -51,6 +52,7 @@ pub fn binary(name: &str) -> PathBuf {
 
 pub struct Daemon {
     pub dir: tempfile::TempDir,
+    env: Vec<(String, String)>,
     child: Option<Child>,
 }
 
@@ -65,45 +67,25 @@ impl Daemon {
     pub fn fernleaf_with(env: &[(&str, String)]) -> Daemon {
         // Under the build's own directory, not `/tmp`, which a sandbox replaces with its own.
         let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
-        let child = Command::new(binary("x100d"))
-            .arg("--data-dir")
-            .arg(dir.path().join("data"))
-            // Code directories go under the test's own directory, never the builder's `~/x100`.
-            .arg("--projects-root")
-            .arg(dir.path().join("projects"))
-            .arg("--scripts-dir")
-            .arg(SCRIPTS)
-            .arg("--fake-harness")
-            .arg(binary("x100d-fake-harness"))
-            .arg("--fake-clock")
-            .arg(START.as_millis().to_string())
-            // The vault's key is a file in the test's data directory, never in a keychain.
-            .env("X100_NO_KEYCHAIN", "1")
-            .env("X100_DOCKER", "/nonexistent/x100-test/docker")
-            .env("X100_GH", "/nonexistent/x100-test/gh")
-            .envs(env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("x100d starts");
+        let env: Vec<(String, String)> =
+            env.iter().map(|(k, v)| ((*k).into(), v.clone())).collect();
+        let child = spawn(dir.path(), START, &env);
         Daemon {
             dir,
+            env,
             child: Some(child),
         }
     }
 
-    pub fn socket(&self) -> PathBuf {
-        self.dir.path().join("data/x100d.sock")
+    /// Stops the daemon and starts it again on the same data, its fake clock at `at`, as after
+    /// the builder's machine restarted.
+    pub fn restart(&mut self, at: Timestamp) {
+        self.stop();
+        self.child = Some(spawn(self.dir.path(), at, &self.env));
     }
 
-    /// Where the daemon makes a project's code directory when its CEO sets it up.
-    pub fn projects_root(&self) -> PathBuf {
-        self.dir.path().join("projects")
-    }
-}
-
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        // SIGKILL leaves driver processes behind; SIGTERM lets the daemon stop them.
+    /// SIGKILL leaves driver processes behind; SIGTERM lets the daemon stop them.
+    fn stop(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = Command::new("kill")
                 .args(["-TERM", &child.id().to_string()])
@@ -119,6 +101,47 @@ impl Drop for Daemon {
             let _ = child.wait();
         }
     }
+
+    pub fn socket(&self) -> PathBuf {
+        self.dir.path().join("data/x100d.sock")
+    }
+
+    /// Where the daemon makes a project's code directory when its CEO sets it up.
+    pub fn projects_root(&self) -> PathBuf {
+        self.dir.path().join("projects")
+    }
+}
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn spawn(dir: &Path, at: Timestamp, env: &[(String, String)]) -> Child {
+    Command::new(binary("x100d"))
+        .arg("--data-dir")
+        .arg(dir.join("data"))
+        // Code directories go under the test's own directory, never the builder's `~/x100`.
+        .arg("--projects-root")
+        .arg(dir.join("projects"))
+        .arg("--scripts-dir")
+        .arg(SCRIPTS)
+        .arg("--fake-harness")
+        .arg(binary("x100d-fake-harness"))
+        .arg("--fake-clock")
+        .arg(at.as_millis().to_string())
+        // The same looks for the same team on every run.
+        .arg("--seed")
+        .arg(SEED.to_string())
+        // The vault's key is a file in the test's data directory, never in a keychain.
+        .env("X100_NO_KEYCHAIN", "1")
+        .env("X100_DOCKER", "/nonexistent/x100-test/docker")
+        .env("X100_GH", "/nonexistent/x100-test/gh")
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .spawn()
+        .expect("x100d starts")
 }
 
 /// The daemon, a Tokio runtime for clients, and the app's GPUI test context.

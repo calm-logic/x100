@@ -8,9 +8,11 @@
 
 pub mod action;
 pub mod agent;
+pub mod appearance;
 pub mod bytes;
 pub mod credential;
 pub mod decision;
+pub mod dice;
 pub mod driver;
 pub mod effort;
 pub mod event;

@@ -56,6 +56,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::{mpsc, oneshot};
 use x100_core::action::Decision;
+use x100_core::dice::Dice;
 use x100_core::effort::EffortRange;
 use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::{
@@ -76,7 +77,7 @@ use x100_store::{DaemonLog, ProjectStore};
 pub use builder::Refused;
 pub use desk::{Desk, Refusal};
 pub use egress::EgressEnd;
-pub use ids::new_id;
+pub use ids::{OsDice, new_id};
 pub use mcp::ToolServer;
 pub use processes::{ProcessRegistry, Reaped};
 pub use recover::recover;
@@ -122,6 +123,9 @@ pub type Settings = Arc<dyn Fn() -> DaemonSettings + Send + Sync>;
 /// Everything the orchestrator is built from.
 pub struct Config {
     pub clock: Arc<dyn Clock>,
+    /// What a new agent's look is rolled with: [`OsDice`], or a seeded one for a run that must
+    /// repeat.
+    pub dice: Arc<dyn Dice>,
     /// The harnesses this run can start, by the id the daemon's log gives each.
     pub harnesses: HashMap<HarnessId, Arc<dyn Harness>>,
     /// The machine those harnesses run on.
@@ -147,6 +151,7 @@ pub struct Config {
 
 pub(crate) struct Shared {
     pub clock: Arc<dyn Clock>,
+    pub dice: Arc<dyn Dice>,
     /// Replaced whole when the builder asks for a rescan.
     pub harnesses: RwLock<HashMap<HarnessId, Arc<dyn Harness>>>,
     pub machine: MachineId,
@@ -219,6 +224,7 @@ impl Orchestrator {
         Self {
             shared: Arc::new(Shared {
                 clock: config.clock,
+                dice: config.dice,
                 harnesses: RwLock::new(config.harnesses),
                 machine: config.machine,
                 daemon: config.daemon,
@@ -241,7 +247,13 @@ impl Orchestrator {
     /// a driver at once. `jobs` is the scheduler that fires the project's jobs, told of each job
     /// the orchestrator appends.
     pub fn attach(&self, project: ProjectId, store: ProjectStore, jobs: Scheduler<ProjectState>) {
-        let ctx = ProjectCtx::new(project, store, Arc::clone(&self.shared.clock), jobs);
+        let ctx = ProjectCtx::new(
+            project,
+            store,
+            Arc::clone(&self.shared.clock),
+            Arc::clone(&self.shared.dice),
+            jobs,
+        );
         let (ctl, task) = project::spawn(Arc::clone(&self.shared), Arc::clone(&ctx));
         self.projects
             .lock()
@@ -392,6 +404,17 @@ impl Orchestrator {
     ) -> Result<(), Refused> {
         let ctx = self.ctx(project)?;
         blocking(move || builder::set_effort(&ctx, agent, range)).await
+    }
+
+    /// The builder changes how an agent looks.
+    pub async fn set_appearance(
+        &self,
+        project: ProjectId,
+        agent: AgentId,
+        look: x100_core::appearance::Appearance,
+    ) -> Result<(), Refused> {
+        let ctx = self.ctx(project)?;
+        blocking(move || builder::set_appearance(&ctx, agent, look)).await
     }
 
     /// Something in the daemon's log changed that could let an agent waiting for a driver find

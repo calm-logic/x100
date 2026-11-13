@@ -2,6 +2,7 @@
 //! the protocol's own params; none holds state or logic.
 
 use x100_core::action::Decision;
+use x100_core::appearance::Appearance;
 use x100_core::credential::CredentialScope;
 use x100_core::decision::DecisionProvider;
 use x100_core::effort::EffortRange;
@@ -13,7 +14,8 @@ use x100_proto::{
     AddCredential, ChangeProjectSetting, ConnectDecisionModel, DecideAction,
     DisconnectDecisionModel, ListMemories, ListSkills, ListTrials, LogId, LogPage, Memories, Page,
     RaiseTask, ReadLog, RemoveCredential, RemoveFile, RenameProject, ReplaceCredential,
-    ResizeTerminal, ScopeCredential, Secret, SetEffortRange, SetLeadBudget, Skills, Trials,
+    ResizeTerminal, ScopeCredential, Secret, SetAppearance, SetEffortRange, SetLeadBudget, Skills,
+    Trials,
 };
 
 use crate::{Client, ClientError};
@@ -155,6 +157,22 @@ impl Client {
             project,
             agent,
             range,
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Changes how an agent looks.
+    pub async fn set_appearance(
+        &self,
+        project: ProjectId,
+        agent: AgentId,
+        appearance: Appearance,
+    ) -> Result<(), ClientError> {
+        self.request(SetAppearance {
+            project,
+            agent,
+            appearance,
         })
         .await?;
         Ok(())

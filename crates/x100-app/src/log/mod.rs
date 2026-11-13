@@ -14,16 +14,18 @@ use gpui::{
     prelude::*, px, uniform_list,
 };
 use x100_client::Change;
+use x100_core::appearance::Appearance;
 use x100_core::event::{Envelope, ProjectEvent, Seq};
 use x100_core::fold::ProjectPart;
-use x100_core::id::{FileId, ProjectId};
+use x100_core::id::{AgentId, FileId, ProjectId};
+use x100_core::party::Actor;
 
 pub(crate) use wording::unfit;
 pub use wording::{Line, Names, kind, line, request};
 
+use crate::face;
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
-use crate::widgets::{self, Orb};
 use crate::{theme, words};
 
 pub const ROW_HEIGHT: f32 = 36.;
@@ -38,6 +40,8 @@ const LOOK_AHEAD: usize = 40;
 pub struct LogLine {
     pub seq: Seq,
     pub at: String,
+    /// The agent that acted, whose face the row shows. The builder and x100 have none.
+    pub by: Option<AgentId>,
     pub who: String,
     pub text: String,
 }
@@ -108,8 +112,23 @@ impl LogView {
         !self.loading && self.newest == seq
     }
 
+    fn looks(&self, cx: &gpui::App) -> HashMap<AgentId, Appearance> {
+        self.session
+            .read(cx)
+            .project(self.project, |p, _| {
+                p.agents().map(|a| (a.id, a.appearance)).collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn changed(&mut self, change: &Change, cx: &mut Context<Self>) {
         match change {
+            Change::Project { project, changes }
+                if *project == self.project && changes.parts.contains(&ProjectPart::Looks) =>
+            {
+                self.sync(cx);
+                cx.notify();
+            }
             Change::Project { project, changes }
                 if *project == self.project && changes.parts.contains(&ProjectPart::Log) =>
             {
@@ -224,6 +243,10 @@ impl LogView {
                         LogLine {
                             seq: e.seq,
                             at: words::moment(e.at),
+                            by: match e.by {
+                                Actor::Agent(a) => Some(a),
+                                Actor::Builder | Actor::Daemon => None,
+                            },
                             who: l.who,
                             text: l.text,
                         }
@@ -259,7 +282,7 @@ impl LogView {
     }
 }
 
-fn row(l: &LogLine) -> gpui::Div {
+fn row(l: &LogLine, look: Option<Appearance>) -> gpui::Div {
     div()
         .h(px(ROW_HEIGHT))
         .w_full()
@@ -279,7 +302,7 @@ fn row(l: &LogLine) -> gpui::Div {
                 .text_color(theme::dim())
                 .child(l.at.clone()),
         )
-        .child(widgets::orb(18., Orb::Agent))
+        .child(look.map_or_else(|| face::blank(18.), |l| face::face(18., l)))
         .child(
             div()
                 .flex_none()
@@ -319,8 +342,13 @@ impl Render for LogView {
                         this.wants_older = true;
                         this.sync(cx);
                     }
+                    // Looked up as drawn, so a changed look shows on rows made before it.
+                    let looks = this.looks(cx);
                     range
-                        .filter_map(|i| this.lines.get(i).map(row))
+                        .filter_map(|i| {
+                            let l = this.lines.get(i)?;
+                            Some(row(l, l.by.and_then(|a| looks.get(&a).copied())))
+                        })
                         .collect::<Vec<_>>()
                 }),
             )

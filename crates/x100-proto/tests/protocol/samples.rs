@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use x100_core::action::{AskMeAbout, Decision};
+use x100_core::appearance::{Appearance, Hue, Outline};
 use x100_core::credential::{CredentialScope, Projects};
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::Envelope;
@@ -530,6 +531,17 @@ pub fn samples() -> Vec<Sample> {
                 project: prj,
                 agent: agt,
                 range: low_high,
+            },
+            Done {},
+        ),
+        s(
+            SetAppearance {
+                project: prj,
+                agent: agt,
+                appearance: Appearance {
+                    outline: Outline::Hexagon,
+                    hue: Some(Hue::Teal),
+                },
             },
             Done {},
         ),

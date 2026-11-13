@@ -10,6 +10,7 @@ use x100_core::fold::DaemonState;
 use x100_core::integration::{GitHubConnection, GitHubWay, HomeboxConnection, HomeboxWay};
 use x100_proto::{GitHubConnecting, GitHubMethod, Integration, IntegrationList};
 
+use crate::glass;
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
@@ -321,6 +322,7 @@ impl IntegrationsPart {
             ways.push((HomeboxWay::Local, "Use local", "homebox-way-local"));
         }
         ways.push((HomeboxWay::Address, "Host and key", "homebox-way-address"));
+        let at = ways.iter().position(|(w, ..)| *w == way);
         let choices = ways.into_iter().map(|(w, label, selector)| {
             widgets::segment(selector, label, w == way)
                 .debug_selector(move || selector.to_owned())
@@ -332,7 +334,7 @@ impl IntegrationsPart {
             "Not connected. Projects cannot be deployed until it is.".into(),
             theme::ask(),
         )
-        .child(widgets::segments(choices));
+        .child(widgets::segments("homebox-ways", at, choices));
         match (way, local) {
             (HomeboxWay::Local, Some(at)) if self.confirming => part
                 .child(say(format!(
@@ -344,8 +346,8 @@ impl IntegrationsPart {
                         .flex()
                         .gap(px(8.))
                         .child(
-                            widgets::button("homebox-confirm", "Make the key and connect")
-                                .debug_selector(|| "homebox-confirm".into())
+                            glass::primary("homebox-confirm", "Make the key and connect")
+                                .selector("homebox-confirm")
                                 .on_click(cx.listener(|this, _, _, cx| this.confirm(cx))),
                         )
                         .child(
@@ -369,8 +371,8 @@ impl IntegrationsPart {
                     .child(field("homebox-address", self.address.clone()))
                     .child(field("homebox-key", self.key.clone()))
                     .child(
-                        widgets::button("homebox-connect", "Connect")
-                            .debug_selector(|| "homebox-connect".into())
+                        glass::primary("homebox-connect", "Connect")
+                            .selector("homebox-connect")
                             .on_click(cx.listener(|this, _, _, cx| this.connect_address(cx))),
                     ),
             ),
@@ -416,6 +418,7 @@ impl IntegrationsPart {
             ));
         }
         let chosen = self.github_way();
+        let at = ways.iter().position(|w| Some(*w) == chosen);
         let choices = ways.into_iter().map(|w| {
             let (label, selector) = match w {
                 GitHubMethod::LocalGh => ("Use local gh", "github-way-local"),
@@ -426,14 +429,14 @@ impl IntegrationsPart {
                 .on_click(cx.listener(move |this, _, _, cx| this.choose_github(w, cx)))
                 .into_any_element()
         });
-        part.child(widgets::segments(choices))
+        part.child(widgets::segments("github-ways", at, choices))
             .children(self.github_code.as_ref().map(|(code, at)| {
                 say(format!("Enter {code} at {at} to let x100 in."))
                     .debug_selector(|| "github-code".into())
             }))
             .child(
-                widgets::button("github-connect", "Connect")
-                    .debug_selector(|| "github-connect".into())
+                glass::primary("github-connect", "Connect")
+                    .selector("github-connect")
                     .on_click(cx.listener(|this, _, _, cx| this.connect_github(cx))),
             )
     }

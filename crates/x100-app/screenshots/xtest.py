@@ -5,6 +5,8 @@ go to whichever window Windows has in the foreground, which a newly opened windo
 
 Usage: xtest.py WINDOW_ID command...
   click X Y         click at window-relative coordinates
+  move X Y          move the pointer there, to hover
+  down / up         press or release the left button where the pointer is
   scroll X Y N      N wheel notches down (up if negative) at a point
   type TEXT         type text (letters, digits, punctuation, spaces)
   key NAME          press a key, e.g. Return or shift+Return
@@ -107,6 +109,14 @@ def main():
             xtst.XTestFakeButtonEvent(d, 1, 0, 0)
             x11.XFlush(d)
             time.sleep(0.2)
+        elif cmd == "move":
+            x, y, args = int(args[0]), int(args[1]), args[2:]
+            xtst.XTestFakeMotionEvent(d, -1, ox + x, oy + y, 0)
+            x11.XFlush(d)
+            time.sleep(0.1)
+        elif cmd in ("down", "up"):
+            xtst.XTestFakeButtonEvent(d, 1, 1 if cmd == "down" else 0, 0)
+            x11.XFlush(d)
         elif cmd == "scroll":
             # scroll X Y N: the wheel N notches down at a point.
             x, y, n, args = int(args[0]), int(args[1]), int(args[2]), args[3:]

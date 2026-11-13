@@ -164,6 +164,7 @@ impl Run {
         common::add_harnesses(&daemon, &harnesses, &[]);
         let orch = Orchestrator::new(Config {
             clock: Arc::clone(&shared),
+            dice: Arc::new(x100_orch::OsDice),
             harnesses,
             machine: common::MACHINE,
             daemon,

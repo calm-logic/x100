@@ -220,6 +220,7 @@ impl Project {
                     effort: range,
                     budget,
                 },
+                appearance: Default::default(),
             }),
         );
         Project { b, ceo, lead }

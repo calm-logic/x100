@@ -390,6 +390,7 @@ fn agent_event(n: &Names, agent: AgentId, event: &AgentEvent) -> String {
             words::effort(effort.max()),
             words::money(*budget)
         ),
+        AgentEvent::AppearanceSet(look) => format!("Made {who} {}", words::look(*look)),
     }
 }
 

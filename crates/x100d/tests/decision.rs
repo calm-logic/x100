@@ -33,9 +33,13 @@ use x100_core::fold::{ActionRecord, ProjectState};
 use x100_core::harness::OneOffPurpose;
 use x100_core::id::{ActionId, AgentId, ProjectId};
 use x100_core::ledger::ChargeSource;
-use x100_core::money::Money;
+use x100_core::money::{Money, Percent};
 use x100_core::project::SettingChange;
-use x100_proto::{ChangeProjectSetting, GetDaemon, LogId, LogPage, Page, ReadLog, ReadTranscript};
+use x100_core::settings::DaemonSetting;
+use x100_proto::{
+    ChangeProjectSetting, ErrorCode, GetDaemon, LogId, LogPage, Page, ReadLog, ReadTranscript,
+    SetDaemonSetting,
+};
 
 /// Invented for this test; it opens nothing anywhere.
 const KEY: &str = "dm-test-key-7f3a9c2e5b1d4a6f8e0c";
@@ -92,23 +96,7 @@ async fn rig() -> Rig {
     let standin = StandIn::start(env.dir.path()).await;
     let (port, seen) = plain_server().await;
     std::fs::write(env.scripts.join("fake.toml"), SCRIPT).unwrap();
-    let mut args = env.daemon_args(Path::new(env!("CARGO_BIN_EXE_x100d-fake-harness")));
-    args.extend(["--fake-clock".into(), "1794000000000".into()]);
-    let mut resolve: Vec<String> = DecisionProvider::ALL
-        .iter()
-        .map(|p| format!("{}=127.0.0.1:{}", p.host(), standin.port))
-        .collect();
-    resolve.extend([MAIL_HOST, READ_HOST].map(|h| format!("{h}=127.0.0.1")));
-    let daemon = DaemonProc::spawn_adding(
-        args,
-        &[
-            (x100d::PROXY_RESOLVE_ENV, resolve.join(",")),
-            (
-                x100d::PROXY_UPSTREAM_CA_ENV,
-                standin.ca.display().to_string(),
-            ),
-        ],
-    );
+    let daemon = spawn_daemon(&env, &standin);
     let client = env.client().await;
     Rig {
         env,
@@ -118,6 +106,28 @@ async fn rig() -> Rig {
         daemon,
         client,
     }
+}
+
+/// A daemon on the test's directory with the providers' hosts sent to the stand-in. Starting it
+/// again after a stop gives the restarted daemon.
+fn spawn_daemon(env: &Env, standin: &StandIn) -> DaemonProc {
+    let mut args = env.daemon_args(Path::new(env!("CARGO_BIN_EXE_x100d-fake-harness")));
+    args.extend(["--fake-clock".into(), "1794000000000".into()]);
+    let mut resolve: Vec<String> = DecisionProvider::ALL
+        .iter()
+        .map(|p| format!("{}=127.0.0.1:{}", p.host(), standin.port))
+        .collect();
+    resolve.extend([MAIL_HOST, READ_HOST].map(|h| format!("{h}=127.0.0.1")));
+    DaemonProc::spawn_adding(
+        args,
+        &[
+            (x100d::PROXY_RESOLVE_ENV, resolve.join(",")),
+            (
+                x100d::PROXY_UPSTREAM_CA_ENV,
+                standin.ca.display().to_string(),
+            ),
+        ],
+    )
 }
 
 struct Project {
@@ -557,5 +567,75 @@ async fn with_no_decision_model_a_read_goes_and_a_write_waits_and_nothing_is_sta
         unreachable!()
     };
     assert_eq!(wrote, read_by);
+    r.daemon.terminate();
+}
+
+async fn set_threshold(client: &Client, percent: u8) -> Result<(), x100_client::ClientError> {
+    client
+        .request(SetDaemonSetting {
+            setting: DaemonSetting::DecisionThreshold(Percent::new(percent).unwrap()),
+        })
+        .await
+        .map(drop)
+}
+
+async fn threshold(client: &Client) -> u8 {
+    let daemon = client.request(GetDaemon {}).await.unwrap();
+    daemon.settings().decision_threshold.value()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_threshold_decides_which_answers_are_raised_and_survives_a_restart() {
+    if common::available::skip_without_sandbox() {
+        return;
+    }
+    let mut r = rig().await;
+    r.client
+        .connect_decision_model(DecisionProvider::Gemini, KEY)
+        .await
+        .unwrap();
+    let p = project(&r, "threshold").await;
+    assert_eq!(threshold(&r.client).await, 70);
+
+    // Medium and 80 percent sure: sure enough under the default.
+    let medium = Says::Labels {
+        kind: "none_of_these",
+        risk: "medium",
+        confidence: 0.8,
+    };
+    r.standin.say(medium.clone());
+    let a = one(&r, &p, "MAIL").await;
+    assert_eq!(a.state, ActionState::CarriedOut);
+    assert_eq!(a.classification.unwrap().risk, Risk::Medium);
+
+    // Out of range is refused and changes nothing.
+    for bad in [49, 96, 0, 100] {
+        match set_threshold(&r.client, bad).await {
+            Err(x100_client::ClientError::Rpc(e)) => {
+                assert_eq!(e.code, ErrorCode::Rejected, "{bad}")
+            }
+            other => panic!("{bad}: {other:?}"),
+        }
+    }
+    assert_eq!(threshold(&r.client).await, 70);
+
+    // The same answer is not sure enough under 90.
+    set_threshold(&r.client, 90).await.unwrap();
+    let raised = |a: &ActionRecord| {
+        let c = a.classification.clone().unwrap();
+        (a.state, c.risk, c.why.contains("raised to High"))
+    };
+    let a = one(&r, &p, "MAIL").await;
+    assert_eq!(raised(&a), (ActionState::Held, Risk::High, true));
+
+    // The setting is on disk, not only in the running daemon, and still rules after a restart.
+    r.daemon.terminate();
+    r.daemon = spawn_daemon(&r.env, &r.standin);
+    r.client = r.env.client().await;
+    assert_eq!(threshold(&r.client).await, 90);
+    let p = project(&r, "after-restart").await;
+    r.standin.say(medium);
+    let a = one(&r, &p, "MAIL").await;
+    assert_eq!(raised(&a), (ActionState::Held, Risk::High, true));
     r.daemon.terminate();
 }

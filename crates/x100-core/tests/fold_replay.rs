@@ -296,6 +296,7 @@ fn a_change_that_puts_the_leads_over_the_total_is_an_error() {
             effort: EffortRange::FULL,
             budget: Money::from_dollars(20),
         },
+        appearance: x100_core::appearance::Appearance::default(),
     };
     let (mut state, e) = appended(&f, Actor::Agent(f.ceo), ProjectEvent::AgentAdded(lead));
     assert!(matches!(
@@ -376,4 +377,44 @@ fn an_agent_goes_back_to_waiting_only_with_a_wait_open() {
         AgentState::Working,
         "a refused event changes nothing"
     );
+}
+
+#[test]
+fn every_agent_has_a_look_by_the_rule_and_the_builder_can_change_one() {
+    use x100_core::appearance::{Appearance, Hue, Outline};
+    use x100_core::fold::ProjectPart;
+
+    let f = fernleaf();
+    let state = ProjectState::fold(&f.log).unwrap();
+    let look = |a: AgentId| state.agent(a).unwrap().appearance;
+    assert_eq!(look(f.ceo), Appearance::default());
+    assert_eq!(look(f.ceo).outline, Outline::Circle);
+    let leads = [f.tech, f.product, f.marketing].map(look);
+    assert!(
+        leads
+            .iter()
+            .all(|l| l.hue.is_none() && l.outline != Outline::Circle)
+    );
+    let outlines: std::collections::BTreeSet<_> = leads.iter().map(|l| l.outline).collect();
+    assert_eq!(outlines.len(), 3, "{leads:?}");
+    for (worker, parent) in [(f.backend, f.tech), (f.migrations, f.backend)] {
+        assert_ne!(look(worker).outline, look(parent).outline);
+    }
+
+    let teal_shield = Appearance {
+        outline: Outline::Shield,
+        hue: Some(Hue::Teal),
+    };
+    let set = ProjectEvent::Agent {
+        agent: f.tech,
+        event: AgentEvent::AppearanceSet(teal_shield),
+    };
+    let (mut state, e) = appended(&f, Actor::Builder, set);
+    let changes = state.apply(&e).unwrap();
+    assert_eq!(state.agent(f.tech).unwrap().appearance, teal_shield);
+    assert_eq!(state.agent(f.product).unwrap().appearance, leads[1]);
+    assert!(changes.parts.contains(&ProjectPart::Looks));
+    assert!(changes.parts.contains(&ProjectPart::Team));
+    assert!(changes.records.contains(&Record::Agent(f.tech)));
+    assert!(!changes.parts.contains(&ProjectPart::Budget));
 }

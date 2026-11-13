@@ -1,61 +1,10 @@
-//! The small pieces the mock repeats: an agent's orb, the effort pips, a progress meter, a pill, a
+//! The small pieces the mock repeats: the effort pips, a progress meter, a pill, a
 //! segmented switch, buttons, and Settings' row of a label and its control.
 
-use gpui::{
-    AnyElement, BoxShadow, Div, ElementId, Rgba, SharedString, Stateful, div, hsla, point,
-    prelude::*, px, relative,
-};
+use gpui::{Div, ElementId, Rgba, SharedString, Stateful, div, prelude::*, px, relative};
 use x100_core::effort::{Effort, EffortRange};
 
 use crate::theme;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Orb {
-    /// The CEO: white, with dark eyes and a glow.
-    Ceo,
-    /// Before the first message: the CEO as an outline.
-    Outline,
-    /// Any other agent: dark, with a white rim.
-    Agent,
-}
-
-pub fn orb(size: f32, kind: Orb) -> Div {
-    let (fill, eyes, rim): (Rgba, Rgba, f32) = match kind {
-        Orb::Ceo => (theme::text(), gpui::rgb(0x000000), 1.5),
-        Orb::Outline => (gpui::rgba(0x00000000), theme::text(), 2.),
-        Orb::Agent => (gpui::rgb(0x0a0a0b), theme::text(), 1.5),
-    };
-    let eye = |left: bool| {
-        div()
-            .absolute()
-            .top(relative(0.35))
-            .when(left, |d| d.left(relative(0.26)))
-            .when(!left, |d| d.right(relative(0.26)))
-            .w(relative(0.16))
-            .h(relative(0.22))
-            .rounded_full()
-            .bg(eyes)
-    };
-    div()
-        .relative()
-        .flex_none()
-        .size(px(size))
-        .rounded_full()
-        .border(px(rim))
-        .border_color(theme::text())
-        .bg(fill)
-        .when(kind == Orb::Ceo, |d| {
-            d.shadow(vec![BoxShadow {
-                color: hsla(0., 0., 1., 0.45),
-                offset: point(px(0.), px(0.)),
-                blur_radius: px(size / 4.),
-                spread_radius: px(0.),
-                inset: false,
-            }])
-        })
-        .child(eye(true))
-        .child(eye(false))
-}
 
 /// The four effort levels: lit inside `range`, bright at `now`.
 pub fn pips(range: EffortRange, now: Option<Effort>) -> Div {
@@ -107,7 +56,9 @@ pub fn dot(size: f32, colour: Rgba) -> Div {
     div().flex_none().size(px(size)).rounded_full().bg(colour)
 }
 
-/// A button in a segmented switch, rimmed when on.
+pub use crate::glass::segments;
+
+/// An option in [`segments`]. The chosen one is bright, and sits on the toggle's glass.
 pub fn segment(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -122,25 +73,11 @@ pub fn segment(
         .whitespace_nowrap()
         .cursor_pointer()
         .text_color(if on { theme::text() } else { theme::muted() })
-        .when(on, |d| d.border_1().border_color(gpui::rgba(0xffffff99)))
-        .when(!on, |d| d.border_1().border_color(gpui::rgba(0x00000000)))
         .hover(|s| s.text_color(theme::text()))
         .child(label.into())
 }
 
-/// The segments' frame.
-pub fn segments(children: impl IntoIterator<Item = AnyElement>) -> Div {
-    div()
-        .flex()
-        .p(px(3.))
-        .gap(px(2.))
-        .rounded_full()
-        .border_1()
-        .border_color(theme::line())
-        .children(children)
-}
-
-/// A plain button: rimmed text.
+/// A secondary button: rimmed text. A primary action is [`crate::glass::primary`].
 pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
     div()
         .id(id)

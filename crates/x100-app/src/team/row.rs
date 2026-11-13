@@ -9,8 +9,8 @@ use x100_core::fold::{DaemonState, ProjectState};
 use x100_core::id::{AgentId, ProjectId};
 
 use crate::session::Session;
-use crate::widgets::{self, Orb};
-use crate::{theme, words};
+use crate::{face, theme, widgets, words};
+use x100_core::appearance::Appearance;
 
 pub const ROW_HEIGHT: f32 = 64.;
 pub const HEADER_HEIGHT: f32 = 168.;
@@ -20,6 +20,9 @@ pub const HEADER_HEIGHT: f32 = 168.;
 pub struct AgentModel {
     pub name: String,
     pub ceo: bool,
+    pub look: Appearance,
+    /// Retired: its look can no longer change.
+    pub retired: bool,
     /// Its current task's title, or what it is doing without one.
     pub doing: String,
     pub progress: Option<u8>,
@@ -50,6 +53,8 @@ impl AgentModel {
         Some(AgentModel {
             name: row.agent.role.clone(),
             ceo: matches!(row.position, Position::Ceo { .. }),
+            look: row.agent.appearance,
+            retired: row.agent.state == x100_core::agent::AgentState::Retired,
             doing,
             progress: row.progress.map(|p| p.value()),
             driver,
@@ -155,7 +160,7 @@ impl Render for AgentRow {
             .cursor_pointer()
             .hover(|s| s.border_color(gpui::rgba(0xffffff80)).bg(theme::hover()))
             .on_click(cx.listener(|this, _, _, cx| cx.emit(RowEvent::Open(this.agent))))
-            .child(widgets::orb(40., Orb::Agent))
+            .child(face::face(40., m.look))
             .child(
                 div()
                     .flex_1()
@@ -205,13 +210,16 @@ fn driver(m: &AgentModel) -> impl IntoElement {
 }
 
 /// The agent a view is opened on. Drawn large and centred at the Team tab's top level, which is
-/// always the CEO's; a drilldown shows its head and name small in the corner from what this reads.
+/// always the CEO's, where clicking it opens the CEO's own page; a drilldown shows its head and
+/// name small in the corner from what this reads.
 pub struct AgentHeader {
     session: Entity<Session>,
     project: ProjectId,
     agent: AgentId,
     model: Option<AgentModel>,
 }
+
+impl EventEmitter<RowEvent> for AgentHeader {}
 
 impl AgentHeader {
     pub fn new(
@@ -245,11 +253,19 @@ impl AgentHeader {
 }
 
 impl Render for AgentHeader {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(m) = self.model.clone() else {
             return div().into_any_element();
         };
         let size = if m.ceo { 76. } else { 52. };
+        let head = div()
+            .id("head")
+            .debug_selector(|| "head".into())
+            .mb(px(6.))
+            .rounded_full()
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| cx.emit(RowEvent::Open(this.agent))))
+            .child(face::face(size, m.look));
         div()
             .h(px(HEADER_HEIGHT))
             .w_full()
@@ -259,7 +275,7 @@ impl Render for AgentHeader {
             .justify_end()
             .gap(px(3.))
             .text_size(px(theme::ROW_TEXT))
-            .child(widgets::orb(size, if m.ceo { Orb::Ceo } else { Orb::Agent }).mb(px(6.)))
+            .child(head)
             .child(
                 div()
                     .text_size(px(theme::SMALL))

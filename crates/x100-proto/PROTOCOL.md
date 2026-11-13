@@ -151,7 +151,7 @@ The client subscribes with no cursor. The result carries the snapshot: the daemo
 ```
 
 ```json daemon
-{"jsonrpc":"2.0","id":2,"result":{"snapshot":{"daemon":{"cool_offs":[],"credentials":{},"harnesses":{},"jobs":{},"machines":{},"projects":{},"seq":null,"settings":{"cool_off":{"nanos":0,"secs":600},"decision_model":null,"decision_threshold":70,"default_wait_deadline":{"nanos":0,"secs":86400},"github":null,"homebox":null,"last_turn_limit":{"nanos":0,"secs":180},"minimum_repeat":{"nanos":0,"secs":300},"projects_root":null,"retire_after_age":{"nanos":0,"secs":14400},"retire_after_tasks":10,"retire_at_context":70,"run_without_sandbox":false,"sandbox_programs":[],"stall_timeout":{"nanos":0,"secs":300},"start_pack_share":50,"terminal_drivers_per_login":4,"turns_without_progress":3}},"projects":{"prj_01M74XBRM00000000000000001":{"actions":{},"agents":{"agt_01M74XBRM00000000000000001":{"charter":"Own Fernleaf's launch, from brief to a live site.","drivers":[],"id":"agt_01M74XBRM00000000000000001","inbox":{"items":{}},"items":{},"joined":1794387601000,"memories":{},"open_tasks":[],"processes":{},"role":"CEO","skills":[],"spent":{"cost":0,"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}},"state":"planned","waits":{}}},"chat":[],"drivers":{},"files":{},"jobs":{},"messages":{},"project":{"ceo":"agt_01M74XBRM00000000000000001","code_dir":null,"created":1794387601000,"homebox":null,"identity":null,"preview":null,"repository":null,"settings":{"allowed":[{"harness":"hns_00000000000000000000000002","model":"claude-opus"},{"harness":"hns_00000000000000000000000002","model":"claude-sonnet"},{"harness":"hns_00000000000000000000000003","model":"gpt-codex"}],"ask_me_about":"high_risk_only","budget":50000000,"lab_share":10},"team":{"ceo":"agt_01M74XBRM00000000000000001","members":{"agt_01M74XBRM00000000000000001":{"position":{"ceo":{"effort":{"max":"max","min":"low"}}},"retired":false}}}},"seq":1,"skills":[],"specs":{},"spend":{"lab":0,"leads":{},"project":0},"tasks":{},"trials":{},"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}}}},"subscription":1}}
+{"jsonrpc":"2.0","id":2,"result":{"snapshot":{"daemon":{"cool_offs":[],"credentials":{},"harnesses":{},"jobs":{},"machines":{},"projects":{},"seq":null,"settings":{"cool_off":{"nanos":0,"secs":600},"decision_model":null,"decision_threshold":70,"default_wait_deadline":{"nanos":0,"secs":86400},"github":null,"homebox":null,"last_turn_limit":{"nanos":0,"secs":180},"minimum_repeat":{"nanos":0,"secs":300},"projects_root":null,"retire_after_age":{"nanos":0,"secs":14400},"retire_after_tasks":10,"retire_at_context":70,"run_without_sandbox":false,"sandbox_programs":[],"stall_timeout":{"nanos":0,"secs":300},"start_pack_share":50,"terminal_drivers_per_login":4,"turns_without_progress":3}},"projects":{"prj_01M74XBRM00000000000000001":{"actions":{},"agents":{"agt_01M74XBRM00000000000000001":{"appearance":{"hue":null,"outline":"circle"},"charter":"Own Fernleaf's launch, from brief to a live site.","drivers":[],"id":"agt_01M74XBRM00000000000000001","inbox":{"items":{}},"items":{},"joined":1794387601000,"memories":{},"open_tasks":[],"processes":{},"role":"CEO","skills":[],"spent":{"cost":0,"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}},"state":"planned","waits":{}}},"chat":[],"drivers":{},"files":{},"jobs":{},"messages":{},"project":{"ceo":"agt_01M74XBRM00000000000000001","code_dir":null,"created":1794387601000,"homebox":null,"identity":null,"preview":null,"repository":null,"settings":{"allowed":[{"harness":"hns_00000000000000000000000002","model":"claude-opus"},{"harness":"hns_00000000000000000000000002","model":"claude-sonnet"},{"harness":"hns_00000000000000000000000003","model":"gpt-codex"}],"ask_me_about":"high_risk_only","budget":50000000,"lab_share":10},"team":{"ceo":"agt_01M74XBRM00000000000000001","members":{"agt_01M74XBRM00000000000000001":{"position":{"ceo":{"effort":{"max":"max","min":"low"}}},"retired":false}}}},"seq":1,"skills":[],"specs":{},"spend":{"lab":0,"leads":{},"project":0},"tasks":{},"trials":{},"usage":{"cache_read":0,"cache_write_long":0,"cache_write_short":0,"input":0,"output":0}}}},"subscription":1}}
 ```
 
 Every event after the snapshot follows as a notification, in order, once. The next two events of the project's log are 2 and 3.
@@ -291,6 +291,10 @@ Errors: rejected
         "actions": {},
         "agents": {
           "agt_01M74XBRM00000000000000001": {
+            "appearance": {
+              "hue": null,
+              "outline": "circle"
+            },
             "charter": "Own Fernleaf's launch, from brief to a live site.",
             "drivers": [],
             "id": "agt_01M74XBRM00000000000000001",
@@ -1099,6 +1103,10 @@ Errors: not_found
   "actions": {},
   "agents": {
     "agt_01M74XBRM00000000000000001": {
+      "appearance": {
+        "hue": null,
+        "outline": "circle"
+      },
       "charter": "Own Fernleaf's launch, from brief to a live site.",
       "drivers": [],
       "id": "agt_01M74XBRM00000000000000001",
@@ -1565,6 +1573,29 @@ Errors: not_found, rejected
 {}
 ```
 
+### `agents.set_appearance`
+
+Sets how an agent looks: the outline of its face and its colour. A retired agent is `wrong_state`.
+
+Params type `SetAppearance`, result type `Done`.
+
+Errors: not_found, wrong_state
+
+```json params
+{
+  "agent": "agt_01M74XBRM00000000000000002",
+  "appearance": {
+    "hue": "teal",
+    "outline": "hexagon"
+  },
+  "project": "prj_01M74XBRM00000000000000001"
+}
+```
+
+```json result
+{}
+```
+
 ### `agents.replace_driver`
 
 Replaces the driver acting for an agent. The work hands off the way any handoff does.
@@ -1878,7 +1909,7 @@ which appends events; the client sees the result in the stream, not in the respo
 | `/integrations/` | `integrations.list`, `integrations.homebox_projects`; each connection is a daemon setting | `integrations.connect_homebox`, `.connect_github`, `.disconnect` |
 | `/projects/` | snapshot, `projects.list`, `projects.get` | `projects.create`, `projects.rename`, `projects.set`, `projects.reflect`, `projects.link_homebox`, `.unlink_homebox`, `projects.deploy` |
 | `/events` | `events.subscribe`, `events.read` | not changed by clients |
-| `/agents/` | snapshot (team, state, current task and driver) | `agents.set_budget`, `agents.set_effort`, `agents.replace_driver` |
+| `/agents/` | snapshot (team, state, look, current task and driver) | `agents.set_budget`, `agents.set_effort`, `agents.set_appearance`, `agents.replace_driver` |
 | `/agents/{id}/inbox` | `agents.inbox` | by the daemon |
 | `/agents/{id}/waits` | `agents.waits` | by the daemon |
 | `/agents/{id}/transcript` | `transcript.read`, `transcript.subscribe` | by the daemon |

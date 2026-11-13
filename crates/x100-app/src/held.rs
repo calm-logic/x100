@@ -10,15 +10,17 @@ use x100_core::action::{Decision, Risk};
 use x100_core::fold::{ProjectPart, ProjectState};
 use x100_core::id::{ActionId, ProjectId};
 
+use crate::glass;
 use crate::log::{self, Names};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
-use crate::{theme, widgets, words};
+use crate::{face, theme, widgets, words};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldModel {
     pub id: ActionId,
     pub agent: String,
+    pub look: x100_core::appearance::Appearance,
     /// What it is, as a phrase after the agent's name: "run `rm -rf build`".
     pub what: String,
     /// The kind of action, when it has been classified.
@@ -43,6 +45,10 @@ impl HeldModel {
                 agent: p
                     .agent(a.action.agent)
                     .map_or_else(|| "An agent".into(), |r| r.role.clone()),
+                look: p
+                    .agent(a.action.agent)
+                    .map(|r| r.appearance)
+                    .unwrap_or_default(),
                 what: log::request(&names, &a.action.request),
                 kind: a
                     .classification
@@ -72,7 +78,9 @@ impl HeldStrip {
         let subscription = cx.subscribe(&session, |this, _, event, cx| {
             let ours = match event {
                 SessionEvent::Changed(Change::Project { project, changes }) => {
-                    *project == this.project && changes.parts.contains(&ProjectPart::HeldActions)
+                    *project == this.project
+                        && (changes.parts.contains(&ProjectPart::HeldActions)
+                            || changes.parts.contains(&ProjectPart::Looks))
                 }
                 SessionEvent::Changed(Change::Reset) => true,
                 _ => false,
@@ -156,9 +164,16 @@ impl Render for HeldStrip {
                     .bg(theme::raised())
                     .child(
                         div()
-                            .text_size(px(theme::TEXT))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("{} wants to {}", h.agent, h.what)),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(face::face(18., h.look))
+                            .child(
+                                div()
+                                    .text_size(px(theme::TEXT))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(format!("{} wants to {}", h.agent, h.what)),
+                            ),
                     )
                     .child(
                         div()
@@ -183,8 +198,8 @@ impl Render for HeldStrip {
                             .items_center()
                             .gap(px(8.))
                             .child(
-                                widgets::button(("approve", i), "Approve")
-                                    .debug_selector(move || format!("approve-{i}"))
+                                glass::primary(("approve", i), "Approve")
+                                    .selector(format!("approve-{i}"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.decide(id, Decision::Approved, cx)
                                     })),

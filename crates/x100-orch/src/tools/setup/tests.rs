@@ -93,6 +93,7 @@ fn call(
         now: clock.now(),
         settings: &settings,
         clock: &clock,
+        dice: &x100_core::dice::SeededDice::new(1),
         file_stored: false,
         homebox: None,
     };

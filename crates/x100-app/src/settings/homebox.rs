@@ -169,12 +169,18 @@ impl Render for HomeboxPart {
                 .into(),
         };
         let linked = m.link.as_ref().map(|l| l.repo_full_name.clone());
-        let choices = m
+        let managed: Vec<_> = m
             .projects
             .iter()
             .flatten()
             .enumerate()
             .filter(|(_, p)| p.managed)
+            .collect();
+        let chosen = managed
+            .iter()
+            .position(|(_, p)| linked.as_deref() == Some(p.repo_full_name.as_str()));
+        let choices = managed
+            .into_iter()
             .map(|(i, p)| {
                 let on = linked.as_deref() == Some(p.repo_full_name.as_str());
                 let selector = format!("homebox-project-{}", p.name);
@@ -204,7 +210,9 @@ impl Render for HomeboxPart {
                     .text_color(theme::muted())
                     .child(said),
             )
-            .when(!choices.is_empty(), |d| d.child(widgets::segments(choices)))
+            .when(!choices.is_empty(), |d| {
+                d.child(widgets::segments("homebox-projects", chosen, choices))
+            })
             .when(m.link.is_some(), |d| {
                 d.child(
                     widgets::button("homebox-unlink", "Unlink")

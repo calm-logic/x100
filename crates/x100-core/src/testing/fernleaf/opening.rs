@@ -200,6 +200,7 @@ pub(super) fn opening(b: &mut LogBuilder) -> Opening {
                         effort: spec.effort,
                         budget: spec.budget,
                     },
+                    appearance: b.child_look(ceo, id),
                 };
                 b.push(Actor::Agent(ceo), ProjectEvent::AgentAdded(agent));
                 leads.push(id);

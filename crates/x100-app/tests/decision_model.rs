@@ -115,6 +115,7 @@ fn a_decision_model_is_connected_with_a_key_and_disconnected_from_settings() {
     click(&mut vcx, "decision-disconnect");
     pump_until(&mut vcx, "the model is disconnected", |vcx| {
         vcx.read(|cx| dm.read(cx).shown().connected).is_none()
+            && vcx.read(|cx| dm.read(cx).outcome().is_none())
     });
     assert_eq!(vcx.read(|cx| dm.read(cx).outcome().cloned()), None);
     let gone = client.with_state(|s| {
@@ -123,4 +124,60 @@ fn a_decision_model_is_connected_with_a_key_and_disconnected_from_settings() {
             .all(|c| c.credential.reference != setting.credential)
     });
     assert!(gone, "the key is removed with it");
+}
+
+#[test]
+fn the_threshold_is_shown_changed_and_gemini_is_preselected() {
+    let mut run = Run::start();
+    let client = run.client();
+    let project = run.fernleaf_project(&client);
+    run.rt
+        .block_on(client.send_chat(
+            project,
+            "Launch Fernleaf\nA landing page for Fernleaf, a plant shop, with a waitlist.",
+            vec![],
+            None,
+        ))
+        .expect("the first message is sent");
+    run.settle(&client, project);
+    let (window, mut vcx) = run.open(client.clone());
+    pump_until(&mut vcx, "the main panel opens", |vcx| {
+        bounds(vcx, "tab-Team").is_some()
+    });
+    click(&mut vcx, "tab-Settings");
+    let main = vcx.read(|cx| {
+        window
+            .read(cx)
+            .unwrap()
+            .project(project)
+            .unwrap()
+            .main
+            .clone()
+    });
+    let settings = vcx
+        .read(|cx| main.read(cx).tab_view::<SettingsView>(Tab::Settings))
+        .expect("the Settings tab");
+    let dm = part(&vcx, &settings);
+
+    assert_eq!(
+        vcx.read(|cx| dm.read(cx).chosen()),
+        DecisionProvider::Gemini
+    );
+    assert_eq!(vcx.read(|cx| dm.read(cx).shown().threshold), 70);
+
+    scroll_down(&mut vcx);
+    click(&mut vcx, "decision-threshold-90");
+    pump_until(&mut vcx, "the daemon has the new threshold", |_| {
+        client.with_state(|s| s.daemon.settings().decision_threshold.value()) == 90
+    });
+    // The daemon's event can arrive before the reply that clears the working notice.
+    pump_until(
+        &mut vcx,
+        "the part shows it and the request is answered",
+        |vcx| {
+            vcx.read(|cx| dm.read(cx).shown().threshold) == 90
+                && vcx.read(|cx| dm.read(cx).outcome().is_none())
+        },
+    );
+    assert_eq!(vcx.read(|cx| dm.read(cx).outcome().cloned()), None);
 }

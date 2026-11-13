@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use x100_core::dice::{Dice, SeededDice};
 use x100_core::time::{Clock, FakeClock, Timestamp};
 use x100_jobs::SystemClock;
 
@@ -102,6 +103,9 @@ pub struct Config {
     /// each project runs one turn at a time, so a run of fake-harness scripts is the same every
     /// time. For tests and scripted runs.
     pub fake_clock: Option<FakeClock>,
+    /// What the daemon's random choices are rolled with, such as a new agent's look: the system's
+    /// randomness, or with `--seed` the same numbers every run, for tests and scripted runs.
+    pub dice: Arc<dyn Dice>,
     /// The builder's Claude Code login directory, which terminal drivers of Claude Code run on:
     /// `~/.claude` unless named. The daemon checks that it exists and never opens what is in it.
     pub claude_login: Option<PathBuf>,
@@ -138,6 +142,7 @@ impl Config {
             lag_after: LAG_AFTER,
             clock: Arc::new(SystemClock),
             fake_clock: None,
+            dice: Arc::new(x100_orch::OsDice),
             claude_login: home_dir(".claude", |k| std::env::var_os(k)),
             codex_login: home_dir(".codex", |k| std::env::var_os(k)),
             claude_base_url: None,
@@ -160,7 +165,8 @@ impl Config {
 
     /// From `--data-dir`, `--projects-root`, `--scripts-dir`, `--fake-harness`, `--claude-login`,
     /// `--codex-login`, `--sandbox` (`bubblewrap`, `docker` or `podman`) and `--sandbox-helper`
-    /// arguments, each of which falls back to its environment variable, and `--fake-clock`. The data directory then falls back to the user's data directory, the
+    /// arguments, each of which falls back to its environment variable, and `--fake-clock` and
+    /// `--seed`. The data directory then falls back to the user's data directory, the
     /// projects root to `~/x100`, and each login to the program's own directory in the user's
     /// home.
     pub fn from_args(
@@ -169,7 +175,7 @@ impl Config {
     ) -> Result<Self, String> {
         let (mut data, mut scripts, mut fake, mut clock) = (None, None, None, None);
         let (mut claude, mut codex, mut root) = (None, None, None);
-        let (mut sandbox, mut helper) = (None, None);
+        let (mut sandbox, mut helper, mut seed) = (None, None, None);
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let slot = match arg.to_str() {
@@ -182,6 +188,7 @@ impl Config {
                 Some("--codex-login") => &mut codex,
                 Some("--sandbox") => &mut sandbox,
                 Some("--sandbox-helper") => &mut helper,
+                Some("--seed") => &mut seed,
                 _ => return Err(format!("unknown argument {arg:?}")),
             };
             let value = args
@@ -247,6 +254,13 @@ impl Config {
             config.github_git_base = base;
         }
         config.github_client_id = text(GITHUB_CLIENT_ID_ENV).filter(|id| !id.trim().is_empty());
+        if let Some(seed) = seed {
+            let seed: u64 = seed
+                .to_str()
+                .and_then(|s| s.parse().ok())
+                .ok_or("--seed needs a whole number")?;
+            config.dice = Arc::new(SeededDice::new(seed));
+        }
         if let Some(start) = clock {
             // A real harness bills real time, so only scripted ones run on a fake clock.
             if config.scripts_dir.is_none() {
@@ -438,6 +452,17 @@ mod tests {
         let alone = |k: &str| (k == PROXY_UPSTREAM_CA_ENV).then(|| OsString::from("/t/ca.pem"));
         assert!(Config::from_args(["--data-dir".into(), "/d".into()], alone).is_err());
         let args = ["--data-dir", "/d", "--sandbox", "chroot"];
+        assert!(Config::from_args(args.map(OsString::from), no_env).is_err());
+    }
+
+    #[test]
+    fn a_seed_makes_the_dice_repeat() {
+        let rolls = |c: &Config| (0..4).map(|_| c.dice.roll()).collect::<Vec<_>>();
+        let args = ["--data-dir", "/d", "--seed", "7"];
+        let a = Config::from_args(args.map(OsString::from), no_env).unwrap();
+        let b = Config::from_args(args.map(OsString::from), no_env).unwrap();
+        assert_eq!(rolls(&a), rolls(&b));
+        let args = ["--data-dir", "/d", "--seed", "seven"];
         assert!(Config::from_args(args.map(OsString::from), no_env).is_err());
     }
 

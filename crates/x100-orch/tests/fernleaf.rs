@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use common::*;
 use x100_core::agent::{AgentEvent, AgentState, Position};
+use x100_core::appearance::Appearance;
 use x100_core::driver::{DriverEvent, DriverState, EndReason, RetireReason};
 use x100_core::event::{Envelope, ProjectEvent};
 use x100_core::fold::ProjectState;
@@ -398,12 +399,20 @@ fn assert_invariants(s: &ProjectState, log: &[Envelope<ProjectEvent>]) {
     }
 }
 
+/// The same events, and with the dice seeded the same, every agent the same look.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_run_is_the_same_every_time() {
-    let mut first: Option<Vec<String>> = None;
+    type Run = (Vec<String>, Vec<(String, Appearance)>);
+    let mut first: Option<Run> = None;
     for run_no in 0..10 {
         let w = run().await;
-        let kinds = kinds(&w.log());
+        let state = ProjectState::fold(&w.log()).unwrap();
+        let mut looks: Vec<_> = state
+            .agents()
+            .map(|a| (a.role.clone(), a.appearance))
+            .collect();
+        looks.sort_by(|a, b| a.0.cmp(&b.0));
+        let kinds = (kinds(&w.log()), looks);
         w.finish().await;
         match &first {
             None => first = Some(kinds),

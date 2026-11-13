@@ -75,7 +75,11 @@ impl Tab {
             ProjectPart::Log => Tab::Log,
             ProjectPart::Preview => Tab::Preview,
             ProjectPart::Settings => Tab::Settings,
-            ProjectPart::Chat | ProjectPart::HeldActions | ProjectPart::Sidebar => return None,
+            // A look shows wherever a face is drawn, so it dots no one tab.
+            ProjectPart::Chat
+            | ProjectPart::HeldActions
+            | ProjectPart::Sidebar
+            | ProjectPart::Looks => return None,
         })
     }
 }

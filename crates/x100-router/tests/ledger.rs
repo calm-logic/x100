@@ -26,6 +26,7 @@ fn worker(p: &mut Project, id: u128, parent: AgentId) -> AgentId {
                 parent,
                 effort: None,
             },
+            appearance: Default::default(),
         }),
     );
     id

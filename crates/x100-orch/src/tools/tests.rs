@@ -3,6 +3,8 @@
 
 use std::time::Duration;
 
+use x100_core::appearance::Appearance;
+use x100_core::dice::SeededDice;
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::{Envelope, Seq};
 use x100_core::file::ContentHash;
@@ -29,6 +31,7 @@ struct Scene {
     f: Fernleaf,
     state: ProjectState,
     clock: FakeClock,
+    dice: SeededDice,
     settings: DaemonSettings,
 }
 
@@ -40,6 +43,7 @@ fn scene() -> Scene {
         f,
         state,
         clock: FakeClock::new(at),
+        dice: SeededDice::new(7),
         settings: DaemonSettings::default(),
     }
 }
@@ -51,6 +55,7 @@ impl Scene {
             now: self.clock.now(),
             settings: &self.settings,
             clock: &self.clock,
+            dice: &self.dice,
             file_stored: false,
             homebox: None,
         };
@@ -123,6 +128,75 @@ fn only_the_ceo_forms_the_team_and_only_the_first_time() {
     );
     assert!(s.refused(s.f.backend, &call).contains("only the CEO"));
     assert!(s.refused(s.f.ceo, &call).contains("formed already"));
+}
+
+/// Leads formed together, and a worker started beside others, each get the creator's colour and
+/// an outline that is neither the creator's nor a sibling's while one is left.
+#[test]
+fn a_new_agent_takes_its_creators_colour_and_an_outline_no_sibling_has() {
+    let mut s = scene();
+    let first_lead =
+        s.f.log
+            .iter()
+            .position(|e| matches!(e.event, x100_core::event::ProjectEvent::AgentAdded(_)))
+            .unwrap();
+    s.state = ProjectState::fold(&s.f.log[..first_lead]).unwrap();
+    let leads = [
+        "Tech",
+        "Product",
+        "Marketing",
+        "Ops",
+        "Legal",
+        "Sales",
+        "Data",
+    ]
+    .map(|role| LeadSpec {
+        role: role.into(),
+        charter: format!("{role}."),
+        effort: EffortRange::FULL,
+        budget: Money::from_dollars(1),
+    })
+    .to_vec();
+    let after = s.folds(s.f.ceo, &ToolCall::FormTeam { leads });
+    let ceo = after.agent(s.f.ceo).unwrap().appearance;
+    assert_eq!(ceo, Appearance::default());
+    let looks: Vec<Appearance> = after
+        .children(s.f.ceo)
+        .into_iter()
+        .map(|a| after.agent(a).unwrap().appearance)
+        .collect();
+    assert_eq!(looks.len(), 7);
+    let outlines: std::collections::BTreeSet<_> = looks.iter().map(|l| l.outline).collect();
+    assert_eq!(
+        outlines.len(),
+        7,
+        "seven outlines besides the CEO's: {looks:?}"
+    );
+    assert!(
+        looks
+            .iter()
+            .all(|l| l.hue == ceo.hue && l.outline != ceo.outline)
+    );
+
+    // Under Tech, which runs Backend and Frontend, in Tech's colour.
+    let s = scene();
+    let tech = s.state.agent(s.f.tech).unwrap().appearance;
+    let siblings: Vec<_> = s
+        .state
+        .children(s.f.tech)
+        .into_iter()
+        .map(|a| s.state.agent(a).unwrap().appearance.outline)
+        .collect();
+    let worker = Delegatee::NewWorker {
+        role: "QA".into(),
+        charter: "Test it.".into(),
+        effort: None,
+    };
+    let after = s.folds(s.f.tech, &delegate(worker, Effort::Low));
+    let qa = after.agents().find(|a| a.role == "QA").unwrap().appearance;
+    assert_eq!(qa.hue, tech.hue);
+    assert_ne!(qa.outline, tech.outline);
+    assert!(!siblings.contains(&qa.outline), "{siblings:?} {qa:?}");
 }
 
 #[test]
@@ -505,6 +579,7 @@ fn a_process_is_started_once_by_name_and_stopped_only_while_it_runs() {
         state: s.folds(s.f.frontend, &start("web")),
         f: fernleaf(),
         clock: s.clock.clone(),
+        dice: s.dice.clone(),
         settings: DaemonSettings::default(),
     };
     assert!(

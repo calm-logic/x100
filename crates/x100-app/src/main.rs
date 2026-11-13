@@ -103,6 +103,7 @@ fn main() -> ExitCode {
     let failure = failed.clone();
     let ran = x100_app::platform::run(move |cx: &mut App| {
         x100_app::init(cx);
+        cx.set_reduce_motion(x100_app::platform::reduces_motion());
         if let Err(e) = x100_app::open_window(cx, client) {
             eprintln!("x100-app: could not open a window: {e:#}");
             failure.set(true);

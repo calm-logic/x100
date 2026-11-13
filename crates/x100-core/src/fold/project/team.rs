@@ -22,8 +22,10 @@ impl ProjectState {
             position: a.position.clone(),
         };
         self.change_team(&op, Record::Agent(a.id))?;
-        self.agents
-            .insert(a.id, AgentRecord::new(a.id, &a.role, &a.charter, s.at));
+        self.agents.insert(
+            a.id,
+            AgentRecord::new(a.id, &a.role, &a.charter, s.at, a.appearance),
+        );
         ch.part(ProjectPart::Team)
             .part(ProjectPart::Sidebar)
             .record(Record::Agent(a.id));
@@ -172,6 +174,10 @@ impl ProjectState {
             }
             AgentEvent::BudgetSet(_) | AgentEvent::Promoted { .. } => {
                 ch.part(ProjectPart::Settings).part(ProjectPart::Budget);
+            }
+            AgentEvent::AppearanceSet(look) => {
+                rec.appearance = *look;
+                ch.part(ProjectPart::Looks);
             }
             _ => {}
         }

@@ -1,4 +1,5 @@
-//! `x100d [--data-dir DIR] [--scripts-dir DIR] [--fake-harness PROGRAM] [--fake-clock MILLIS]`
+//! `x100d [--data-dir DIR] [--scripts-dir DIR] [--fake-harness PROGRAM] [--fake-clock MILLIS]
+//! [--seed N]`
 
 use std::process::ExitCode;
 

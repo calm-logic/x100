@@ -159,16 +159,22 @@ impl Render for SandboxPart {
                             .items_center()
                             .gap(px(10.))
                             .children(self.outcome.as_ref().map(notice::line))
-                            .child(widgets::segments([widgets::segment(
-                                "uncontained",
-                                if on { "On, unsafe" } else { "Off" },
-                                on,
-                            )
-                            .debug_selector(|| "run-without-sandbox".to_owned())
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.set_uncontained(!on, cx)),
-                            )
-                            .into_any_element()])),
+                            .child(widgets::segments(
+                                "uncontained-switch",
+                                on.then_some(0),
+                                [widgets::segment(
+                                    "uncontained",
+                                    if on { "On, unsafe" } else { "Off" },
+                                    on,
+                                )
+                                .debug_selector(|| "run-without-sandbox".to_owned())
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.set_uncontained(!on, cx)
+                                    }),
+                                )
+                                .into_any_element()],
+                            )),
                     ),
             )
     }

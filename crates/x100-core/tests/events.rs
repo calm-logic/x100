@@ -8,6 +8,7 @@ use x100_core::action::{
     Risk,
 };
 use x100_core::agent::{Agent, AgentEvent, Position};
+use x100_core::appearance::{Appearance, Hue, Outline};
 use x100_core::credential::{
     Credential, CredentialScope, CredentialUse, Projects, Refusal, UseOutcome, Via,
 };
@@ -120,7 +121,18 @@ fn project_events() -> Vec<ProjectEvent> {
                 effort: EffortRange::new(Effort::Medium, Effort::Max).unwrap(),
                 budget: Money::from_dollars(10),
             },
+            appearance: Appearance {
+                outline: Outline::Hexagon,
+                hue: Some(Hue::Teal),
+            },
         }),
+        P::Agent {
+            agent: agent(1),
+            event: AgentEvent::AppearanceSet(Appearance {
+                outline: Outline::Shield,
+                hue: None,
+            }),
+        },
         P::Agent {
             agent: agent(1),
             event: AgentEvent::Delivered {

@@ -9,6 +9,7 @@
 //! builder, and finds the task it opened in its records.
 
 use x100_core::agent::{AgentEvent, AgentState};
+use x100_core::appearance::Appearance;
 use x100_core::effort::{Effort, EffortRange};
 use x100_core::event::ProjectEvent;
 use x100_core::fold::ProjectState;
@@ -274,6 +275,24 @@ pub(crate) fn set_effort(
         let event = ProjectEvent::Agent {
             agent,
             event: AgentEvent::EffortSet(range),
+        };
+        (vec![(Actor::Builder, event)], Ok(()))
+    })?
+}
+
+/// The builder changes how an agent looks. Blocks.
+pub(crate) fn set_appearance(
+    ctx: &ProjectCtx,
+    agent: AgentId,
+    look: Appearance,
+) -> Result<(), Refused> {
+    ctx.commit(|s, _| -> Decided<()> {
+        if let Err(e) = live(s, agent) {
+            return refused(e);
+        }
+        let event = ProjectEvent::Agent {
+            agent,
+            event: AgentEvent::AppearanceSet(look),
         };
         (vec![(Actor::Builder, event)], Ok(()))
     })?

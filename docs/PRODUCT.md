@@ -114,6 +114,10 @@ Each feature is tagged **v1** (in the first release), **later** (designed for, n
   and name small in the top-left corner. The drivers it has had are marked in that output where each took
   over. Its waits and jobs show in the Log. (The owner removed the table of drivers, waits, jobs and inbox
   from this view on 2026-11-12.)
+- **v1** Every agent has a look: an outline and a colour. The CEO starts as a plain circle. An agent it or a
+  lead creates takes its creator's colour and a different outline. The builder changes a look from the agent's
+  page in the Team tab, the CEO's included. The CEO's face is shown only where it says who acted or whose page
+  it is, never on the first screen or in the chat.
 - **v1** The Team tab can list drivers instead of agents: every live and warm driver in the project, with its
   agent, harness, model, effort, machine, state, how full its context is, and what it has cost.
 - **v1** There is one chat per project, with the CEO. The builder does not message leads or workers. A request

@@ -2,6 +2,7 @@
 
 use x100_core::action::{AskMeAbout, Risk};
 use x100_core::agent::{AgentState, Waiting};
+use x100_core::appearance::{Appearance, Hue, Outline};
 use x100_core::decision::DecisionProvider;
 use x100_core::driver::{ContextFill, DriverState};
 use x100_core::effort::Effort;
@@ -38,6 +39,44 @@ pub fn decision_provider(provider: DecisionProvider) -> &'static str {
         DecisionProvider::OpenAi => "OpenAI Decisions",
         DecisionProvider::Jev => "Jev, by TypeSafe AI",
     }
+}
+
+pub fn outline(o: Outline) -> &'static str {
+    match o {
+        Outline::Circle => "Circle",
+        Outline::Square => "Square",
+        Outline::Hexagon => "Hexagon",
+        Outline::Diamond => "Diamond",
+        Outline::Octagon => "Octagon",
+        Outline::Triangle => "Triangle",
+        Outline::Shield => "Shield",
+        Outline::Capsule => "Capsule",
+    }
+}
+
+/// A colour's name, or "No color" for the text colour every agent starts from. Spelled as the
+/// popover's Color tab is.
+pub fn hue(h: Option<Hue>) -> &'static str {
+    match h {
+        None => "No color",
+        Some(Hue::Red) => "Red",
+        Some(Hue::Orange) => "Orange",
+        Some(Hue::Yellow) => "Yellow",
+        Some(Hue::Green) => "Green",
+        Some(Hue::Teal) => "Teal",
+        Some(Hue::Blue) => "Blue",
+        Some(Hue::Violet) => "Violet",
+        Some(Hue::Pink) => "Pink",
+    }
+}
+
+/// "a teal hexagon", or "a plain circle" without a colour.
+pub fn look(a: Appearance) -> String {
+    let colour = match a.hue {
+        None => "plain".to_owned(),
+        Some(_) => hue(a.hue).to_lowercase(),
+    };
+    format!("a {colour} {}", outline(a.outline).to_lowercase())
 }
 
 pub fn machine(daemon: &DaemonState, id: MachineId) -> String {

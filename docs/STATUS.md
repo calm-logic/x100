@@ -249,6 +249,28 @@ How the orchestrator, or a session that replaces it, picks the build up. Read th
   - The driver tests no longer assert the exact installed version of Claude Code or Codex. Claude Code
     updated itself to 2.1.323 here and 13 tests failed on that alone. A version other than the tested one is
     allowed its warning, and the tests run against what is installed.
+- **Agent looks, the first-run opening, glass buttons and the threshold setting.** The orchestrator's run:
+  564 tests pass, 0 fail, 13 ignored, clippy and fmt clean, nothing left running. The orchestrator looked at
+  `look-color.png`, `glass-states.png` and `opening-2.png`.
+  - Every agent has a look: one of eight outlines and no colour or one of eight. The CEO starts as a plain
+    circle. A new agent takes its creator's colour and an outline that is not its creator's and, while unused
+    ones remain, not a sibling's. The choice is rolled once and recorded in the creating event. The dice are
+    seeded in tests (`x100d --seed`), and the Fernleaf run gives the same looks over ten runs.
+  - `agents.set_appearance` changes a look. In the app, clicking the face on an agent's page opens a popover
+    with Outline and Color. The CEO has a page like any agent and is drawn in Team by the same widget and
+    style as a lead. The first-run screen and the chat draw no face. A look survives a restart.
+  - The first run opens with a glass shape that squares off into the message box while a rim grows to the
+    window's edges, about 750 ms, skipped by any click or key, by reduced motion, and once a project exists.
+    **It is a shape morph, not liquid:** GPUI has no custom shaders, blur or radial gradient. In the debug
+    build the captured frames start at the rim stage. No release build was looked at.
+  - Primary actions are one glass button and every toggle is a sliding glass piece, after the mock's PAB.
+    **Differs from the mock:** a linear highlight, not radial; the inner light drifts only under the pointer,
+    since an always-on drift cost 43% of a core idle against 1.1% now (debug build, about ten buttons); only
+    the glass squashes on a press, not the label; at rest the buttons are a little greyer than the mock's.
+  - The classifier's confidence threshold is a daemon setting, 70 by default, valid from 50 to 95.
+  - **Not verified:** the macOS and Windows reduced-motion reads, a release build, the toggle mid-slide.
+    `x100-app/tests/integrations.rs` timed out once under load in the subagent's run and passed after.
+    `team/mod.rs` and `settings/mod.rs` are a little over 600 lines.
 - **The marketing site is deployed by hand through Homebox** at `https://x100.dev`, as project `x100-site`
   in base mode, production only, dev paused. Not through x100.
 
@@ -300,8 +322,7 @@ invent any role with a charter, and team changes need the builder's agreement.
   threshold is a setting.** Gemini Decision 1 is offered first in Settings: its free tier makes it the
   cheapest in use and its documentation is the most complete. Jev has the lowest list price but its access is
   unclear and a paper reports it following an option's name over its description. The threshold stays 0.7 by
-  default and becomes a daemon setting the builder can change. **Not built yet:** the threshold is a constant
-  until the change after M12I.
+  default and becomes a daemon setting the builder can change. Built: valid from 50 to 95, changed in Settings under Decision model.
 - **2026-11-12. Trials are a toggle, off by default.** After Anthropic's post on agent memory, reflection
   commits its changes directly unless the project's "trial before commit" setting is on. Corrections of notes
   against the log are never put on trial. This changed the decided line in ARCHITECTURE's "Evals, trials and

@@ -2,6 +2,7 @@
 //! theming is a later feature.
 
 use gpui::{Hsla, Rgba, rgb, rgba};
+use x100_core::appearance::Hue;
 
 /// The window behind everything.
 pub fn bg() -> Rgba {
@@ -68,6 +69,21 @@ pub fn link() -> Rgba {
 }
 pub fn code() -> Rgba {
     rgb(0xffa657)
+}
+/// An agent's face: its colour, or the text colour without one. Bright enough for a 1.5px line on
+/// the window's near-black, and far enough apart to tell eight agents apart.
+pub fn hue(h: Option<Hue>) -> Rgba {
+    match h {
+        None => text(),
+        Some(Hue::Red) => rgb(0xff6b6b),
+        Some(Hue::Orange) => rgb(0xff9f45),
+        Some(Hue::Yellow) => rgb(0xf5d150),
+        Some(Hue::Green) => rgb(0x5ad48a),
+        Some(Hue::Teal) => rgb(0x3fd0c9),
+        Some(Hue::Blue) => rgb(0x5aa9ff),
+        Some(Hue::Violet) => rgb(0xa78bfa),
+        Some(Hue::Pink) => rgb(0xf472b6),
+    }
 }
 pub fn transparent() -> Hsla {
     gpui::transparent_black()

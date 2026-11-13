@@ -82,6 +82,7 @@ impl Run {
                     role: role.into(),
                     charter: "c".into(),
                     position,
+                    appearance: Default::default(),
                 }),
             )
         };

@@ -2,8 +2,8 @@ use x100_drivers::terminal::Size;
 use x100_orch::DriverError;
 use x100_proto::{
     CancelJob, DecideAction, Done, ErrorCode, Inbox, InboxEntry, ReadInbox, ReadStartPack,
-    ReadWaits, ResizeTerminal, RpcError, SetEffortRange, SetLeadBudget, StartPack, StopDriver,
-    Waits,
+    ReadWaits, ResizeTerminal, RpcError, SetAppearance, SetEffortRange, SetLeadBudget, StartPack,
+    StopDriver, Waits,
 };
 
 use super::{project, refused, terminal_of};
@@ -147,6 +147,15 @@ pub async fn set_effort(hub: &Hub, p: SetEffortRange) -> Result<Done, RpcError> 
     project(hub, p.project)?;
     hub.orch
         .set_effort(p.project, p.agent, p.range)
+        .await
+        .map_err(refused)?;
+    Ok(Done {})
+}
+
+pub async fn set_appearance(hub: &Hub, p: SetAppearance) -> Result<Done, RpcError> {
+    project(hub, p.project)?;
+    hub.orch
+        .set_appearance(p.project, p.agent, p.appearance)
         .await
         .map_err(refused)?;
     Ok(Done {})

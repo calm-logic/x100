@@ -59,6 +59,7 @@ pub(super) fn form(at: &At, leads: &[LeadSpec]) -> Result<Plan, Refusal> {
     }
     let mut events = Vec::new();
     let mut shaped = team.clone();
+    let mut outlines = Vec::new();
     for lead in leads {
         let id = new_id(at.ctx.clock, AgentId::new);
         let position = Position::Lead {
@@ -71,6 +72,8 @@ pub(super) fn form(at: &At, leads: &[LeadSpec]) -> Result<Plan, Refusal> {
                 position: position.clone(),
             })
             .map_err(|e| e.to_string())?;
+        let appearance = at.child_look(&outlines);
+        outlines.push(appearance.outline);
         events.push((
             Actor::Agent(at.id()),
             ProjectEvent::AgentAdded(Agent {
@@ -78,6 +81,7 @@ pub(super) fn form(at: &At, leads: &[LeadSpec]) -> Result<Plan, Refusal> {
                 role: lead.role.clone(),
                 charter: lead.charter.clone(),
                 position,
+                appearance,
             }),
         ));
     }

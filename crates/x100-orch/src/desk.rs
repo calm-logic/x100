@@ -373,13 +373,14 @@ fn plan(
         ToolCall::AddFile { hash, .. } => ctx.store.files.contains(hash).unwrap_or(false),
         _ => true,
     };
-    let clock = w.clock();
+    let (clock, dice) = (w.clock(), w.dice());
     w.read(|s| {
         let ctx = Ctx {
             agent: action.agent,
             now: clock.now(),
             settings: &using.settings,
             clock,
+            dice,
             file_stored,
             homebox: using.homebox.as_ref(),
         };

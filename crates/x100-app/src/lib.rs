@@ -15,11 +15,15 @@
 //!   for an agent's memories, skills and trials. [`notice`] is what a control says beside itself.
 //! - [`term`]: the terminal an agent's live output is drawn in.
 //!
+//! [`face`] draws every agent's face and [`glass`] the primary button and toggles.
+//!
 //! [`session`] is the one connection, shared by all of them.
 
 pub mod budget;
 pub mod chat;
+pub mod face;
 pub mod files;
+pub mod glass;
 pub mod held;
 pub mod infra;
 pub mod input;

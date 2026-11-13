@@ -166,6 +166,7 @@ impl LogBuilder {
                     parent: from,
                     effort: None,
                 },
+                appearance: b.child_look(from, worker),
             };
             b.push(Actor::Agent(from), ProjectEvent::AgentAdded(agent));
             task = Some(b.open_delegated(Party::Agent(from), worker, title, ask, effort));

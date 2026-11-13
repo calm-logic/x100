@@ -9,8 +9,9 @@ use x100_core::spec::{SpecKind, SpecStatus};
 
 use crate::markdown::Markdown;
 use crate::session::{Session, SessionEvent};
-use crate::widgets::{self, Orb};
+use crate::{face, widgets};
 use crate::{theme, words};
+use x100_core::appearance::Appearance;
 
 const KINDS: [SpecKind; 3] = [SpecKind::Brd, SpecKind::Prd, SpecKind::Add];
 
@@ -19,6 +20,7 @@ const KINDS: [SpecKind; 3] = [SpecKind::Brd, SpecKind::Prd, SpecKind::Add];
 pub struct SpecModel {
     pub kind: SpecKind,
     pub author: String,
+    pub look: Appearance,
     pub revision: u32,
     pub status: SpecStatus,
     pub body: String,
@@ -32,6 +34,7 @@ impl SpecModel {
             author: p
                 .agent(s.author)
                 .map_or_else(|| "an agent".into(), |a| a.role.clone()),
+            look: p.agent(s.author).map(|a| a.appearance).unwrap_or_default(),
             revision: s.revision,
             status: s.status,
             body: s.body.clone(),
@@ -54,7 +57,9 @@ impl SpecsView {
         let subscription = cx.subscribe(&session, |this, _, event, cx| {
             let ours = match event {
                 SessionEvent::Changed(Change::Project { project, changes }) => {
-                    *project == this.project && changes.parts.contains(&ProjectPart::Specs)
+                    *project == this.project
+                        && (changes.parts.contains(&ProjectPart::Specs)
+                            || changes.parts.contains(&ProjectPart::Looks))
                 }
                 SessionEvent::Changed(Change::Reset) => true,
                 _ => false,
@@ -120,16 +125,20 @@ fn status(status: SpecStatus) -> impl IntoElement {
 impl Render for SpecsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let open = self.open;
-        let switch = widgets::segments(KINDS.map(|kind| {
-            widgets::segment(
-                words::spec_abbreviation(kind),
-                words::spec_short(kind),
-                kind == open,
-            )
-            .debug_selector(move || format!("spec-{}", words::spec_abbreviation(kind)))
-            .on_click(cx.listener(move |this, _, _, cx| this.open(kind, cx)))
-            .into_any_element()
-        }));
+        let switch = widgets::segments(
+            "spec-kinds",
+            KINDS.iter().position(|k| *k == open),
+            KINDS.map(|kind| {
+                widgets::segment(
+                    words::spec_abbreviation(kind),
+                    words::spec_short(kind),
+                    kind == open,
+                )
+                .debug_selector(move || format!("spec-{}", words::spec_abbreviation(kind)))
+                .on_click(cx.listener(move |this, _, _, cx| this.open(kind, cx)))
+                .into_any_element()
+            }),
+        );
         let doc = match self.model.clone() {
             None => div()
                 .p(px(8.))
@@ -167,7 +176,7 @@ impl Render for SpecsView {
                             .pb(px(14.))
                             .border_b_1()
                             .border_color(theme::line())
-                            .child(widgets::orb(32., Orb::Agent))
+                            .child(face::face(32., m.look))
                             .child(
                                 div()
                                     .flex_1()

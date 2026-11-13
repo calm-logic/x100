@@ -612,8 +612,8 @@ Decision 1, OpenAI's Decisions API, or TypeSafe AI's Jev. `docs/DECISION_MODELS.
   outside the vault handles the value. One request asks two choice questions about the action: its kind,
   with a catch-all option, and its risk (low, medium, high). The input is the action as the gate sees it,
   marked as untrusted.
-- **The answer.** The risk is never below the rule table's floor. Below a confidence threshold, 0.7 by
-  default, the risk is raised one level. No answer, an error or a refusal holds the action.
+- **The answer.** The risk is never below the rule table's floor. Below a confidence threshold, a daemon
+  setting that is 0.7 by default and valid from 0.5 to 0.95, the risk is raised one level. No answer, an error or a refusal holds the action.
 - **No decision model connected.** Nothing is classified. An unruled read goes through at its floor, and an
   unruled write is held. Settings says a decision model is not connected.
 - **Cost.** Input tokens at the provider's price, charged to the acting agent's payer and checked against
@@ -856,6 +856,12 @@ since a GPU-rendered window under WSL depends on WSLg.
 
 The app needs: a terminal view (for an agent's live output, continuous across a change of driver), Markdown
 rendering (specs, chat), a list that updates in place, images, and the hero-style orb only if wanted.
+
+**proposed** An agent's look is part of the contract: `Appearance` in `x100-core` is an outline and an optional
+colour, both closed enums. It is recorded when the agent is created and changed by `AppearanceSet`, through
+`agents.set_appearance`. A new agent's look is rolled from a `Dice` source that sits beside the clock, so tests
+and scripted runs seed it. Every face in the app is drawn by one widget from the agent's look. Primary buttons
+and toggles are one glass widget each. The first run opens with a short shape morph into the message box.
 
 **proposed** What spike S1 found, which the app is built on (`spikes/gpui/REPORT.md`):
 

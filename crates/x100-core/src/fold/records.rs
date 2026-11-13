@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionState, Classification};
 use crate::agent::AgentState;
+use crate::appearance::Appearance;
 use crate::driver::{ContextFill, Driver, DriverState};
 use crate::event::Seq;
 use crate::file::FileRef;
@@ -47,6 +48,7 @@ pub struct AgentRecord {
     pub role: String,
     pub charter: String,
     pub joined: Timestamp,
+    pub appearance: Appearance,
     pub state: AgentState,
     /// Which items it has been given and not yet handled.
     pub inbox: Inbox,

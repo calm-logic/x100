@@ -158,6 +158,7 @@ fn agent_transitions() {
             effort: range,
             budget: Money::from_dollars(5),
         },
+        E::AppearanceSet(x100_core::appearance::Appearance::default()),
     ];
     let mut events = vec![
         delivered.clone(),

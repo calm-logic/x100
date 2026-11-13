@@ -148,6 +148,7 @@ impl Daemon {
         let daemon_jobs = x100_jobs::Scheduler::new(log.clone(), Arc::clone(&clock));
         let orch = Orchestrator::new(x100_orch::Config {
             clock: Arc::clone(&clock),
+            dice: Arc::clone(&config.dice),
             harnesses: found.harnesses,
             machine: found.machine,
             daemon: log.clone(),

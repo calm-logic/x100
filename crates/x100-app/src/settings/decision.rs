@@ -7,7 +7,11 @@ use gpui::{Context, Entity, FontWeight, Subscription, Window, div, prelude::*, p
 use x100_client::Change;
 use x100_core::decision::DecisionProvider;
 use x100_core::fold::DaemonState;
+use x100_core::money::Percent;
+use x100_core::settings::DaemonSetting;
+use x100_proto::SetDaemonSetting;
 
+use crate::glass;
 use crate::input::{InputEvent, TextInput};
 use crate::notice::{self, Outcome};
 use crate::session::{Session, SessionEvent};
@@ -18,13 +22,31 @@ use crate::{theme, widgets, words};
 pub struct DecisionPartModel {
     /// The connected model, or `None`.
     pub connected: Option<DecisionProvider>,
+    /// The daemon's confidence threshold, in percent: an answer less sure than this has its risk
+    /// raised one level.
+    pub threshold: u8,
 }
+
+/// The values offered, inside the range the daemon accepts (50 to 95).
+const THRESHOLDS: [u8; 5] = [50, 60, 70, 80, 90];
 
 impl DecisionPartModel {
     pub fn read(daemon: &DaemonState) -> DecisionPartModel {
+        let settings = daemon.settings();
         DecisionPartModel {
-            connected: daemon.settings().decision_model.map(|m| m.provider),
+            connected: settings.decision_model.map(|m| m.provider),
+            threshold: settings.decision_threshold.value(),
         }
+    }
+
+    /// The values to offer: the usual ones, and the one in force when a script set another.
+    fn offered(&self) -> Vec<u8> {
+        let mut all = THRESHOLDS.to_vec();
+        if !all.contains(&self.threshold) {
+            all.push(self.threshold);
+            all.sort_unstable();
+        }
+        all
     }
 }
 
@@ -131,6 +153,28 @@ impl DecisionPart {
         );
     }
 
+    /// Sets the daemon's threshold. What the part shows changes when the daemon says it has.
+    pub fn set_threshold(&mut self, percent: u8, cx: &mut Context<Self>) {
+        let Ok(percent) = Percent::new(percent) else {
+            return;
+        };
+        let client = self.session.read(cx).client().clone();
+        self.outcome = Some(Outcome::Working);
+        cx.notify();
+        let request = async move {
+            client
+                .request(SetDaemonSetting {
+                    setting: DaemonSetting::DecisionThreshold(percent),
+                })
+                .await
+                .map(drop)
+        };
+        notice::run(cx, request, |this, result, cx| {
+            this.outcome = result.err();
+            cx.notify();
+        });
+    }
+
     pub fn disconnect(&mut self, cx: &mut Context<Self>) {
         let client = self.session.read(cx).client().clone();
         self.outcome = Some(Outcome::Working);
@@ -189,6 +233,17 @@ impl Render for DecisionPart {
             .on_click(cx.listener(move |this, _, _, cx| this.choose(p, cx)))
             .into_any_element()
         });
+        let offered = self.model.offered();
+        let thresholds = offered.clone().into_iter().map(|n| {
+            widgets::segment(
+                ("decision-threshold", usize::from(n)),
+                format!("{n}%"),
+                n == self.model.threshold,
+            )
+            .debug_selector(move || format!("decision-threshold-{n}"))
+            .on_click(cx.listener(move |this, _, _, cx| this.set_threshold(n, cx)))
+            .into_any_element()
+        });
         let label = if self.model.connected.is_some() {
             "Connect instead"
         } else {
@@ -212,7 +267,29 @@ impl Render for DecisionPart {
                     .text_color(colour)
                     .child(said),
             )
-            .child(widgets::segments(choices))
+            .child(widgets::segments(
+                "decision-providers",
+                DecisionProvider::ALL.iter().position(|p| *p == self.chosen),
+                choices,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(16.))
+                    .child(
+                        div()
+                            .text_size(px(theme::TEXT))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Raise the risk when it is less sure than"),
+                    )
+                    .child(widgets::segments(
+                        "decision-thresholds",
+                        offered.iter().position(|n| *n == self.model.threshold),
+                        thresholds,
+                    )),
+            )
             .child(
                 div()
                     .flex()
@@ -230,8 +307,8 @@ impl Render for DecisionPart {
                             .child(self.key.clone()),
                     )
                     .child(
-                        widgets::button("decision-connect", label)
-                            .debug_selector(|| "decision-connect".into())
+                        glass::primary("decision-connect", label)
+                            .selector("decision-connect")
                             .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
                     )
                     .when(self.model.connected.is_some(), |d| {

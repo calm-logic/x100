@@ -74,6 +74,7 @@ pub(super) fn delegate(
                     parent: me,
                     effort: *own,
                 },
+                appearance: at.child_look(&[]),
             };
             events.push((Actor::Agent(me), ProjectEvent::AgentAdded(agent)));
             let range = match own {

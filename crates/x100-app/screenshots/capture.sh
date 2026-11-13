@@ -22,7 +22,7 @@ stop() {
 trap stop EXIT
 
 "$bin/x100d" --data-dir "$work/data" --projects-root "$work/projects" --scripts-dir "$root/crates/x100-orch/tests/scripts" \
-  --fake-harness "$bin/x100d-fake-harness" --fake-clock 1794387600000 >"$work/daemon.log" 2>&1 &
+  --fake-harness "$bin/x100d-fake-harness" --fake-clock 1794387600000 --seed 7 >"$work/daemon.log" 2>&1 &
 daemon=$!
 until [[ -S $work/data/x100d.sock ]]; do sleep 0.2; done
 
@@ -45,7 +45,8 @@ ffmpeg -loglevel error -f lavfi -i "color=c=0x2fd27a:s=160x120" -vf "drawbox=x=4
   -frames:v 1 "$work/sketch.png"
 printf '# Notes\nForest greens, maybe.\n' >"$work/notes.md"
 
-# No project: the window opens on the CEO and the box for the first message, with no form.
+# No project: the window opens on the box for the first message, with no form and no face, once its
+# opening has played.
 shot new-project
 # "hi" creates the project, listed as "Untitled" until its CEO names it; the CEO only answers,
 # and with no leads the Team tab is its drilldown.

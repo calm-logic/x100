@@ -19,6 +19,7 @@ use crate::action::{
     Action, ActionEvent, ActionKind, Classification, ClassifiedBy, Decision, Request, Risk,
 };
 use crate::agent::AgentEvent;
+use crate::appearance::Appearance;
 use crate::driver::{ContextFill, Driver, DriverEvent, Purpose, StartReason, View};
 use crate::effort::Effort;
 use crate::event::{Envelope, ProjectEvent, Seq};
@@ -71,6 +72,18 @@ impl LogBuilder {
 
     pub fn advance(&mut self, by: Duration) {
         self.now = self.now + by;
+    }
+
+    /// The look the daemon would give `agent` as `creator` adds it now, rolled from its id.
+    pub fn child_look(&self, creator: AgentId, agent: AgentId) -> Appearance {
+        let s = &self.state;
+        let siblings: Vec<_> = s
+            .children(creator)
+            .into_iter()
+            .filter_map(|c| Some(s.agent(c)?.appearance.outline))
+            .collect();
+        let look = s.agent(creator).map(|a| a.appearance).unwrap_or_default();
+        Appearance::child(look, &siblings, agent.ulid().0 as u64)
     }
 
     /// A fresh id of any kind, ordered by time like the daemon's.
