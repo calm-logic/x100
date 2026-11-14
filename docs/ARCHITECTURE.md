@@ -983,7 +983,7 @@ cannot reach each other directly. It contradicts "no server" but is what makes a
 
 ## Licence
 
-**proposed** MIT and Apache-2.0 together, as is usual for Rust.
+**decided (owner, 2026-11-13)** MIT alone, in one `LICENSE` file at the root.
 
 ## Code from elsewhere
 
@@ -997,9 +997,8 @@ None of these blocks work. Each is built as written unless the owner says otherw
 1. The gate does not ask about every shell command inside a sandbox.
 2. The delegator, not a classifier, states the effort a task needs.
 3. Preview in v1 is a link to the builder's browser.
-4. The licence is MIT and Apache-2.0 together.
-5. The terminal interface uses ratatui.
-6. An agent has one driver at a time. Work that should run in parallel goes to workers.
+4. The terminal interface uses ratatui.
+5. An agent has one driver at a time. Work that should run in parallel goes to workers.
 7. A takeover always rebuilds the new driver's context from x100's own records, never from a provider's own
    resume, even on the same harness.
 8. Drivers do not outlive the daemon, so a daemon restart is a takeover for every working agent.

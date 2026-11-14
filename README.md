@@ -29,4 +29,4 @@ Read `docs/` for the design: `PRODUCT.md` (what x100 does), `ARCHITECTURE.md` (h
 
 ## Licence
 
-MIT or Apache-2.0, at your option. See `LICENSE-MIT` and `LICENSE-APACHE`.
+MIT. See `LICENSE`.

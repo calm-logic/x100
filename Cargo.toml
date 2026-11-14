@@ -5,7 +5,7 @@ exclude = ["spikes"]
 
 [workspace.package]
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/calm-logic/x100"
 
 [workspace.lints.rust]
